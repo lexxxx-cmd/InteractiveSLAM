@@ -60,7 +60,7 @@ ApplicationWindow {
 
         Menu {
             title: qsTr("View")
-            Action { text: qsTr("Reset camera") }
+            Action { text: qsTr("Reset camera"); onTriggered: graphViewport.resetCamera() }
             Action { 
                 text: qsTr("Graph Rendering Setting")
                 checkable: true
