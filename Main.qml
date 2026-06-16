@@ -123,6 +123,34 @@ ApplicationWindow {
             graphManager: GraphManager
         }
 
+        // Mouse capture overlay (on top of GraphViewport)
+        MouseArea {
+            id: viewportMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+            property real lastX: 0
+            property real lastY: 0
+
+            onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y; }
+            onPositionChanged: (mouse) => {
+                var dx = mouse.x - lastX;
+                var dy = mouse.y - lastY;
+                if (mouse.buttons & Qt.LeftButton) {
+                    graphViewport.onMouseRotate(dx, dy);
+                } else if (mouse.buttons & Qt.MiddleButton) {
+                    graphViewport.onMousePan(dx, dy);
+                }
+                lastX = mouse.x;
+                lastY = mouse.y;
+            }
+            onWheel: (wheel) => { graphViewport.onMouseZoom(wheel.angleDelta.y); }
+        }
+
+        // Keyboard shortcuts
+        Shortcut { sequence: "R"; onActivated: graphViewport.resetCamera() }
+        Shortcut { sequence: "F"; onActivated: graphViewport.resetCamera() }
+
         // Statistics overlay (real data from GraphManager)
         ColumnLayout {
             id: statsPanel

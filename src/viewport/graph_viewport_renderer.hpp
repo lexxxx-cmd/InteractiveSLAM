@@ -55,6 +55,11 @@ private:
     std::unique_ptr<glk::GLSLShader> m_rainbowShader;
     QSize m_viewportSize;       // from synchronize (QML item size)
     QSize m_fboSize;            // from createFramebufferObject (actual FBO)
+    Eigen::Matrix4f m_cameraView = [](){
+        Eigen::Matrix4f v = Eigen::Matrix4f::Identity();
+        v(2, 3) = -10.0f;
+        return v;
+    }();
     bool m_glInitialized = false;
 
     // FPS throttling

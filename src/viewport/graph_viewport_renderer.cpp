@@ -50,6 +50,12 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
         m_renderGraph.reset();
     }
 
+    // Sync camera view matrix (main thread → render thread)
+    if (viewport->cameraDirty()) {
+        m_cameraView = viewport->cameraViewMatrix();
+        viewport->clearCameraDirty();
+    }
+
     if (m_hasFpsUpdate) {
         viewport->receiveFpsUpdate(m_pendingFpsUpdate);
         m_hasFpsUpdate = false;
@@ -154,11 +160,8 @@ void GraphViewportRenderer::render() {
     proj(2, 3) = -(2.0f * 1000.0f * 0.1f) / (1000.0f - 0.1f);
     proj(3, 2) = -1.0f;
 
-    // Simple camera (Phase H will replace with ArcCameraControl)
-    Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
-    view(2, 3) = -10.0f;  // further back for keyframe view
-
-    m_rainbowShader->set_uniform("view_matrix", view);
+    // Use camera from QML mouse interaction (defaults to z=-10 if untouched)
+    m_rainbowShader->set_uniform("view_matrix", m_cameraView);
     m_rainbowShader->set_uniform("projection_matrix", proj);
     m_rainbowShader->set_uniform("z_range", Eigen::Vector2f(-100.0f, 100.0f));
     m_rainbowShader->set_uniform("z_clipping", int{0});
