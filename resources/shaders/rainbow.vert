@@ -1,4 +1,4 @@
-#version 140
+#version 330 core
 uniform float point_size;
 uniform float point_scale;
 uniform bool apply_keyframe_scale;

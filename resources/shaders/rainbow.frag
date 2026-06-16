@@ -1,4 +1,4 @@
-#version 140
+#version 330 core
 uniform vec2 z_range;
 uniform int z_clipping;
 uniform int color_mode;
