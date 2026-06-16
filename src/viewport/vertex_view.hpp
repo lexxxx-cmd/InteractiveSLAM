@@ -18,6 +18,9 @@ public:
 
     long id() const { return vertex->id(); }
 
+    // Pure virtual from DrawableObject — default empty (KeyFrameView overrides)
+    void draw(const DrawFlags&, glk::GLSLShader&) override {}
+
 protected:
     g2o::HyperGraph::Vertex* vertex;
 };
