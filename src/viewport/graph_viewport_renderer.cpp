@@ -35,7 +35,7 @@ QOpenGLFramebufferObject* GraphViewportRenderer::createFramebufferObject(const Q
     QOpenGLFramebufferObjectFormat format;
     format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
     format.setSamples(0);
-    m_viewportSize = size;
+    m_fboSize = size;
     return new QOpenGLFramebufferObject(size, format);
 }
 
@@ -44,14 +44,12 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
     auto* viewport = static_cast<GraphViewport*>(item);
     auto* manager = viewport->graphManager();
 
-    // Get render thread's own shared_ptr copy (UAF protection)
     if (manager && manager->isLoaded()) {
         m_renderGraph = manager->sharedGraph();
     } else {
         m_renderGraph.reset();
     }
 
-    // FPS throttled pass-back (every 0.5s)
     if (m_hasFpsUpdate) {
         viewport->receiveFpsUpdate(m_pendingFpsUpdate);
         m_hasFpsUpdate = false;
@@ -77,16 +75,7 @@ void GraphViewportRenderer::setupShaders() {
 
 void GraphViewportRenderer::syncGraphData() {
     auto graph = m_renderGraph;
-    if (!graph) {
-        if (!m_drawables.empty()) {
-            m_drawables.clear();
-            m_keyframeViews.clear();
-            m_vertexViews.clear();
-        }
-        m_pendingUploads.clear();
-        m_uploadedKeyframeIds.clear();
-        return;
-    }
+    if (!graph) { return; }
 
     // Batched VBO upload — max 5 KeyFrameViews per frame
     static constexpr int UPLOAD_QUOTA = 5;
@@ -134,7 +123,7 @@ void GraphViewportRenderer::render() {
     if (!m_rainbowShader) return;
 
     m_gl->glDepthMask(GL_TRUE);
-    m_gl->glViewport(0, 0, m_viewportSize.width(), m_viewportSize.height());
+    m_gl->glViewport(0, 0, m_fboSize.width(), m_fboSize.height());
     m_gl->glClearColor(0.051f, 0.059f, 0.071f, 1.0f);
     m_gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     m_gl->glEnable(GL_DEPTH_TEST);
@@ -142,7 +131,7 @@ void GraphViewportRenderer::render() {
     m_rainbowShader->use();
 
     // Perspective projection
-    float aspect = (float)m_viewportSize.width() / std::max(m_viewportSize.height(), 1);
+    float aspect = (float)m_fboSize.width() / std::max(m_fboSize.height(), 1);
     float fovY = 45.0f * 3.14159265f / 180.0f;
     float tanHalfFov = std::tan(fovY / 2.0f);
     Eigen::Matrix4f proj = Eigen::Matrix4f::Zero();

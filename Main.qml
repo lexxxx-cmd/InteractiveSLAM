@@ -54,7 +54,7 @@ ApplicationWindow {
                 Action { text: qsTr("Save map data") }
                 Action { text: qsTr("Export PointCloud") }
             }
-            Action { text: qsTr("Close Map"); onTriggered: graphManager.closeMap() }
+            Action { text: qsTr("Close Map"); onTriggered: GraphManager.closeMap() }
             Action { text: qsTr("Quit"); onTriggered: Qt.quit() }
         }
 
@@ -92,7 +92,7 @@ ApplicationWindow {
         title: qsTr("Select Map Folder")
         onAccepted: {
             log("Loading: " + selectedFolder);
-            graphManager.openMapData(selectedFolder);
+            GraphManager.openMapData(selectedFolder);
         }
         onRejected: {
             log("Folder selection cancelled");
@@ -120,7 +120,7 @@ ApplicationWindow {
         GraphViewport {
             id: graphViewport
             anchors.fill: parent
-            graphManager: graphManager
+            graphManager: GraphManager
         }
 
         // Statistics overlay (real data from GraphManager)
@@ -132,9 +132,9 @@ ApplicationWindow {
             spacing: 8
 
             Label { text: "STATISTICS"; font.bold: true; color: "#009688"; font.pixelSize: 16 }
-            Label { text: "Vertices:  " + graphManager.vertexCount; color: "#A0AABF"; font.pixelSize: 14 }
-            Label { text: "Edges:     " + graphManager.edgeCount; color: "#A0AABF"; font.pixelSize: 14 }
-            Label { text: "Keyframes: " + graphManager.keyframeCount; color: "#A0AABF"; font.pixelSize: 14 }
+            Label { text: "Vertices:  " + GraphManager.vertexCount; color: "#A0AABF"; font.pixelSize: 14 }
+            Label { text: "Edges:     " + GraphManager.edgeCount; color: "#A0AABF"; font.pixelSize: 14 }
+            Label { text: "Keyframes: " + GraphManager.keyframeCount; color: "#A0AABF"; font.pixelSize: 14 }
             Label { text: "FPS:       -- fps"; color: "#A0AABF"; font.pixelSize: 14 }
         }
 
@@ -143,7 +143,7 @@ ApplicationWindow {
             id: loadingPanel
             anchors.centerIn: parent
             spacing: 12
-            visible: graphManager.isLoading
+            visible: GraphManager.isLoading
 
             BusyIndicator {
                 running: true
@@ -179,9 +179,9 @@ ApplicationWindow {
         }
 
         function onLoadingSucceeded() {
-            log("Map loaded: " + graphManager.vertexCount + " vertices, "
-                + graphManager.edgeCount + " edges, "
-                + graphManager.keyframeCount + " keyframes");
+            log("Map loaded: " + GraphManager.vertexCount + " vertices, "
+                + GraphManager.edgeCount + " edges, "
+                + GraphManager.keyframeCount + " keyframes");
         }
 
         function onLoadingFailed(error) {
@@ -191,7 +191,7 @@ ApplicationWindow {
 
     // Loading progress text
     Connections {
-        target: graphManager.progress
+        target: GraphManager.progress
 
         function onTitleChanged(title) {
             loadingTitle.text = title;

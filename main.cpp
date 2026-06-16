@@ -42,12 +42,11 @@ int main(int argc, char *argv[]) {
     // Register QML types
     qmlRegisterType<GraphViewport>("InteractiveSLAM", 1, 0, "GraphViewport");
 
-    // Create backend manager and expose to QML
+    // Create backend manager and expose to QML as singleton
     GraphManager graphManager;
-    graphManager.setObjectName("graphManager");
+    qmlRegisterSingletonInstance<GraphManager>("InteractiveSLAM", 1, 0, "GraphManager", &graphManager);
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("graphManager", &graphManager);
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);

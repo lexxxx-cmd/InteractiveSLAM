@@ -47,7 +47,8 @@ private:
 
     QOpenGLExtraFunctions* m_gl = nullptr;
     std::unique_ptr<glk::GLSLShader> m_rainbowShader;
-    QSize m_viewportSize;
+    QSize m_viewportSize;       // from synchronize (QML item size)
+    QSize m_fboSize;            // from createFramebufferObject (actual FBO)
     bool m_glInitialized = false;
 
     // FPS throttling
