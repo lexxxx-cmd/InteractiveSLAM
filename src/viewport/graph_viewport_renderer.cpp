@@ -32,12 +32,10 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
 }
 
 void GraphViewportRenderer::initGL() {
-    m_gl = QOpenGLContext::currentContext()
-        ->versionFunctions<QOpenGLFunctions_3_0>();
+    m_gl = glk::gl();  // thread_local QOpenGLFunctions_3_0
     if (!m_gl) {
         qFatal("GraphViewportRenderer: OpenGL 3.0 not available");
     }
-    m_gl->initializeOpenGLFunctions();
     const char* version = (const char*)m_gl->glGetString(GL_VERSION);
     qDebug() << "GraphViewportRenderer: OpenGL version" << version;
     m_glInitialized = true;
