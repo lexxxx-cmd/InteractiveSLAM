@@ -93,17 +93,18 @@ void GraphViewportRenderer::render() {
     m_rainbowShader->set_uniform("apply_keyframe_scale", false);
     m_rainbowShader->set_uniform("info_values", Eigen::Vector4i(0, 0, 0, 0));
 
-    // Coordinate axes (color_mode=2: per-vertex color + info)
-    m_rainbowShader->set_uniform("color_mode", 2);
-    Eigen::Matrix4f model_matrix = Eigen::Matrix4f::Identity();
-    m_rainbowShader->set_uniform("model_matrix", model_matrix);
+    // Coordinate axes (solid white)
+    m_rainbowShader->set_uniform("color_mode", 1);
+    Eigen::Vector4f white(1.0f, 1.0f, 1.0f, 1.0f);
+    m_rainbowShader->set_uniform("material_color", white);
+    Eigen::Matrix4f model_m = Eigen::Matrix4f::Identity();
+    m_rainbowShader->set_uniform("model_matrix", model_m);
     glk::Primitives::instance()->primitive(glk::Primitives::COORDINATE_SYSTEM)
         .draw(*m_rainbowShader);
 
-    // Grid (color_mode=1: solid color)
-    m_rainbowShader->set_uniform("color_mode", 1);
-    m_rainbowShader->set_uniform("material_color",
-        Eigen::Vector4f(0.3f, 0.3f, 0.3f, 1.0f));
+    // Grid (solid grey)
+    Eigen::Vector4f grey(0.4f, 0.4f, 0.4f, 1.0f);
+    m_rainbowShader->set_uniform("material_color", grey);
     glk::Primitives::instance()->primitive(glk::Primitives::GRID)
         .draw(*m_rainbowShader);
 

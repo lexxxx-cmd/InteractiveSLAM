@@ -6,6 +6,7 @@
 #include <memory>
 #include <Eigen/Core>
 #include "glk/glsl_shader.hpp"
+#include "glk/mesh.hpp"
 
 class GraphViewportRenderer : public QQuickFramebufferObject::Renderer {
 public:

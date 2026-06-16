@@ -5,9 +5,11 @@ namespace glk {
 
 Mesh::Mesh(const std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& vertices,
            const std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& normals,
-           const std::vector<int>& indices)
+           const std::vector<int>& indices,
+           GLenum drawMode)
     : num_vertices(static_cast<int>(vertices.size())),
-      num_indices(static_cast<int>(indices.size())) {
+      num_indices(static_cast<int>(indices.size())),
+      m_drawMode(drawMode) {
 
     auto* f = glk::gl();
     f->glGenVertexArrays(1, &vao);
@@ -39,6 +41,22 @@ Mesh::~Mesh() {
     f->glDeleteVertexArrays(1, &vao);
 }
 
+Mesh::Mesh(Mesh&& other) noexcept
+    : num_vertices(other.num_vertices)
+    , num_indices(other.num_indices)
+    , m_drawMode(other.m_drawMode)
+    , vao(other.vao)
+    , vbo(other.vbo)
+    , nbo(other.nbo)
+    , ebo(other.ebo)
+{
+    // Null out source to prevent double-deletion of GL resources
+    other.vao = 0;
+    other.vbo = 0;
+    other.nbo = 0;
+    other.ebo = 0;
+}
+
 void Mesh::draw(glk::GLSLShader& shader) const {
     auto* f = glk::gl();
     f->glBindVertexArray(vao);
@@ -58,7 +76,7 @@ void Mesh::draw(glk::GLSLShader& shader) const {
     }
 
     f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    f->glDrawElements(GL_TRIANGLES, num_indices, GL_UNSIGNED_INT, nullptr);
+    f->glDrawElements(m_drawMode, num_indices, GL_UNSIGNED_INT, nullptr);
 
     f->glDisableVertexAttribArray(shader.attrib("vert_position"));
     if (colorLoc >= 0) f->glDisableVertexAttribArray(colorLoc);

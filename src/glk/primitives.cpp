@@ -21,7 +21,7 @@ static Mesh buildCoordinateSystem() {
     std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> normals;
     std::vector<int> indices;
 
-    // X-axis (red) — 3 segments
+    // X-axis (red)
     vertices.push_back(Eigen::Vector3f(0, 0, 0));
     normals.push_back(Eigen::Vector3f(1, 0, 0));
     vertices.push_back(Eigen::Vector3f(1, 0, 0));
@@ -54,7 +54,7 @@ static Mesh buildCoordinateSystem() {
     normals.push_back(Eigen::Vector3f(0, 0, 1));
     indices.insert(indices.end(), {8, 9, 9, 10, 9, 11});
 
-    return Mesh(vertices, normals, indices);
+    return Mesh(vertices, normals, indices, GL_LINES);
 }
 
 static Mesh buildGrid(int size = 10) {
@@ -78,7 +78,7 @@ static Mesh buildGrid(int size = 10) {
         indices.push_back((int)vertices.size() - 1);
     }
 
-    return Mesh(vertices, normals, indices);
+    return Mesh(vertices, normals, indices, GL_LINES);
 }
 
 static Mesh buildSphere(float radius = 0.2f, int rings = 12, int sectors = 12) {
@@ -106,7 +106,7 @@ static Mesh buildSphere(float radius = 0.2f, int rings = 12, int sectors = 12) {
         }
     }
 
-    return Mesh(vertices, normals, indices);
+    return Mesh(vertices, normals, indices, GL_TRIANGLES);
 }
 
 const Drawable& Primitives::primitive(PrimitiveType type) {
