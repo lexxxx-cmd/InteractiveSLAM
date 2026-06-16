@@ -4,6 +4,7 @@ project(InteractiveSLAM VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTORCC ON)  # Auto-process .qrc files in source lists
 
 # Third-party find modules (before Qt, so vcpkg toolchain can inject paths)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -55,6 +56,8 @@ qt_add_executable(appInteractiveSLAM
     ${VIEWPORT_SOURCES}
     resources/shaders.qrc
 )
+
+# Shader resources — .qrc processed by CMAKE_AUTORCC
 
 # Standalone CLI test for data loading (Phase B verification)
 add_executable(test_data_loading

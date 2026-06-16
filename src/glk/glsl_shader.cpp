@@ -1,6 +1,8 @@
 #include "glk/glsl_shader.hpp"
 #include <iostream>
 #include <sstream>
+#include <QDebug>
+#include <QFileInfo>
 
 namespace glk {
 
@@ -12,8 +14,14 @@ GLSLShader::~GLSLShader() {
 
 bool GLSLShader::init(const QString& vertRes, const QString& fragRes) {
     QFile vertFile(vertRes), fragFile(fragRes);
-    if (!vertFile.open(QIODevice::ReadOnly) || !fragFile.open(QIODevice::ReadOnly)) {
-        std::cerr << "GLSLShader: failed to open shader files" << std::endl;
+    if (!vertFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "GLSLShader: failed to open vertex shader:" << vertRes
+                   << "(exists:" << QFileInfo::exists(vertRes) << ")";
+        return false;
+    }
+    if (!fragFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "GLSLShader: failed to open fragment shader:" << fragRes
+                   << "(exists:" << QFileInfo::exists(fragRes) << ")";
         return false;
     }
     return init(vertFile.readAll().toStdString(), fragFile.readAll().toStdString());
@@ -43,7 +51,7 @@ bool GLSLShader::init(const std::string& vertSrc, const std::string& fragSrc) {
         f->glGetProgramiv(shader_program, GL_INFO_LOG_LENGTH, &len);
         std::vector<char> buf(len);
         f->glGetProgramInfoLog(shader_program, len, nullptr, buf.data());
-        std::cerr << "GLSLShader: link error: " << buf.data() << std::endl;
+        qWarning() << "GLSLShader: link error: " << buf.data();
         f->glDeleteProgram(shader_program);
         shader_program = 0;
         return false;
@@ -68,7 +76,7 @@ GLuint GLSLShader::read_shader_from_source(const std::string& source, GLuint sha
         f->glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
         std::vector<char> buf(len);
         f->glGetShaderInfoLog(shader, len, nullptr, buf.data());
-        std::cerr << "GLSLShader: compile error (" << shader_type << "): " << buf.data() << std::endl;
+        qWarning() << "GLSLShader: compile error (" << shader_type << "): " << buf.data();
         f->glDeleteShader(shader);
         return 0;
     }

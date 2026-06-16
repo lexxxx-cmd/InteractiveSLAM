@@ -1,5 +1,5 @@
 <RCC>
-    <qresource prefix="/shaders">
+    <qresource prefix="/">
         <file alias="rainbow.vert">shaders/rainbow.vert</file>
         <file alias="rainbow.frag">shaders/rainbow.frag</file>
     </qresource>

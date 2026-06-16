@@ -43,8 +43,8 @@ void GraphViewportRenderer::initGL() {
 
 void GraphViewportRenderer::setupShaders() {
     m_rainbowShader = std::make_unique<glk::GLSLShader>();
-    if (!m_rainbowShader->init(QStringLiteral(":/shaders/rainbow.vert"),
-                                QStringLiteral(":/shaders/rainbow.frag"))) {
+    if (!m_rainbowShader->init(QStringLiteral(":/rainbow.vert"),
+                                QStringLiteral(":/rainbow.frag"))) {
         qFatal("GraphViewportRenderer: failed to load rainbow shader");
     }
 }
