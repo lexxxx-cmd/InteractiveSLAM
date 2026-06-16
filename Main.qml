@@ -200,7 +200,7 @@ ApplicationWindow {
     // Connections: GraphManager signals → UI
     // ==========================================
     Connections {
-        target: graphManager
+        target: GraphManager
 
         function onLoadingStarted() {
             log("Loading map data...");
