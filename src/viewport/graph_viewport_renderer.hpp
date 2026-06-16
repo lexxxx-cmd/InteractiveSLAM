@@ -2,7 +2,7 @@
 
 #include <QQuickFramebufferObject>
 #include <QOpenGLFramebufferObject>
-#include <QOpenGLFunctions_3_0>
+#include <QOpenGLExtraFunctions>
 #include <memory>
 #include <Eigen/Core>
 #include "glk/glsl_shader.hpp"
@@ -21,7 +21,7 @@ private:
     void setupShaders();
     void cleanupGL();
 
-    QOpenGLFunctions_3_0* m_gl = nullptr;
+    QOpenGLExtraFunctions* m_gl = nullptr;
     std::unique_ptr<glk::GLSLShader> m_rainbowShader;
     QSize m_viewportSize;
     bool m_glInitialized = false;
