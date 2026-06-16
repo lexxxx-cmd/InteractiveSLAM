@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <g2o/types/slam3d/vertex_se3.h>
 #include "glk/pointcloud_buffer.hpp"
 #include "glk/primitives.hpp"
 #include "viewport/drawable_object.hpp"
