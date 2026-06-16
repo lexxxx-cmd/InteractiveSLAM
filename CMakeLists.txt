@@ -47,6 +47,7 @@ set(VIEWPORT_SOURCES
     src/viewport/graph_viewport.cpp
     src/viewport/graph_viewport_renderer.cpp
     src/viewport/vertex_view.cpp
+    src/viewport/edge_view.cpp
 )
 
 qt_add_executable(appInteractiveSLAM

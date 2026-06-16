@@ -13,6 +13,8 @@
 #include "viewport/drawable_object.hpp"
 #include "viewport/keyframe_view.hpp"
 #include "viewport/vertex_view.hpp"
+#include "viewport/edge_view.hpp"
+#include "viewport/line_buffer.hpp"
 #include "data/hdl_graph_slam/interactive_graph.hpp"
 
 class GraphViewportRenderer : public QQuickFramebufferObject::Renderer {
@@ -38,6 +40,10 @@ private:
     std::vector<hdl_graph_slam::DrawableObject::Ptr> m_drawables;
     std::unordered_map<long, hdl_graph_slam::KeyFrameView::Ptr> m_keyframeViews;
     std::unordered_map<long, hdl_graph_slam::VertexView::Ptr> m_vertexViews;
+    std::unordered_map<long, hdl_graph_slam::EdgeView::Ptr> m_edgeViews;
+
+    // Edge line batch
+    std::unique_ptr<hdl_graph_slam::LineBuffer> m_lineBuffer;
 
     // Batched VBO upload state
     std::deque<long> m_pendingUploads;

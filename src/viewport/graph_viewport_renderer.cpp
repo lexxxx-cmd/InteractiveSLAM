@@ -63,6 +63,7 @@ void GraphViewportRenderer::initGL() {
     if (!m_gl) qFatal("GraphViewportRenderer: OpenGL 3.0 not available");
     qDebug() << "GraphViewportRenderer: OpenGL version"
              << (const char*)m_gl->glGetString(GL_VERSION);
+    m_lineBuffer = std::make_unique<hdl_graph_slam::LineBuffer>();
     m_glInitialized = true;
 }
 
@@ -103,7 +104,7 @@ void GraphViewportRenderer::syncGraphData() {
         }
     }
 
-    // Remove stale views not in the current graph
+    // Remove stale keyframe views
     for (auto it = m_drawables.begin(); it != m_drawables.end();) {
         auto kv = std::dynamic_pointer_cast<hdl_graph_slam::KeyFrameView>(*it);
         if (kv) {
@@ -115,6 +116,18 @@ void GraphViewportRenderer::syncGraphData() {
             }
         }
         ++it;
+    }
+
+    // Sync edge views — create once per edge
+    for (auto& edge : graph->graph->edges()) {
+        long edge_id = edge->id();
+        if (m_edgeViews.find(edge_id) == m_edgeViews.end()) {
+            auto view = hdl_graph_slam::EdgeView::create(edge, *m_lineBuffer);
+            if (view) {
+                m_edgeViews[edge_id] = view;
+                m_drawables.push_back(view);
+            }
+        }
     }
 }
 
@@ -159,13 +172,19 @@ void GraphViewportRenderer::render() {
     syncGraphData();
 
     if (!m_drawables.empty()) {
-        // Render all drawable objects (keyframes, point clouds)
+        // Clear line buffer — edge views will re-add lines in draw()
+        m_lineBuffer->clear();
+
+        // Render all drawable objects (keyframes, point clouds, edges)
         m_rainbowShader->set_uniform("color_mode", 0);
         for (auto& d : m_drawables) {
             if (d && d->available()) {
                 d->draw(m_drawFlags, *m_rainbowShader);
             }
         }
+
+        // Batch-draw all collected edge lines
+        m_lineBuffer->draw(*m_rainbowShader);
     } else {
         // Fallback: axes + grid when no graph is loaded
         Eigen::Matrix4f model_m = Eigen::Matrix4f::Identity();
