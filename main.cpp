@@ -13,6 +13,7 @@
 
 // Backend
 #include "backend/graph_manager.hpp"
+#include "viewport/graph_viewport.hpp"
 
 int main(int argc, char *argv[]) {
     // ⚠ Must be set BEFORE QGuiApplication creation!
@@ -37,6 +38,9 @@ int main(int argc, char *argv[]) {
     std::cout << "RHI backend: OpenGL (forced)" << std::endl;
 
     QGuiApplication app(argc, argv);
+
+    // Register QML types
+    qmlRegisterType<GraphViewport>("InteractiveSLAM", 1, 0, "GraphViewport");
 
     // Create backend manager and expose to QML
     GraphManager graphManager;

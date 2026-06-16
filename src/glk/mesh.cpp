@@ -1,0 +1,64 @@
+#include "glk/mesh.hpp"
+#include <GL/gl.h>
+
+namespace glk {
+
+Mesh::Mesh(const std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& vertices,
+           const std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>>& normals,
+           const std::vector<int>& indices)
+    : num_vertices(static_cast<int>(vertices.size())),
+      num_indices(static_cast<int>(indices.size())) {
+
+    auto* f = glk::gl();
+    f->glGenVertexArrays(1, &vao);
+    f->glBindVertexArray(vao);
+
+    f->glGenBuffers(1, &vbo);
+    f->glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    f->glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Eigen::Vector3f),
+                    vertices.data(), GL_STATIC_DRAW);
+
+    f->glGenBuffers(1, &nbo);
+    f->glBindBuffer(GL_ARRAY_BUFFER, nbo);
+    f->glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(Eigen::Vector3f),
+                    normals.data(), GL_STATIC_DRAW);
+
+    f->glGenBuffers(1, &ebo);
+    f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    f->glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(int),
+                    indices.data(), GL_STATIC_DRAW);
+
+    f->glBindVertexArray(0);
+}
+
+Mesh::~Mesh() {
+    auto* f = glk::gl();
+    f->glDeleteBuffers(1, &vbo);
+    f->glDeleteBuffers(1, &nbo);
+    f->glDeleteBuffers(1, &ebo);
+    f->glDeleteVertexArrays(1, &vao);
+}
+
+void Mesh::draw(glk::GLSLShader& shader) const {
+    auto* f = glk::gl();
+    f->glBindVertexArray(vao);
+
+    f->glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    f->glVertexAttribPointer(shader.attrib("vert_position"), 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    f->glEnableVertexAttribArray(shader.attrib("vert_position"));
+
+    f->glBindBuffer(GL_ARRAY_BUFFER, nbo);
+    f->glVertexAttribPointer(shader.attrib("vert_normal"), 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    f->glEnableVertexAttribArray(shader.attrib("vert_normal"));
+
+    f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    f->glDrawElements(GL_TRIANGLES, num_indices, GL_UNSIGNED_INT, nullptr);
+
+    f->glDisableVertexAttribArray(shader.attrib("vert_position"));
+    f->glDisableVertexAttribArray(shader.attrib("vert_normal"));
+    f->glBindBuffer(GL_ARRAY_BUFFER, 0);
+    f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    f->glBindVertexArray(0);
+}
+
+}  // namespace glk

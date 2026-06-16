@@ -2,6 +2,7 @@
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import InteractiveSLAM 1.0
 
 ApplicationWindow {
     id: mainWindow
@@ -115,22 +116,11 @@ ApplicationWindow {
         anchors.right: parent.right
         color: "#0D0F12" 
 
-        Grid {
-            anchors.centerIn: parent
-            rows: 20; columns: 20; spacing: 40
-            Repeater {
-                model: 400
-                Rectangle { width: 2; height: 2; radius: 1; color: "#009688"; opacity: 0.2 }
-            }
-        }
-
-        Text {
-            anchors.centerIn: parent
-            text: "3D OpenGL Canvas Area\n(Awaiting C++ RHI Integration)"
-            color: "#4A5260"
-            font.pixelSize: 20
-            font.letterSpacing: 2
-            horizontalAlignment: Text.AlignHCenter
+        // 3D Viewport (QQuickFramebufferObject — OpenGL rendering)
+        GraphViewport {
+            id: graphViewport
+            anchors.fill: parent
+            graphManager: graphManager
         }
 
         // Statistics overlay (real data from GraphManager)

@@ -33,10 +33,26 @@ set(BACKEND_SOURCES
     src/backend/graph_manager.cpp
 )
 
+# Phase D: OpenGL rendering
+set(GLK_SOURCES
+    src/glk/glsl_shader.cpp
+    src/glk/mesh.cpp
+    src/glk/primitives.cpp
+    src/glk/pointcloud_buffer.cpp
+    src/glk/lines.cpp
+)
+
+set(VIEWPORT_SOURCES
+    src/viewport/graph_viewport.cpp
+    src/viewport/graph_viewport_renderer.cpp
+)
+
 qt_add_executable(appInteractiveSLAM
     main.cpp
     ${DATA_SOURCES}
     ${BACKEND_SOURCES}
+    ${GLK_SOURCES}
+    ${VIEWPORT_SOURCES}
 )
 
 # Standalone CLI test for data loading (Phase B verification)
@@ -65,6 +81,8 @@ qt_add_qml_module(appInteractiveSLAM
     VERSION 1.0
     QML_FILES
         Main.qml
+    RESOURCES
+        resources/shaders.qrc
 )
 
 target_include_directories(appInteractiveSLAM PRIVATE
