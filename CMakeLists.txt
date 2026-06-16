@@ -46,6 +46,7 @@ set(GLK_SOURCES
 set(VIEWPORT_SOURCES
     src/viewport/graph_viewport.cpp
     src/viewport/graph_viewport_renderer.cpp
+    src/viewport/vertex_view.cpp
 )
 
 qt_add_executable(appInteractiveSLAM
