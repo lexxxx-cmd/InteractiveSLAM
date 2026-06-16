@@ -14,7 +14,7 @@ find_package(g2o REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
 # Qt6
-find_package(Qt6 REQUIRED COMPONENTS Quick)
+find_package(Qt6 REQUIRED COMPONENTS Quick Concurrent)
 qt_standard_project_setup(REQUIRES 6.8)
 
 # Source files (Phase B: data loading layer)
@@ -27,9 +27,16 @@ set(DATA_SOURCES
     src/data/g2o/robust_kernel_io.cpp
 )
 
+# Phase C: Qt backend
+set(BACKEND_SOURCES
+    src/backend/progress_reporter.cpp
+    src/backend/graph_manager.cpp
+)
+
 qt_add_executable(appInteractiveSLAM
     main.cpp
     ${DATA_SOURCES}
+    ${BACKEND_SOURCES}
 )
 
 # Standalone CLI test for data loading (Phase B verification)
@@ -70,6 +77,7 @@ target_include_directories(appInteractiveSLAM PRIVATE
 
 target_link_libraries(appInteractiveSLAM PRIVATE
     Qt6::Quick
+    Qt6::Concurrent
     ${PCL_LIBRARIES}
     ${G2O_LIBRARIES}
     Boost::filesystem

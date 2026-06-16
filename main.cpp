@@ -10,6 +10,9 @@
 #include <pcl/point_types.h>
 #include <g2o/core/hyper_graph.h>
 
+// Backend
+#include "backend/graph_manager.hpp"
+
 int main(int argc, char *argv[]) {
     // ⚠ Must be set BEFORE QGuiApplication creation!
     // Qt6 defaults to D3D11 on Windows — QOpenGLContext would return nullptr.
@@ -33,7 +36,14 @@ int main(int argc, char *argv[]) {
     std::cout << "RHI backend: OpenGL (forced)" << std::endl;
 
     QGuiApplication app(argc, argv);
+
+    // Create backend manager and expose to QML
+    GraphManager graphManager;
+    graphManager.setObjectName("graphManager");
+
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("graphManager", &graphManager);
+
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
     engine.loadFromModule("InteractiveSLAM", "Main");
