@@ -177,7 +177,6 @@ ApplicationWindow {
                 anchors.horizontalCenter: parent.horizontalCenter
             }
         }
-    }
 
     // ==========================================
     // Connections: GraphManager signals → UI
@@ -332,7 +331,7 @@ ApplicationWindow {
                 font.bold: true
             }
         }
-    }
+    }  // mainCanvas
 
     // ==========================================
     // 3. 底部状态栏
