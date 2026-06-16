@@ -2,6 +2,7 @@
 
 #include <QOpenGLFunctions_3_0>
 #include <QOpenGLContext>
+#include <QOpenGLVersionFunctionsFactory>
 
 namespace glk {
 
@@ -9,15 +10,16 @@ namespace glk {
 /// Must only be called from the Scene Graph render thread (inside
 /// QQuickFramebufferObject::Renderer::render() or synchronize()).
 ///
-/// On first call per thread, creates and initializes the functions object.
-/// The instance lives for the lifetime of the render thread.
+/// Uses QOpenGLVersionFunctionsFactory (Qt 6 standard API) to obtain
+/// versioned functions from the current context.
 inline QOpenGLFunctions_3_0* gl() {
-    thread_local std::unique_ptr<QOpenGLFunctions_3_0> instance;
+    thread_local QOpenGLFunctions_3_0* instance = nullptr;
     if (!instance) {
-        instance = std::make_unique<QOpenGLFunctions_3_0>();
-        instance->initializeOpenGLFunctions();
+        auto* ctx = QOpenGLContext::currentContext();
+        instance = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_3_0>(ctx);
+        Q_ASSERT(instance);
     }
-    return instance.get();
+    return instance;
 }
 
 } // namespace glk

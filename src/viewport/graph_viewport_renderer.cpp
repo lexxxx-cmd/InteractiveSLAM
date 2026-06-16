@@ -66,8 +66,9 @@ void GraphViewportRenderer::render() {
     // Default view: camera at (0,0,5) looking at origin
     Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
     view(2, 3) = -5.0f;
+    Eigen::Matrix4f proj = Eigen::Matrix4f::Identity();
     m_rainbowShader->set_uniform("view_matrix", view);
-    m_rainbowShader->set_uniform("projection_matrix", Eigen::Matrix4f::Identity());
+    m_rainbowShader->set_uniform("projection_matrix", proj);
     m_rainbowShader->set_uniform("z_range", Eigen::Vector2f(-1.5f, 5.0f));
     m_rainbowShader->set_uniform("z_clipping", int{0});
     m_rainbowShader->set_uniform("point_scale", 1.0f);
@@ -78,7 +79,8 @@ void GraphViewportRenderer::render() {
 
     // Coordinate axes (color_mode=2: per-vertex color + info)
     m_rainbowShader->set_uniform("color_mode", 2);
-    m_rainbowShader->set_uniform("model_matrix", Eigen::Matrix4f::Identity());
+    Eigen::Matrix4f model_matrix = Eigen::Matrix4f::Identity();
+    m_rainbowShader->set_uniform("model_matrix", model_matrix);
     glk::Primitives::instance()->primitive(glk::Primitives::COORDINATE_SYSTEM)
         .draw(*m_rainbowShader);
 
