@@ -16,11 +16,11 @@
 #include <g2o/solvers/pcg/linear_solver_pcg.h>
 #include <g2o/types/slam3d/types_slam3d.h>
 
-// Custom g2o types (SE3 prior edges from hdl_graph_slam)
-#include <g2o/types/slam3d/edge_se3_priorxy.h>
-#include <g2o/types/slam3d/edge_se3_priorxyz.h>
-#include <g2o/types/slam3d/edge_se3_priorvec.h>
-#include <g2o/types/slam3d/edge_se3_priorquat.h>
+// Custom g2o types (SE3 prior edges from hdl_graph_slam, not in vcpkg's g2o)
+#include "data/g2o/edge_se3_priorxy.hpp"
+#include "data/g2o/edge_se3_priorxyz.hpp"
+#include "data/g2o/edge_se3_priorvec.hpp"
+#include "data/g2o/edge_se3_priorquat.hpp"
 
 // Robust kernel I/O (our local copy)
 #include "data/g2o/robust_kernel_io.hpp"
