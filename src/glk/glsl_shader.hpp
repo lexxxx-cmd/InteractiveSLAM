@@ -25,6 +25,7 @@ public:
     GLint uniform(const std::string& name);
 
     void set_uniform(const std::string& name, int value);
+    void set_uniform(const std::string& name, bool value) { glk::gl()->glUniform1i(uniform(name), static_cast<int>(value)); }
     void set_uniform(const std::string& name, float value);
     void set_uniform(const std::string& name, const Eigen::Vector2f& vector);
     void set_uniform(const std::string& name, const Eigen::Vector3f& vector);

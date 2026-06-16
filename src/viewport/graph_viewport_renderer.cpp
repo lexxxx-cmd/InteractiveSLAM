@@ -69,7 +69,7 @@ void GraphViewportRenderer::render() {
     m_rainbowShader->set_uniform("view_matrix", view);
     m_rainbowShader->set_uniform("projection_matrix", Eigen::Matrix4f::Identity());
     m_rainbowShader->set_uniform("z_range", Eigen::Vector2f(-1.5f, 5.0f));
-    m_rainbowShader->set_uniform("z_clipping", 0);
+    m_rainbowShader->set_uniform("z_clipping", int{0});
     m_rainbowShader->set_uniform("point_scale", 1.0f);
     m_rainbowShader->set_uniform("point_size", 50.0f);
     m_rainbowShader->set_uniform("keyframe_scale", 1.0f);
