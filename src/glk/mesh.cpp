@@ -47,15 +47,13 @@ void Mesh::draw(glk::GLSLShader& shader) const {
     f->glVertexAttribPointer(shader.attrib("vert_position"), 3, GL_FLOAT, GL_FALSE, 0, nullptr);
     f->glEnableVertexAttribArray(shader.attrib("vert_position"));
 
-    f->glBindBuffer(GL_ARRAY_BUFFER, nbo);
-    f->glVertexAttribPointer(shader.attrib("vert_normal"), 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-    f->glEnableVertexAttribArray(shader.attrib("vert_normal"));
+    // Note: the rainbow.vert shader does not use vert_normal.
+    // Normals are stored in nbo for potential future use.
 
     f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     f->glDrawElements(GL_TRIANGLES, num_indices, GL_UNSIGNED_INT, nullptr);
 
     f->glDisableVertexAttribArray(shader.attrib("vert_position"));
-    f->glDisableVertexAttribArray(shader.attrib("vert_normal"));
     f->glBindBuffer(GL_ARRAY_BUFFER, 0);
     f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     f->glBindVertexArray(0);

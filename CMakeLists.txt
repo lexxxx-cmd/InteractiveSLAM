@@ -81,8 +81,14 @@ qt_add_qml_module(appInteractiveSLAM
     VERSION 1.0
     QML_FILES
         Main.qml
-    RESOURCES
-        resources/shaders.qrc
+)
+
+# Shader resources — embedded via standard Qt resource system
+qt_add_resources(appInteractiveSLAM "shaders"
+    PREFIX "/shaders"
+    FILES
+        resources/shaders/rainbow.vert
+        resources/shaders/rainbow.frag
 )
 
 target_include_directories(appInteractiveSLAM PRIVATE

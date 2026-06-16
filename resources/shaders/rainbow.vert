@@ -1,5 +1,4 @@
-#version 330 core
-
+#version 140
 uniform float point_size;
 uniform float point_scale;
 uniform bool apply_keyframe_scale;
@@ -14,11 +13,10 @@ uniform vec4 material_color;
 uniform vec2 z_range;
 uniform ivec4 info_values;
 
-layout(location = 0) in vec3 vert_position;
-layout(location = 1) in vec3 vert_normal;
-layout(location = 2) in vec4 vert_color;
-layout(location = 3) in vec3 vert_direction;
-layout(location = 4) in ivec4 vert_info;
+in vec3 vert_position;
+in vec3 vert_direction;
+in vec4 vert_color;
+in ivec4 vert_info;
 
 out vec4 frag_color;
 flat out ivec4 frag_info;
@@ -49,20 +47,21 @@ vec4 rainbow(vec3 position) {
 
 void main() {
     vec4 world_position;
-    if (apply_keyframe_scale) {
+    if(apply_keyframe_scale){
         world_position = model_matrix * vec4(keyframe_scale * vert_position, 1.0);
-    } else {
+    }
+    else{
         world_position = model_matrix * vec4(vert_position, 1.0);
     }
     frag_world_position = world_position.xyz;
     gl_Position = projection_matrix * view_matrix * world_position;
 
     frag_info = info_values;
-    if (color_mode == 0) {
+    if(color_mode == 0) {
         frag_color = rainbow(frag_world_position);
-    } else if (color_mode == 1) {
+    } else if(color_mode == 1) {
         frag_color = material_color;
-    } else if (color_mode == 2) {
+    } else if(color_mode == 2) {
         frag_color = vert_color;
         frag_info = vert_info;
     }
