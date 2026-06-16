@@ -77,6 +77,6 @@ else()
 endif()
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(G2O
+find_package_handle_standard_args(g2o
     REQUIRED_VARS G2O_INCLUDE_DIRS G2O_CORE_LIBRARY G2O_TYPES_SLAM3D_LIBRARY
 )
