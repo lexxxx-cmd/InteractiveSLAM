@@ -8,8 +8,12 @@
 #include <chrono>
 
 // ROS (Z-up) → OpenGL (Y-up) coordinate transform
-static const Eigen::Matrix4f ros_to_render =
-    (Eigen::AngleAxisf(-3.14159265f / 2.0f, Eigen::Vector3f::UnitX())).matrix();
+inline Eigen::Matrix4f rosToRender() {
+    Eigen::Matrix4f m = Eigen::Matrix4f::Identity();
+    m.block<3,3>(0,0) = Eigen::AngleAxisf(-3.14159265f / 2.0f,
+                                           Eigen::Vector3f::UnitX()).matrix();
+    return m;
+}
 
 GraphViewportRenderer::GraphViewportRenderer() = default;
 
