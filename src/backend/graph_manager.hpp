@@ -59,8 +59,9 @@ signals:
     void loadingFailed(const QString& error);
 
 private:
-    // Runs in worker thread. Returns unique_ptr (factory semantics).
-    static std::unique_ptr<hdl_graph_slam::InteractiveGraph> doLoad(
+    // Runs in worker thread. Returns shared_ptr (required by QFuture, which
+    // does not support move-only types like unique_ptr in result()).
+    static std::shared_ptr<hdl_graph_slam::InteractiveGraph> doLoad(
         const std::string& folderPath, ProgressReporter* progress);
 
     // Main-thread callback via QFutureWatcher
@@ -68,7 +69,7 @@ private:
 
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;
     ProgressReporter* m_progress;
-    QFutureWatcher<std::unique_ptr<hdl_graph_slam::InteractiveGraph>>* m_loadWatcher;
+    QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>* m_loadWatcher;
     bool m_isLoaded = false;
     bool m_isLoading = false;
     QAtomicInt m_graphVersion{0};

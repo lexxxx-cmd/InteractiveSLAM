@@ -4,8 +4,8 @@
 GraphManager::GraphManager(QObject* parent)
     : QObject(parent),
       m_progress(new ProgressReporter(this)),
-      m_loadWatcher(new QFutureWatcher<std::unique_ptr<hdl_graph_slam::InteractiveGraph>>(this)) {
-    connect(m_loadWatcher, &QFutureWatcher<std::unique_ptr<hdl_graph_slam::InteractiveGraph>>::finished,
+      m_loadWatcher(new QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>(this)) {
+    connect(m_loadWatcher, &QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>::finished,
             this, &GraphManager::onLoadFinished);
 }
 
@@ -34,7 +34,7 @@ hdl_graph_slam::InteractiveGraph* GraphManager::graph() const {
 }
 
 void GraphManager::openMapData(const QUrl& folderUrl) {
-    if (m_isLoading) return;  // prevent double-load
+    if (m_isLoading) return;
 
     QString localPath = folderUrl.toLocalFile();
     if (localPath.isEmpty()) {
@@ -67,11 +67,9 @@ void GraphManager::onLoadFinished() {
     m_isLoading = false;
     emit isLoadingChanged();
 
-    auto graph = m_loadWatcher->future().result();  // unique_ptr<InteractiveGraph>
+    auto graph = m_loadWatcher->future().result();  // shared_ptr<InteractiveGraph>
     if (graph) {
-        // Convert unique_ptr → shared_ptr: the single place ownership becomes shared.
-        // Main thread holds m_graph, renderer gets a copy via sharedGraph().
-        m_graph = std::shared_ptr<hdl_graph_slam::InteractiveGraph>(std::move(graph));
+        m_graph = graph;  // shared_ptr copy → refcount +1
         m_isLoaded = true;
         m_graphVersion.ref();
         emit isLoadedChanged();
@@ -82,9 +80,9 @@ void GraphManager::onLoadFinished() {
     }
 }
 
-std::unique_ptr<hdl_graph_slam::InteractiveGraph>
+std::shared_ptr<hdl_graph_slam::InteractiveGraph>
 GraphManager::doLoad(const std::string& folderPath, ProgressReporter* progress) {
-    auto graph = std::make_unique<hdl_graph_slam::InteractiveGraph>();
+    auto graph = std::make_shared<hdl_graph_slam::InteractiveGraph>();
     bool ok = graph->load_map_data(folderPath, *progress);
     if (!ok) return nullptr;
     return graph;
