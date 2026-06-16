@@ -47,13 +47,22 @@ void Mesh::draw(glk::GLSLShader& shader) const {
     f->glVertexAttribPointer(shader.attrib("vert_position"), 3, GL_FLOAT, GL_FALSE, 0, nullptr);
     f->glEnableVertexAttribArray(shader.attrib("vert_position"));
 
-    // Note: the rainbow.vert shader does not use vert_normal.
-    // Normals are stored in nbo for potential future use.
+    // Bind nbo (normals/colors) as vert_color.
+    // Primitives stores per-vertex RGB colors in the "normals" parameter;
+    // GL automatically pads the missing alpha to 1.0 for the shader's vec4.
+    GLint colorLoc = shader.attrib("vert_color");
+    if (colorLoc >= 0) {
+        f->glBindBuffer(GL_ARRAY_BUFFER, nbo);
+        f->glVertexAttribPointer(colorLoc, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+        f->glEnableVertexAttribArray(colorLoc);
+    }
 
     f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     f->glDrawElements(GL_TRIANGLES, num_indices, GL_UNSIGNED_INT, nullptr);
 
     f->glDisableVertexAttribArray(shader.attrib("vert_position"));
+    if (colorLoc >= 0) f->glDisableVertexAttribArray(colorLoc);
+
     f->glBindBuffer(GL_ARRAY_BUFFER, 0);
     f->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     f->glBindVertexArray(0);

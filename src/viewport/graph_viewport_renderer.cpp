@@ -3,6 +3,8 @@
 #include "glk/primitives.hpp"
 #include <QOpenGLContext>
 #include <QDebug>
+#include <cmath>
+#include <algorithm>
 #include <iostream>
 
 GraphViewportRenderer::GraphViewportRenderer() = default;
@@ -27,8 +29,8 @@ QOpenGLFramebufferObject* GraphViewportRenderer::createFramebufferObject(const Q
 }
 
 void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
-    // Future: sync graph data, draw flags, pick requests, FPS from renderer
-    (void)item;
+    m_viewportSize = item->size().toSize();
+    item->update();  // keep rendering continuously
 }
 
 void GraphViewportRenderer::initGL() {
@@ -55,18 +57,32 @@ void GraphViewportRenderer::render() {
         setupShaders();
     }
 
-    // Info FBO size sync placeholder — will be active in Phase I (picking)
+    // ⚠ Force depth write — Qt Quick 2D may leave glDepthMask at GL_FALSE
+    m_gl->glDepthMask(GL_TRUE);
 
+    m_gl->glViewport(0, 0, m_viewportSize.width(), m_viewportSize.height());
     m_gl->glClearColor(0.051f, 0.059f, 0.071f, 1.0f);  // #0D0F12
     m_gl->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     m_gl->glEnable(GL_DEPTH_TEST);
 
     m_rainbowShader->use();
 
-    // Default view: camera at (0,0,5) looking at origin
+    // Perspective projection (45° FOV, near=0.1, far=1000)
+    float aspect = (float)m_viewportSize.width() / std::max(m_viewportSize.height(), 1);
+    float fovY = 45.0f * 3.14159265f / 180.0f;
+    float tanHalfFov = std::tan(fovY / 2.0f);
+
+    Eigen::Matrix4f proj = Eigen::Matrix4f::Zero();
+    proj(0, 0) = 1.0f / (aspect * tanHalfFov);
+    proj(1, 1) = 1.0f / tanHalfFov;
+    proj(2, 2) = -(1000.0f + 0.1f) / (1000.0f - 0.1f);
+    proj(2, 3) = -(2.0f * 1000.0f * 0.1f) / (1000.0f - 0.1f);
+    proj(3, 2) = -1.0f;
+
+    // View: camera at (0, 0, 5), looking at origin
     Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
     view(2, 3) = -5.0f;
-    Eigen::Matrix4f proj = Eigen::Matrix4f::Identity();
+
     m_rainbowShader->set_uniform("view_matrix", view);
     m_rainbowShader->set_uniform("projection_matrix", proj);
     m_rainbowShader->set_uniform("z_range", Eigen::Vector2f(-1.5f, 5.0f));
