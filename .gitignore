@@ -80,5 +80,13 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 .vs/
+.vscode/
 /build*/
 /out/
+build-*/
+
+# vcpkg (global install, not manifest mode)
+vcpkg_installed/
+
+# Qt autogen
+*.autogen
