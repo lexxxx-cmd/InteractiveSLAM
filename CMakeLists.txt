@@ -17,10 +17,41 @@ find_package(Boost REQUIRED COMPONENTS filesystem)
 find_package(Qt6 REQUIRED COMPONENTS Quick)
 qt_standard_project_setup(REQUIRES 6.8)
 
-# Source files (expanded in later phases)
+# Source files (Phase B: data loading layer)
+set(DATA_SOURCES
+    src/data/hdl_graph_slam/keyframe.cpp
+    src/data/hdl_graph_slam/graph_slam.cpp
+    src/data/hdl_graph_slam/information_matrix_calculator.cpp
+    src/data/hdl_graph_slam/interactive_keyframe.cpp
+    src/data/hdl_graph_slam/interactive_graph.cpp
+    src/data/g2o/robust_kernel_io.cpp
+)
+
 qt_add_executable(appInteractiveSLAM
     main.cpp
+    ${DATA_SOURCES}
 )
+
+# Standalone CLI test for data loading (Phase B verification)
+add_executable(test_data_loading
+    tests/test_data_loading.cpp
+    ${DATA_SOURCES}
+)
+target_include_directories(test_data_loading PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${EIGEN3_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${G2O_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(test_data_loading PRIVATE
+    ${PCL_LIBRARIES}
+    ${G2O_LIBRARIES}
+    Boost::filesystem
+)
+if(MSVC)
+    target_compile_options(test_data_loading PRIVATE /W3 /wd4996)
+endif()
 
 qt_add_qml_module(appInteractiveSLAM
     URI InteractiveSLAM
