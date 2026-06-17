@@ -30,10 +30,14 @@ public:
     // Pick API (async: request now, result via pickResultReady signal)
     Q_INVOKABLE void requestPick(float mouseX, float mouseY);
 
+    Q_PROPERTY(int selectedVertexId READ selectedVertexId WRITE setSelectedVertexId NOTIFY selectedVertexIdChanged)
     Q_PROPERTY(int pickedVertexId READ pickedVertexId NOTIFY pickResultReady)
     Q_PROPERTY(float pickedWorldX READ pickedWorldX NOTIFY pickResultReady)
     Q_PROPERTY(float pickedWorldY READ pickedWorldY NOTIFY pickResultReady)
     Q_PROPERTY(float pickedWorldZ READ pickedWorldZ NOTIFY pickResultReady)
+
+    int   selectedVertexId() const       { return m_selectedVertexId; }
+    void  setSelectedVertexId(int id);
 
     int   pickedVertexId() const { return m_pickedVertexId; }
     float pickedWorldX()   const { return m_pickedWorldPos.x(); }
@@ -51,6 +55,7 @@ signals:
     void graphManagerChanged();
     void fpsUpdated(float fps);
     void pickResultReady();
+    void selectedVertexIdChanged();
 
 private:
     friend class GraphViewportRenderer;
@@ -70,5 +75,6 @@ private:
     bool   m_pickPending = false;
     float  m_pickMouseX = 0, m_pickMouseY = 0;
     int    m_pickedVertexId = -1;
+    int    m_selectedVertexId = -1;
     Eigen::Vector3f m_pickedWorldPos{0, 0, 0};
 };

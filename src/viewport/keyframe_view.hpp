@@ -28,8 +28,13 @@ public:
         if (!kf) return;
         Eigen::Matrix4f model_matrix = kf->estimate().matrix().cast<float>();
 
-        // Point cloud (color_mode=0: rainbow from Z height)
-        shader.set_uniform("color_mode", 0);
+        // Point cloud — highlight selected keyframe in orange
+        if (kf->id() == flags.selectedVertexId) {
+            shader.set_uniform("color_mode", 1);  // solid
+            shader.set_uniform("material_color", Eigen::Vector4f(1.0f, 0.55f, 0.0f, 1.0f));
+        } else {
+            shader.set_uniform("color_mode", 0);  // rainbow
+        }
         shader.set_uniform("model_matrix", model_matrix);
         shader.set_uniform("info_values", Eigen::Vector4i(POINTS, 0, 0, 0));
         pointcloud_buffer->draw(shader);
@@ -42,7 +47,7 @@ public:
         shader.set_uniform("info_values", Eigen::Vector4i(VERTEX | KEYFRAME, kf->id(), 0, 0));
         shader.set_uniform("apply_keyframe_scale", true);
         Eigen::Matrix4f sphere_model = model_matrix;
-        sphere_model.block<3, 3>(0, 0) *= 5.0f;   // TODO: temporary — was 0.35f, test picking
+        sphere_model.block<3, 3>(0, 0) *= 2.0f;   // TODO: temporary — was 0.35f, test picking
         shader.set_uniform("model_matrix", sphere_model);
         const auto& sphere = glk::Primitives::instance()->primitive(glk::Primitives::SPHERE);
         sphere.draw(shader);

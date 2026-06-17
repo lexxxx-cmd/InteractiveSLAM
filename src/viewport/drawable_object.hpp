@@ -13,6 +13,7 @@ struct DrawFlags {
     bool draw_keyframe_vertices = true;
     bool draw_se3_edges = true;
     bool z_clipping = true;
+    int  selectedVertexId = -1;   // -1 = no selection; set by GraphViewport
 };
 
 class DrawableObject {

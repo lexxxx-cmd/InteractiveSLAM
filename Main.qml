@@ -263,6 +263,7 @@ ApplicationWindow {
 
         function onPickResultReady() {
             if (graphViewport.pickedVertexId >= 0) {
+                graphViewport.selectedVertexId = graphViewport.pickedVertexId;
                 log("Picked vertex " + graphViewport.pickedVertexId
                   + " at (" + graphViewport.pickedWorldX.toFixed(2) + ", "
                   + graphViewport.pickedWorldY.toFixed(2) + ", "

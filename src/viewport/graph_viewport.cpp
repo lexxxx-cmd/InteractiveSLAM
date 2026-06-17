@@ -92,6 +92,14 @@ Eigen::Matrix4f GraphViewport::cameraViewMatrix() const {
     return mat;
 }
 
+void GraphViewport::setSelectedVertexId(int id) {
+    if (m_selectedVertexId != id) {
+        m_selectedVertexId = id;
+        emit selectedVertexIdChanged();
+        update();
+    }
+}
+
 void GraphViewport::requestPick(float mouseX, float mouseY) {
     m_pickPending = true;
     m_pickMouseX = mouseX;

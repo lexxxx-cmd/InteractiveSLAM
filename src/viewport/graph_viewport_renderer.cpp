@@ -72,6 +72,9 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
         m_hasFpsUpdate = false;
     }
 
+    // ---- Selection sync (every frame, not just pick frames) ----
+    m_drawFlags.selectedVertexId = viewport->m_selectedVertexId;
+
     // ---- Pick bridge: main thread → render thread ----
     if (viewport->m_pickPending) {
         m_pickRequested     = true;
