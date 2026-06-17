@@ -71,6 +71,7 @@ private:
         bool hit = false;
         int  vertexId = -1;
         Eigen::Vector3f worldPos{0, 0, 0};
+        std::vector<std::pair<int,int>> allHitObjects;  // all (typeFlags,vertexId) in scan window
     };
 
     bool m_infoAttachmentAdded = false;
@@ -84,6 +85,10 @@ private:
     // Result back to main thread (via synchronize)
     bool      m_pickResultReady = false;
     PickResult m_pickResult;
+
+    // Highlight debug visualisation — all pickable objects in last scan window
+    std::set<std::pair<int,int>> m_highlightedObjects;
+    int m_highlightFramesRemaining = 0;
 
     void doPickReadback(float logicalX, float logicalY, float dpr);
 

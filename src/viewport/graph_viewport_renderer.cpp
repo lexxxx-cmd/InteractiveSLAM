@@ -88,11 +88,14 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
 
     // ---- Pick result: render thread → main thread ----
     if (m_pickResultReady) {
-        // All fields (vertexId, worldPos) were computed inside render() with
-        // consistent m_projectionMatrix, m_cameraView, and depth-buffer from
-        // a single frame.  Just copy to the main-thread side.
         viewport->m_pickedVertexId = m_pickResult.vertexId;
         viewport->m_pickedWorldPos = m_pickResult.worldPos;
+
+        // Refresh highlight set from window scan
+        m_highlightedObjects.clear();
+        for (auto& obj : m_pickResult.allHitObjects)
+            m_highlightedObjects.insert(obj);
+        m_highlightFramesRemaining = 90;   // ~1.5s at 60fps
 
         m_pickResultReady = false;
         emit viewport->pickResultReady();
@@ -234,19 +237,30 @@ void GraphViewportRenderer::render() {
     // Sync graph data and render drawables
     syncGraphData();
 
+    // ---- Highlight decay ----
+    if (m_highlightFramesRemaining > 0) {
+        m_highlightFramesRemaining--;
+        if (m_highlightFramesRemaining == 0)
+            m_highlightedObjects.clear();
+    }
+
+    const bool hasHighlight = !m_highlightedObjects.empty();
+
+    // Set up highlight flags before normal draw — drawables check them internally
+    if (hasHighlight) {
+        m_drawFlags.highlightPass = true;
+        m_drawFlags.highlightedSet = &m_highlightedObjects;
+    }
+
     if (!m_drawables.empty()) {
-        // Clear line buffer — edge views will re-add lines in draw()
         m_lineBuffer->clear();
 
-        // Render all drawable objects (keyframes, point clouds, edges)
         m_rainbowShader->set_uniform("color_mode", 0);
         for (auto& d : m_drawables) {
-            if (d && d->available()) {
+            if (d && d->available())
                 d->draw(m_drawFlags, *m_rainbowShader);
-            }
         }
 
-        // Batch-draw all collected edge lines
         m_lineBuffer->draw(*m_rainbowShader);
     } else {
         // Fallback: axes + grid when no graph is loaded
@@ -263,16 +277,14 @@ void GraphViewportRenderer::render() {
             .draw(*m_rainbowShader);
     }
 
+    // Restore highlight flags
+    if (hasHighlight) {
+        m_drawFlags.highlightPass = false;
+        m_drawFlags.highlightedSet = nullptr;
+    }
+
     // FPS counter (throttled to 0.5s)
     m_frameCount++;
-    auto now = std::chrono::steady_clock::now();
-    float elapsed = std::chrono::duration<float>(now - m_lastFpsEmitTime).count();
-    if (elapsed >= 0.5f) {
-        m_pendingFpsUpdate = m_frameCount / elapsed;
-        m_hasFpsUpdate = true;
-        m_frameCount = 0;
-        m_lastFpsEmitTime = now;
-    }
 
     // ---- GPU pick readback (only on pick frames) ----
     if (pickThisFrame) {
@@ -322,24 +334,16 @@ void GraphViewportRenderer::doPickReadback(float logicalX, float logicalY, float
         return {typeFlags, vertexId};
     };
 
-    // ---- Diagnostic: scan entire window, count objects by type ----
-    int countVertex = 0, countPoints = 0, countEdge = 0, countOther = 0;
-    int sampleVertexId = -1;
-    int sampleVertexX = -1, sampleVertexY = -1;
+    // ---- Collect all pickable objects in scan window ----
+    m_pickResult.allHitObjects.clear();
     for (int ly = 0; ly < readH; ly++) {
         for (int lx = 0; lx < readW; lx++) {
             auto [tf, vid] = decode(&infoPixels[(ly * readW + lx) * 4]);
-            if (tf == 0) continue;
-            if (tf & hdl_graph_slam::DrawableObject::VERTEX)  { countVertex++; sampleVertexId = vid; sampleVertexX = lx; sampleVertexY = ly; }
-            else if (tf & hdl_graph_slam::DrawableObject::POINTS) countPoints++;
-            else if (tf & hdl_graph_slam::DrawableObject::EDGE)  countEdge++;
-            else countOther++;
+            if (tf & (hdl_graph_slam::DrawableObject::VERTEX |
+                      hdl_graph_slam::DrawableObject::EDGE))
+                m_pickResult.allHitObjects.push_back({tf, vid});
         }
     }
-    qDebug() << "[PICK] window scan: vertex=" << countVertex
-             << "points=" << countPoints << "edge=" << countEdge
-             << "other=" << countOther
-             << "sample vid=" << sampleVertexId << "@(" << sampleVertexX << "," << sampleVertexY << ")";
 
     std::vector<Eigen::Vector2i> offsets;
     offsets.reserve(size * size);

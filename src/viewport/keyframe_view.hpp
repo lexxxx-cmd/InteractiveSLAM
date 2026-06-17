@@ -27,28 +27,45 @@ public:
         InteractiveKeyFrame::Ptr kf = keyframe.lock();
         if (!kf) return;
         Eigen::Matrix4f model_matrix = kf->estimate().matrix().cast<float>();
+        int vid = static_cast<int>(kf->id());
 
-        // Point cloud — highlight selected keyframe in orange
-        if (kf->id() == flags.selectedVertexId) {
-            shader.set_uniform("color_mode", 1);  // solid
-            shader.set_uniform("material_color", Eigen::Vector4f(1.0f, 0.55f, 0.0f, 1.0f));
-        } else {
-            shader.set_uniform("color_mode", 0);  // rainbow
+        bool isHighlighted = flags.highlightPass
+            && flags.highlightedSet
+            && flags.highlightedSet->count({VERTEX | KEYFRAME, vid});
+
+        // Point cloud — skip in highlight pass (wireframe cloud is messy)
+        if (!flags.highlightPass) {
+            if (kf->id() == flags.selectedVertexId) {
+                shader.set_uniform("color_mode", 1);
+                shader.set_uniform("material_color", Eigen::Vector4f(1.0f, 0.55f, 0.0f, 1.0f));
+            } else {
+                shader.set_uniform("color_mode", 0);
+            }
+            shader.set_uniform("model_matrix", model_matrix);
+            shader.set_uniform("info_values", Eigen::Vector4i(POINTS, 0, 0, 0));
+            pointcloud_buffer->draw(shader);
         }
-        shader.set_uniform("model_matrix", model_matrix);
-        shader.set_uniform("info_values", Eigen::Vector4i(POINTS, 0, 0, 0));
-        pointcloud_buffer->draw(shader);
 
         if (!flags.draw_verticies || !flags.draw_keyframe_vertices) return;
 
-        // Keyframe sphere (color_mode=1: solid red)
-        shader.set_uniform("color_mode", 1);
-        shader.set_uniform("material_color", Eigen::Vector4f(1.0f, 0.0f, 0.0f, 1.0f));
-        shader.set_uniform("info_values", Eigen::Vector4i(VERTEX | KEYFRAME, kf->id(), 0, 0));
-        shader.set_uniform("apply_keyframe_scale", true);
-        Eigen::Matrix4f sphere_model = model_matrix;
-        sphere_model.block<3, 3>(0, 0) *= 2.0f;   // TODO: temporary — was 0.35f, test picking
-        shader.set_uniform("model_matrix", sphere_model);
+        // Sphere
+        shader.set_uniform("info_values", Eigen::Vector4i(VERTEX | KEYFRAME, vid, 0, 0));
+        if (isHighlighted) {
+            // Bright yellow — stands out against red spheres and rainbow clouds
+            shader.set_uniform("color_mode", 1);
+            shader.set_uniform("material_color", Eigen::Vector4f(1.0f, 1.0f, 0.0f, 1.0f));
+            shader.set_uniform("apply_keyframe_scale", true);
+            Eigen::Matrix4f sphere_model = model_matrix;
+            sphere_model.block<3, 3>(0, 0) *= 2.0f;
+            shader.set_uniform("model_matrix", sphere_model);
+        } else {
+            shader.set_uniform("color_mode", 1);
+            shader.set_uniform("material_color", Eigen::Vector4f(1.0f, 0.0f, 0.0f, 1.0f));
+            shader.set_uniform("apply_keyframe_scale", true);
+            Eigen::Matrix4f sphere_model = model_matrix;
+            sphere_model.block<3, 3>(0, 0) *= 2.0f;
+            shader.set_uniform("model_matrix", sphere_model);
+        }
         const auto& sphere = glk::Primitives::instance()->primitive(glk::Primitives::SPHERE);
         sphere.draw(shader);
         shader.set_uniform("apply_keyframe_scale", false);
