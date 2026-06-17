@@ -26,10 +26,14 @@ class GraphManager : public QObject {
     Q_PROPERTY(int edgeCount READ edgeCount NOTIFY statsChanged)
     Q_PROPERTY(int keyframeCount READ keyframeCount NOTIFY statsChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
+    Q_PROPERTY(QString lastLogLevel READ lastLogLevel NOTIFY lastMessageChanged)
     Q_PROPERTY(bool isLoading READ isLoading NOTIFY isLoadingChanged)
     Q_PROPERTY(ProgressReporter* progress READ progress CONSTANT)
 
 public:
+    enum LogLevel { INFO, WARNING, ERROR };
+    Q_ENUM(LogLevel)
+
     explicit GraphManager(QObject* parent = nullptr);
 
     bool isLoaded() const;
@@ -38,7 +42,12 @@ public:
     int edgeCount() const;
     int keyframeCount() const;
     QString lastMessage() const;
+    QString lastLogLevel() const;
     ProgressReporter* progress() const;
+
+    Q_INVOKABLE void logInfo(const QString& msg);
+    Q_INVOKABLE void logWarning(const QString& msg);
+    Q_INVOKABLE void logError(const QString& msg);
 
     // Returns shared_ptr for renderer to obtain its own reference in synchronize().
     // Caller gets independent refcount → graph cannot be destroyed during render().
@@ -59,6 +68,9 @@ signals:
     void loadingFailed(const QString& error);
 
 private:
+    void emitLog(LogLevel level, const QString& msg);
+
+private:
     // Runs in worker thread. Returns shared_ptr (required by QFuture, which
     // does not support move-only types like unique_ptr in result()).
     static std::shared_ptr<hdl_graph_slam::InteractiveGraph> doLoad(
@@ -73,4 +85,6 @@ private:
     bool m_isLoaded = false;
     bool m_isLoading = false;
     QAtomicInt m_graphVersion{0};
+    QString m_lastMessage;
+    QString m_lastLogLevel = "INFO";
 };

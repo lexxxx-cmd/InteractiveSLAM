@@ -31,6 +31,9 @@ public:
 
     virtual ~DrawableObject() {}
     virtual bool available() const { return true; }
+    virtual int pointCount() const { return 0; }
+    virtual Eigen::Vector3f boundingSphereCenter() const { return {0, 0, 0}; }
+    virtual float boundingSphereRadius() const { return 1e9f; }  // huge = always visible
     virtual void draw(const DrawFlags& flags, glk::GLSLShader& shader) = 0;
     virtual void draw(const DrawFlags& flags, glk::GLSLShader& shader,
                       const Eigen::Vector4f& color,

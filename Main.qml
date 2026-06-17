@@ -26,6 +26,7 @@ ApplicationWindow {
     property bool isOptimizing: false
     property int mockVertexCount: 4531
     property int mockEdgeCount: 12048
+    property string fpsText: "-- fps"
     
     // --- 【新增控制变量】：控制悬浮窗口的显示与隐藏 ---
     property bool showRenderConfig: false 
@@ -191,7 +192,7 @@ ApplicationWindow {
             Label { text: "Vertices:  " + GraphManager.vertexCount; color: "#A0AABF"; font.pixelSize: 14 }
             Label { text: "Edges:     " + GraphManager.edgeCount; color: "#A0AABF"; font.pixelSize: 14 }
             Label { text: "Keyframes: " + GraphManager.keyframeCount; color: "#A0AABF"; font.pixelSize: 14 }
-            Label { text: "FPS:       -- fps"; color: "#A0AABF"; font.pixelSize: 14 }
+            Label { text: "FPS:       " + mainWindow.fpsText; color: "#A0AABF"; font.pixelSize: 14 }
         }
 
         // Loading progress indicator (visible during map loading)
@@ -268,6 +269,13 @@ ApplicationWindow {
                   + " at (" + graphViewport.pickedWorldX.toFixed(2) + ", "
                   + graphViewport.pickedWorldY.toFixed(2) + ", "
                   + graphViewport.pickedWorldZ.toFixed(2) + ")");
+            }
+        }
+
+        function onFpsUpdated(fps) {
+            mainWindow.fpsText = fps.toFixed(1) + " fps";
+            if (fps < 30.0 && fps > 0.0) {
+                GraphManager.logWarning("Low FPS: " + fps.toFixed(1));
             }
         }
     }
@@ -418,7 +426,13 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        color: "#009688"
+        color: {
+            switch (GraphManager.lastLogLevel) {
+                case "WARNING": return "#E6A817";
+                case "ERROR":   return "#D32F2F";
+                default:        return "#009688";
+            }
+        }
 
         Text {
             id: logText
@@ -427,11 +441,11 @@ ApplicationWindow {
             anchors.leftMargin: 15
             color: "#FFFFFF"
             font.pixelSize: 13
-            text: "System Ready."
+            text: GraphManager.lastMessage || "System Ready."
         }
     }
 
     function log(msg) {
-        logText.text = "> " + msg;
+        GraphManager.logInfo(msg);
     }
 }

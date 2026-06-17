@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <deque>
+#include <array>
 #include <Eigen/Core>
 #include "glk/glsl_shader.hpp"
 #include "glk/mesh.hpp"
@@ -92,8 +93,14 @@ private:
 
     void doPickReadback(float logicalX, float logicalY, float dpr);
 
-    // FPS throttling
+    // FPS counter — rolling average over 60-frame window
+    static constexpr int FPS_WINDOW = 60;
+    std::chrono::steady_clock::time_point m_lastFrameTime;
     std::chrono::steady_clock::time_point m_lastFpsEmitTime;
+    std::array<float, FPS_WINDOW> m_frameTimes{};
+    int m_frameIndex = 0;
+    int m_fpsSampleCount = 0;
+    float m_frameTimeSum = 0.0f;
     float m_pendingFpsUpdate = 0.0f;
     bool m_hasFpsUpdate = false;
     int m_frameCount = 0;

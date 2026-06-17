@@ -1,5 +1,6 @@
 #include "backend/graph_manager.hpp"
 #include <QtConcurrent/QtConcurrent>
+#include <QDateTime>
 
 GraphManager::GraphManager(QObject* parent)
     : QObject(parent),
@@ -23,7 +24,24 @@ int GraphManager::keyframeCount() const {
     return m_graph ? static_cast<int>(m_graph->keyframes.size()) : 0;
 }
 
-QString GraphManager::lastMessage() const { return {}; }
+QString GraphManager::lastMessage() const { return m_lastMessage; }
+QString GraphManager::lastLogLevel() const { return m_lastLogLevel; }
+
+void GraphManager::emitLog(LogLevel level, const QString& msg) {
+    auto now = QDateTime::currentDateTime();
+    QString ts = now.toString("HH:mm:ss");
+    switch (level) {
+    case WARNING: m_lastLogLevel = "WARNING"; break;
+    case ERROR:   m_lastLogLevel = "ERROR";   break;
+    default:      m_lastLogLevel = "INFO";    break;
+    }
+    m_lastMessage = QString("[%1] %2").arg(ts, msg);
+    emit lastMessageChanged(m_lastMessage);
+}
+
+void GraphManager::logInfo(const QString& msg)    { emitLog(INFO, msg); }
+void GraphManager::logWarning(const QString& msg) { emitLog(WARNING, msg); }
+void GraphManager::logError(const QString& msg)   { emitLog(ERROR, msg); }
 
 std::shared_ptr<hdl_graph_slam::InteractiveGraph> GraphManager::sharedGraph() const {
     return m_graph;
@@ -34,17 +52,32 @@ hdl_graph_slam::InteractiveGraph* GraphManager::graph() const {
 }
 
 void GraphManager::openMapData(const QUrl& folderUrl) {
-    if (m_isLoading) return;
+    if (m_isLoading) {
+        logWarning("Already loading, ignoring new request");
+        return;
+    }
 
     QString localPath = folderUrl.toLocalFile();
     if (localPath.isEmpty()) {
+        logError("Invalid folder path");
         emit loadingFailed("Invalid folder path");
         return;
+    }
+
+    // Auto-close existing map before loading a new one
+    if (m_isLoaded) {
+        logInfo("Closing previous map before loading new one");
+        m_graph.reset();
+        m_isLoaded = false;
+        m_graphVersion.ref();
+        emit isLoadedChanged();
+        emit statsChanged();
     }
 
     m_isLoading = true;
     emit isLoadingChanged();
     emit loadingStarted();
+    logInfo(QString("Loading map: %1").arg(localPath));
 
     auto future = QtConcurrent::run(
         &GraphManager::doLoad,
@@ -55,12 +88,17 @@ void GraphManager::openMapData(const QUrl& folderUrl) {
 }
 
 void GraphManager::closeMap() {
-    if (!m_isLoaded) return;
+    if (!m_isLoaded) {
+        logInfo("No map loaded");
+        return;
+    }
+    logInfo("Closing map");
     m_graph.reset();
     m_isLoaded = false;
     m_graphVersion.ref();
     emit isLoadedChanged();
     emit statsChanged();
+    logInfo("Map closed");
 }
 
 void GraphManager::onLoadFinished() {
@@ -75,7 +113,10 @@ void GraphManager::onLoadFinished() {
         emit isLoadedChanged();
         emit statsChanged();
         emit loadingSucceeded();
+        logInfo(QString("Loaded: %1 vertices, %2 edges, %3 keyframes")
+                    .arg(vertexCount()).arg(edgeCount()).arg(keyframeCount()));
     } else {
+        logError("Failed to load map data");
         emit loadingFailed("Failed to load map data");
     }
 }

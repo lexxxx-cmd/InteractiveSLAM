@@ -110,9 +110,26 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
 
 void GraphViewportRenderer::initGL() {
     m_gl = glk::gl();
-    if (!m_gl) qFatal("GraphViewportRenderer: OpenGL 3.0 not available");
-    qDebug() << "GraphViewportRenderer: OpenGL version"
-             << (const char*)m_gl->glGetString(GL_VERSION);
+    if (!m_gl) {
+        qFatal("GraphViewportRenderer: OpenGL 3.0 not available. "
+               "Check GPU drivers and Qt RHI backend (must be OpenGL).");
+    }
+
+    const char* version  = (const char*)m_gl->glGetString(GL_VERSION);
+    const char* vendor   = (const char*)m_gl->glGetString(GL_VENDOR);
+    const char* renderer = (const char*)m_gl->glGetString(GL_RENDERER);
+    qDebug() << "GraphViewportRenderer: OpenGL" << version
+             << "| Vendor:" << (vendor ? vendor : "?")
+             << "| GPU:" << (renderer ? renderer : "?");
+
+    // Validate minimum requirements
+    GLint major = 0, minor = 0;
+    m_gl->glGetIntegerv(GL_MAJOR_VERSION, &major);
+    m_gl->glGetIntegerv(GL_MINOR_VERSION, &minor);
+    if (major < 3 || (major == 3 && minor < 0)) {
+        qFatal("GraphViewportRenderer: OpenGL 3.0 required, got %d.%d", major, minor);
+    }
+
     m_lineBuffer = std::make_unique<hdl_graph_slam::LineBuffer>();
     m_glInitialized = true;
 }
@@ -120,8 +137,29 @@ void GraphViewportRenderer::initGL() {
 void GraphViewportRenderer::setupShaders() {
     m_rainbowShader = std::make_unique<glk::GLSLShader>();
     if (!m_rainbowShader->init(QStringLiteral(":/rainbow.vert"),
-                                QStringLiteral(":/rainbow.frag")))
-        qFatal("GraphViewportRenderer: failed to load rainbow shader");
+                                QStringLiteral(":/rainbow.frag"))) {
+        qWarning() << "GraphViewportRenderer: rainbow shader failed, using fallback";
+
+        // Minimal fallback shader — solid white, no fancy features
+        static const char* fallbackVert = R"(#version 130
+            in vec4 vert_position;
+            uniform mat4 view_matrix;
+            uniform mat4 projection_matrix;
+            uniform mat4 model_matrix;
+            void main() {
+                gl_Position = projection_matrix * view_matrix * model_matrix * vert_position;
+            })";
+
+        static const char* fallbackFrag = R"(#version 130
+            out vec4 frag_color;
+            void main() {
+                frag_color = vec4(0.8, 0.8, 0.8, 1.0);
+            })";
+
+        if (!m_rainbowShader->init(std::string(fallbackVert), std::string(fallbackFrag))) {
+            qFatal("GraphViewportRenderer: fallback shader also failed");
+        }
+    }
 }
 
 void GraphViewportRenderer::syncGraphData() {
@@ -259,11 +297,59 @@ void GraphViewportRenderer::render() {
     if (!m_drawables.empty()) {
         m_lineBuffer->clear();
 
+        // ---- Frustum culling: build MVP once per frame ----
+        Eigen::Matrix4f mvp = m_projectionMatrix * m_cameraView;
+
+        auto isSphereInFrustum = [&](const Eigen::Vector3f& center, float radius) -> bool {
+            // Transform sphere center to clip space
+            Eigen::Vector4f clip = mvp * Eigen::Vector4f(center.x(), center.y(), center.z(), 1.0f);
+            float w = std::abs(clip.w());
+            // Approximate frustum test: check if sphere intersects all 6 planes
+            // Simplified: test NDC bounds extended by sphere radius in screen space
+            float screenRadius = radius * mvp.row(0).head<3>().norm() * 0.5f; // crude
+            (void)screenRadius;
+            // Full plane test: all 6 frustum planes
+            if (clip.x() + radius * w < -w) return false;
+            if (clip.x() - radius * w >  w) return false;
+            if (clip.y() + radius * w < -w) return false;
+            if (clip.y() - radius * w >  w) return false;
+            // Near/far: z in [-w, w] for OpenGL
+            if (clip.z() + radius * w < -w) return false;
+            if (clip.z() - radius * w >  w) return false;
+            return true;
+        };
+
+        static constexpr size_t MAX_POINTS_PER_FRAME = 5'000'000;
+        static constexpr int    FRUSTUM_CULL_MIN_POINTS = 50000;  // skip cull test for small clouds
+        size_t totalPoints = 0;
+        int culledCount = 0;
+        int budgetSkippedCount = 0;
+
         m_rainbowShader->set_uniform("color_mode", 0);
         for (auto& d : m_drawables) {
-            if (d && d->available())
-                d->draw(m_drawFlags, *m_rainbowShader);
+            if (!d || !d->available()) continue;
+
+            // K3: Frustum culling (skip if bounding sphere outside view)
+            if (d->pointCount() >= FRUSTUM_CULL_MIN_POINTS) {
+                if (!isSphereInFrustum(d->boundingSphereCenter(), d->boundingSphereRadius())) {
+                    culledCount++;
+                    continue;
+                }
+            }
+
+            // K2: Point budget guard
+            size_t pts = static_cast<size_t>(d->pointCount());
+            if (totalPoints + pts > MAX_POINTS_PER_FRAME) {
+                budgetSkippedCount++;
+                continue;
+            }
+
+            totalPoints += pts;
+            d->draw(m_drawFlags, *m_rainbowShader);
         }
+
+        if (budgetSkippedCount > 0)
+            qWarning() << "[BUDGET] Point budget exceeded, skipped" << budgetSkippedCount << "drawables";
 
         m_lineBuffer->draw(*m_rainbowShader);
     }
@@ -295,8 +381,33 @@ void GraphViewportRenderer::render() {
         m_drawFlags.highlightedSet = nullptr;
     }
 
-    // FPS counter (throttled to 0.5s)
-    m_frameCount++;
+    // FPS counter — compute rolling average over 60-frame window
+    {
+        using Clock = std::chrono::steady_clock;
+        auto now = Clock::now();
+
+        if (m_frameCount > 0) {
+            float dt = std::chrono::duration<float>(now - m_lastFrameTime).count();
+            if (dt > 0.0f) {
+                m_frameTimeSum += dt;
+                m_frameTimeSum -= m_frameTimes[m_frameIndex];
+                m_frameTimes[m_frameIndex] = dt;
+                m_frameIndex = (m_frameIndex + 1) % FPS_WINDOW;
+                if (m_fpsSampleCount < FPS_WINDOW) m_fpsSampleCount++;
+            }
+        }
+        m_lastFrameTime = now;
+        m_frameCount++;
+
+        // Throttled emit to main thread (every 0.5s)
+        float elapsed = std::chrono::duration<float>(now - m_lastFpsEmitTime).count();
+        if (elapsed >= 0.5f && m_fpsSampleCount > 0) {
+            m_lastFpsEmitTime = now;
+            float avgDt = m_frameTimeSum / static_cast<float>(m_fpsSampleCount);
+            m_pendingFpsUpdate = (avgDt > 0.0f) ? (1.0f / avgDt) : 0.0f;
+            m_hasFpsUpdate = true;
+        }
+    }
 
     // ---- GPU pick readback (only on pick frames) ----
     if (pickThisFrame) {
