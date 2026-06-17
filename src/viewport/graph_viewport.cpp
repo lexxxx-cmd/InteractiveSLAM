@@ -100,6 +100,40 @@ void GraphViewport::setSelectedVertexId(int id) {
     }
 }
 
+// ---- DrawFlags setters — emit signal + trigger Scene Graph redraw ----
+
+void GraphViewport::setDrawVertices(bool v) {
+    if (m_drawFlags.draw_verticies != v) {
+        m_drawFlags.draw_verticies = v;
+        emit drawFlagsChanged();
+        update();
+    }
+}
+
+void GraphViewport::setDrawEdges(bool v) {
+    if (m_drawFlags.draw_edges != v) {
+        m_drawFlags.draw_edges = v;
+        emit drawFlagsChanged();
+        update();
+    }
+}
+
+void GraphViewport::setDrawKeyframeVertices(bool v) {
+    if (m_drawFlags.draw_keyframe_vertices != v) {
+        m_drawFlags.draw_keyframe_vertices = v;
+        emit drawFlagsChanged();
+        update();
+    }
+}
+
+void GraphViewport::setDrawSE3Edges(bool v) {
+    if (m_drawFlags.draw_se3_edges != v) {
+        m_drawFlags.draw_se3_edges = v;
+        emit drawFlagsChanged();
+        update();
+    }
+}
+
 void GraphViewport::requestPick(float mouseX, float mouseY) {
     m_pickPending = true;
     m_pickMouseX = mouseX;

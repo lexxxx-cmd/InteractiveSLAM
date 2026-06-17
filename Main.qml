@@ -346,27 +346,42 @@ ApplicationWindow {
                     width: parent.width - 10
                     spacing: 18
 
+                    // General switches
                     RowLayout {
                         width: parent.width; spacing: 3
                         Label { text: "General"; color: "#FF8C00"; font.pixelSize: 11; font.bold: true; Layout.bottomMargin: 3 }
-                        Switch { text: "Draw Vertices"; checked: true }
-                        Switch { text: "Draw Edges"; checked: true }
+                        Switch {
+                            text: "Draw Vertices"
+                            checked: graphViewport.drawVertices
+                            onCheckedChanged: graphViewport.drawVertices = checked
+                        }
+                        Switch {
+                            text: "Draw Edges"
+                            checked: graphViewport.drawEdges
+                            onCheckedChanged: graphViewport.drawEdges = checked
+                        }
                     }
 
+                    // Vertex switches
                     RowLayout {
                         width: parent.width; spacing: 3
                         Label { text: "Vertex"; color: "#FF8C00"; font.pixelSize: 11; font.bold: true; Layout.bottomMargin: 3 }
-                        Switch { text: "Keyframes"; checked: true }
-                        Switch { text: "Planes"; checked: true }
+                        Switch {
+                            text: "Keyframes"
+                            checked: graphViewport.drawKeyframeVertices
+                            onCheckedChanged: graphViewport.drawKeyframeVertices = checked
+                        }
                     }
 
+                    // Edge switches
                     RowLayout {
                         width: parent.width; spacing: 3
                         Label { text: "Edge"; color: "#FF8C00"; font.pixelSize: 11; font.bold: true; Layout.bottomMargin: 3 }
-                        Switch { text: "SE3"; checked: true }
-                        Switch { text: "Plane"; checked: true }
-                        Switch { text: "SE3Plane"; checked: true }
-                        Switch { text: "SE3Floor"; checked: true }
+                        Switch {
+                            text: "SE3"
+                            checked: graphViewport.drawSE3Edges
+                            onCheckedChanged: graphViewport.drawSE3Edges = checked
+                        }
                     }
                 }
             }

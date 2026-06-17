@@ -72,8 +72,12 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
         m_hasFpsUpdate = false;
     }
 
-    // ---- Selection sync (every frame, not just pick frames) ----
-    m_drawFlags.selectedVertexId = viewport->m_selectedVertexId;
+    // ---- DrawFlags sync (main thread → render thread, every frame) ----
+    m_drawFlags.draw_verticies         = viewport->drawVertices();
+    m_drawFlags.draw_edges             = viewport->drawEdges();
+    m_drawFlags.draw_keyframe_vertices = viewport->drawKeyframeVertices();
+    m_drawFlags.draw_se3_edges         = viewport->drawSE3Edges();
+    m_drawFlags.selectedVertexId       = viewport->m_selectedVertexId;
 
     // ---- Pick bridge: main thread → render thread ----
     if (viewport->m_pickPending) {

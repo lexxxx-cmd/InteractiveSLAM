@@ -3,6 +3,7 @@
 #include <QQuickFramebufferObject>
 #include <Eigen/Core>
 #include "backend/graph_manager.hpp"
+#include "viewport/drawable_object.hpp"
 
 class GraphViewportRenderer;
 
@@ -36,6 +37,12 @@ public:
     Q_PROPERTY(float pickedWorldY READ pickedWorldY NOTIFY pickResultReady)
     Q_PROPERTY(float pickedWorldZ READ pickedWorldZ NOTIFY pickResultReady)
 
+    // Draw flags — SE3-only (no plane switches)
+    Q_PROPERTY(bool drawVertices READ drawVertices WRITE setDrawVertices NOTIFY drawFlagsChanged)
+    Q_PROPERTY(bool drawEdges READ drawEdges WRITE setDrawEdges NOTIFY drawFlagsChanged)
+    Q_PROPERTY(bool drawKeyframeVertices READ drawKeyframeVertices WRITE setDrawKeyframeVertices NOTIFY drawFlagsChanged)
+    Q_PROPERTY(bool drawSE3Edges READ drawSE3Edges WRITE setDrawSE3Edges NOTIFY drawFlagsChanged)
+
     int   selectedVertexId() const       { return m_selectedVertexId; }
     void  setSelectedVertexId(int id);
 
@@ -43,6 +50,16 @@ public:
     float pickedWorldX()   const { return m_pickedWorldPos.x(); }
     float pickedWorldY()   const { return m_pickedWorldPos.y(); }
     float pickedWorldZ()   const { return m_pickedWorldPos.z(); }
+
+    // DrawFlags accessors (main thread)
+    bool drawVertices() const { return m_drawFlags.draw_verticies; }
+    void setDrawVertices(bool v);
+    bool drawEdges() const { return m_drawFlags.draw_edges; }
+    void setDrawEdges(bool v);
+    bool drawKeyframeVertices() const { return m_drawFlags.draw_keyframe_vertices; }
+    void setDrawKeyframeVertices(bool v);
+    bool drawSE3Edges() const { return m_drawFlags.draw_se3_edges; }
+    void setDrawSE3Edges(bool v);
 
     // Camera state for renderer sync
     Eigen::Matrix4f cameraViewMatrix() const;
@@ -56,6 +73,7 @@ signals:
     void fpsUpdated(float fps);
     void pickResultReady();
     void selectedVertexIdChanged();
+    void drawFlagsChanged();
 
 private:
     friend class GraphViewportRenderer;
@@ -63,6 +81,9 @@ private:
 
     GraphManager* m_graphManager = nullptr;
     float m_currentFps = 0.0f;
+
+    // Draw flags (main thread copy, synced to renderer in synchronize())
+    hdl_graph_slam::DrawFlags m_drawFlags;
 
     // Camera state (main thread)
     Eigen::Vector3f m_camCenter{0, 0, 0};
