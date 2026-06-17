@@ -42,7 +42,7 @@ public:
         shader.set_uniform("info_values", Eigen::Vector4i(VERTEX | KEYFRAME, kf->id(), 0, 0));
         shader.set_uniform("apply_keyframe_scale", true);
         Eigen::Matrix4f sphere_model = model_matrix;
-        sphere_model.block<3, 3>(0, 0) *= 0.35f;
+        sphere_model.block<3, 3>(0, 0) *= 5.0f;   // TODO: temporary — was 0.35f, test picking
         shader.set_uniform("model_matrix", sphere_model);
         const auto& sphere = glk::Primitives::instance()->primitive(glk::Primitives::SPHERE);
         sphere.draw(shader);

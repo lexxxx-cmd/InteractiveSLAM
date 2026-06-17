@@ -2,18 +2,13 @@
 #include "viewport/graph_viewport.hpp"
 #include "glk/primitives.hpp"
 #include <QOpenGLContext>
+#include <QQuickWindow>
 #include <QDebug>
 #include <cmath>
 #include <algorithm>
 #include <chrono>
-
-// ROS (Z-up) → OpenGL (Y-up) coordinate transform
-inline Eigen::Matrix4f rosToRender() {
-    Eigen::Matrix4f m = Eigen::Matrix4f::Identity();
-    m.block<3,3>(0,0) = Eigen::AngleAxisf(-3.14159265f / 2.0f,
-                                           Eigen::Vector3f::UnitX()).matrix();
-    return m;
-}
+#include <vector>
+#include <limits>
 
 GraphViewportRenderer::GraphViewportRenderer() = default;
 
@@ -35,8 +30,24 @@ QOpenGLFramebufferObject* GraphViewportRenderer::createFramebufferObject(const Q
     QOpenGLFramebufferObjectFormat format;
     format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
     format.setSamples(0);
+    // Do NOT call setInternalTextureFormat — let Qt pick its default sized
+    // format (e.g. GL_RGBA8).  Unsized GL_RGBA breaks Qt RHI compositing.
+
     m_fboSize = size;
-    return new QOpenGLFramebufferObject(size, format);
+    auto* fbo = new QOpenGLFramebufferObject(size, format);
+
+    // Attachment 1: also GL_RGBA8 — same type as attachment 0.
+    // No integer formats → no driver compatibility issues with MRT.
+    fbo->addColorAttachment(size);   // default = GL_RGBA8
+
+    if (!fbo->isValid()) {
+        qWarning() << "[PICK] addColorAttachment failed — picking disabled";
+        m_infoAttachmentAdded = false;
+        delete fbo;
+        return new QOpenGLFramebufferObject(size, format);
+    }
+    m_infoAttachmentAdded = true;
+    return fbo;
 }
 
 void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
@@ -59,6 +70,29 @@ void GraphViewportRenderer::synchronize(QQuickFramebufferObject* item) {
     if (m_hasFpsUpdate) {
         viewport->receiveFpsUpdate(m_pendingFpsUpdate);
         m_hasFpsUpdate = false;
+    }
+
+    // ---- Pick bridge: main thread → render thread ----
+    if (viewport->m_pickPending) {
+        m_pickRequested     = true;
+        m_pickLogicalX      = viewport->m_pickMouseX;
+        m_pickLogicalY      = viewport->m_pickMouseY;
+        m_devicePixelRatio  = item->window()->devicePixelRatio();
+        viewport->m_pickPending = false;
+        qDebug() << "[PICK] request accepted logicalX=" << m_pickLogicalX
+                 << "logicalY=" << m_pickLogicalY << "dpr=" << m_devicePixelRatio;
+    }
+
+    // ---- Pick result: render thread → main thread ----
+    if (m_pickResultReady) {
+        // All fields (vertexId, worldPos) were computed inside render() with
+        // consistent m_projectionMatrix, m_cameraView, and depth-buffer from
+        // a single frame.  Just copy to the main-thread side.
+        viewport->m_pickedVertexId = m_pickResult.vertexId;
+        viewport->m_pickedWorldPos = m_pickResult.worldPos;
+
+        m_pickResultReady = false;
+        emit viewport->pickResultReady();
     }
 
     item->update();
@@ -149,6 +183,28 @@ void GraphViewportRenderer::render() {
 
     m_rainbowShader->use();
 
+    const bool pickThisFrame = m_pickRequested && m_infoAttachmentAdded;
+
+    // Enable MRT ONLY on pick frames — normal frames let Qt manage draw buffers
+    if (pickThisFrame) {
+        GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        m_gl->glDrawBuffers(2, drawBuffers);
+
+        // Diagnostic: check FBO is still complete with both attachments active
+        GLenum status = m_gl->glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+            qWarning() << "[PICK] FBO incomplete after MRT setup:" << Qt::hex << status;
+
+        // Clear info buffer to all zeros → decodes to typeFlags=0 (no object).
+        // GL_RGBA8 ⇒ must use glClearBufferfv, not glClearBufferiv.
+        GLfloat clearInfo[] = {0.0f, 0.0f, 0.0f, 0.0f};
+        m_gl->glClearBufferfv(GL_COLOR, 1, clearInfo);
+
+        GLenum e = m_gl->glGetError();
+        if (e != GL_NO_ERROR)
+            qWarning() << "[PICK] MRT setup error:" << Qt::hex << e;
+    }
+
     // Perspective projection
     float aspect = (float)m_fboSize.width() / std::max(m_fboSize.height(), 1);
     float fovY = 45.0f * 3.14159265f / 180.0f;
@@ -159,6 +215,7 @@ void GraphViewportRenderer::render() {
     proj(2, 2) = -(1000.0f + 0.1f) / (1000.0f - 0.1f);
     proj(2, 3) = -(2.0f * 1000.0f * 0.1f) / (1000.0f - 0.1f);
     proj(3, 2) = -1.0f;
+    m_projectionMatrix = proj;
 
     // Use camera from QML mouse interaction (defaults to z=-10 if untouched)
     m_rainbowShader->set_uniform("view_matrix", m_cameraView);
@@ -213,4 +270,121 @@ void GraphViewportRenderer::render() {
         m_frameCount = 0;
         m_lastFpsEmitTime = now;
     }
+
+    // ---- GPU pick readback (only on pick frames) ----
+    if (pickThisFrame) {
+        doPickReadback(m_pickLogicalX, m_pickLogicalY, m_devicePixelRatio);
+        m_pickRequested = false;
+        m_pickResultReady = true;
+
+        // Restore: only changed draw buffers on this frame, so restore now
+        GLenum singleBuffer[] = {GL_COLOR_ATTACHMENT0};
+        m_gl->glDrawBuffers(1, singleBuffer);
+        m_gl->glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
+}
+
+void GraphViewportRenderer::doPickReadback(float logicalX, float logicalY, float dpr) {
+    m_pickResult = {};   // reset to no-hit
+
+    // ---- Logical pixels → FBO device pixels (Y-flip) ----
+    int fboX = static_cast<int>(std::round(logicalX * dpr));
+    int fboY = m_fboSize.height() - 1
+             - static_cast<int>(std::round(logicalY * dpr));
+
+    if (fboX < 0 || fboY < 0 ||
+        fboX >= m_fboSize.width() || fboY >= m_fboSize.height())
+        return;
+
+    constexpr int window = 5;
+    const int size  = window * 2 + 1;
+    const int readX = std::max(0, fboX - window);
+    const int readY = std::max(0, fboY - window);
+    const int readW = std::min(size, m_fboSize.width()  - readX);
+    const int readH = std::min(size, m_fboSize.height() - readY);
+
+    // ---- Read info attachment (RGBA8 → raw bytes, ~484 Bytes) ----
+    std::vector<unsigned char> infoPixels(readW * readH * 4);
+    m_gl->glReadBuffer(GL_COLOR_ATTACHMENT1);
+    m_gl->glReadPixels(readX, readY, readW, readH,
+                       GL_RGBA, GL_UNSIGNED_BYTE, infoPixels.data());
+
+    // ---- Spiral search + decode ----
+    // Shader packs: R=typeFlags.lo, G=typeFlags.hi, B=vertexId.lo, A=vertexId.hi
+    // Background cleared to all zeros → typeFlags=0 → no hit
+    auto decode = [](const unsigned char* p) -> std::pair<int, int> {
+        int typeFlags = p[0] | (p[1] << 8);
+        int vertexId  = p[2] | (p[3] << 8);
+        if (vertexId >= 32768) vertexId -= 65536;   // sign-extend 16-bit → 32-bit
+        return {typeFlags, vertexId};
+    };
+
+    // ---- Diagnostic: scan entire window, count objects by type ----
+    int countVertex = 0, countPoints = 0, countEdge = 0, countOther = 0;
+    int sampleVertexId = -1;
+    int sampleVertexX = -1, sampleVertexY = -1;
+    for (int ly = 0; ly < readH; ly++) {
+        for (int lx = 0; lx < readW; lx++) {
+            auto [tf, vid] = decode(&infoPixels[(ly * readW + lx) * 4]);
+            if (tf == 0) continue;
+            if (tf & hdl_graph_slam::DrawableObject::VERTEX)  { countVertex++; sampleVertexId = vid; sampleVertexX = lx; sampleVertexY = ly; }
+            else if (tf & hdl_graph_slam::DrawableObject::POINTS) countPoints++;
+            else if (tf & hdl_graph_slam::DrawableObject::EDGE)  countEdge++;
+            else countOther++;
+        }
+    }
+    qDebug() << "[PICK] window scan: vertex=" << countVertex
+             << "points=" << countPoints << "edge=" << countEdge
+             << "other=" << countOther
+             << "sample vid=" << sampleVertexId << "@(" << sampleVertexX << "," << sampleVertexY << ")";
+
+    std::vector<Eigen::Vector2i> offsets;
+    offsets.reserve(size * size);
+    for (int dy = -window; dy <= window; dy++)
+        for (int dx = -window; dx <= window; dx++)
+            offsets.push_back(Eigen::Vector2i(dx, dy));
+    std::sort(offsets.begin(), offsets.end(),
+              [](const Eigen::Vector2i& a, const Eigen::Vector2i& b) {
+                  return a.squaredNorm() < b.squaredNorm();
+              });
+
+    int hitLocalX = -1, hitLocalY = -1;
+    for (const auto& offset : offsets) {
+        int lx = (fboX - readX) + offset.x();
+        int ly = (fboY - readY) + offset.y();
+        if (lx < 0 || ly < 0 || lx >= readW || ly >= readH) continue;
+
+        auto [typeFlags, vertexId] = decode(&infoPixels[(ly * readW + lx) * 4]);
+        if (typeFlags & (hdl_graph_slam::DrawableObject::VERTEX |
+                          hdl_graph_slam::DrawableObject::EDGE)) {
+            m_pickResult.hit      = true;
+            m_pickResult.vertexId = vertexId;
+            hitLocalX = lx;
+            hitLocalY = ly;
+            break;
+        }
+    }
+
+    if (!m_pickResult.hit) return;
+
+    // ---- Read depth at the hit pixel (same frame, same pixel as the ID) ----
+    int hitFboX = readX + hitLocalX;
+    int hitFboY = readY + hitLocalY;
+    float depth = 1.0f;
+    m_gl->glReadBuffer(GL_NONE);
+    m_gl->glReadPixels(hitFboX, hitFboY, 1, 1,
+                       GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+
+    // ---- Unproject: use the actual hit pixel, not the mouse center ----
+    // FBO coords: Y=0 at bottom, NDC: Y=-1 at bottom — no flip needed
+    float ndcX = (hitFboX + 0.5f) / m_fboSize.width()  * 2.0f - 1.0f;
+    float ndcY = (hitFboY + 0.5f) / m_fboSize.height() * 2.0f - 1.0f;
+    float clipZ = depth * 2.0f - 1.0f;   // [0,1] → [-1,1]
+
+    Eigen::Vector4f clipPos(ndcX, ndcY, clipZ, 1.0f);
+    Eigen::Matrix4f vp = m_projectionMatrix * m_cameraView;
+    Eigen::Matrix4f invVP = vp.inverse();
+    Eigen::Vector4f worldPos = invVP * clipPos;
+
+    m_pickResult.worldPos = worldPos.head<3>() / worldPos.w();
 }

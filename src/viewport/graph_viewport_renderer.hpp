@@ -53,14 +53,39 @@ private:
 
     QOpenGLExtraFunctions* m_gl = nullptr;
     std::unique_ptr<glk::GLSLShader> m_rainbowShader;
-    QSize m_viewportSize;       // from synchronize (QML item size)
-    QSize m_fboSize;            // from createFramebufferObject (actual FBO)
+    QSize m_viewportSize;       // from synchronize (QML item size, logical px)
+    QSize m_fboSize;            // from createFramebufferObject (actual FBO, device px)
     Eigen::Matrix4f m_cameraView = [](){
         Eigen::Matrix4f v = Eigen::Matrix4f::Identity();
         v(2, 3) = -10.0f;
         return v;
     }();
+    Eigen::Matrix4f m_projectionMatrix = Eigen::Matrix4f::Identity();  // stored for doPickReadback
     bool m_glInitialized = false;
+
+    // ---- GPU color-coded picking ----
+    // Single-frame consistent result: ID, depth, and worldPos are all from the
+    // same render() invocation, unprojected with m_projectionMatrix × m_cameraView
+    // of that frame.  No cross-frame matrix mixing.
+    struct PickResult {
+        bool hit = false;
+        int  vertexId = -1;
+        Eigen::Vector3f worldPos{0, 0, 0};
+    };
+
+    bool m_infoAttachmentAdded = false;
+
+    // Request from main thread (via synchronize)
+    bool  m_pickRequested = false;
+    float m_pickLogicalX = 0;   // QML logical pixels
+    float m_pickLogicalY = 0;
+    float m_devicePixelRatio = 1.0f;
+
+    // Result back to main thread (via synchronize)
+    bool      m_pickResultReady = false;
+    PickResult m_pickResult;
+
+    void doPickReadback(float logicalX, float logicalY, float dpr);
 
     // FPS throttling
     std::chrono::steady_clock::time_point m_lastFpsEmitTime;

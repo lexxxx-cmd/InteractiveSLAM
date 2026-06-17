@@ -129,21 +129,49 @@ ApplicationWindow {
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+
             property real lastX: 0
             property real lastY: 0
+            property real pressX: 0
+            property real pressY: 0
+            property bool isDragging: false
 
-            onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y; }
+            onPressed: (mouse) => {
+                lastX = mouse.x; lastY = mouse.y;
+                pressX = mouse.x; pressY = mouse.y;
+                isDragging = false;
+            }
+
             onPositionChanged: (mouse) => {
                 var dx = mouse.x - lastX;
                 var dy = mouse.y - lastY;
-                if (mouse.buttons & Qt.LeftButton) {
-                    graphViewport.onMouseRotate(dx, dy);
-                } else if (mouse.buttons & Qt.MiddleButton) {
-                    graphViewport.onMousePan(dx, dy);
+
+                if (!isDragging) {
+                    if (Math.abs(mouse.x - pressX) > 3 || Math.abs(mouse.y - pressY) > 3) {
+                        isDragging = true;
+                        lastX = mouse.x;  // eat accumulated delta to avoid jump
+                        lastY = mouse.y;
+                        return;
+                    }
+                }
+
+                if (isDragging) {
+                    if (mouse.buttons & Qt.LeftButton) {
+                        graphViewport.onMouseRotate(dx, dy);
+                    } else if (mouse.buttons & Qt.MiddleButton) {
+                        graphViewport.onMousePan(dx, dy);
+                    }
                 }
                 lastX = mouse.x;
                 lastY = mouse.y;
             }
+
+            onReleased: (mouse) => {
+                if (!isDragging && mouse.button === Qt.LeftButton) {
+                    graphViewport.requestPick(mouse.x, mouse.y);
+                }
+            }
+
             onWheel: (wheel) => { graphViewport.onMouseZoom(wheel.angleDelta.y); }
         }
 
@@ -226,6 +254,20 @@ ApplicationWindow {
         }
         function onTextChanged(text) {
             loadingText.text = text;
+        }
+    }
+
+    // Pick result (one frame after requestPick)
+    Connections {
+        target: graphViewport
+
+        function onPickResultReady() {
+            if (graphViewport.pickedVertexId >= 0) {
+                log("Picked vertex " + graphViewport.pickedVertexId
+                  + " at (" + graphViewport.pickedWorldX.toFixed(2) + ", "
+                  + graphViewport.pickedWorldY.toFixed(2) + ", "
+                  + graphViewport.pickedWorldZ.toFixed(2) + ")");
+            }
         }
     }
 

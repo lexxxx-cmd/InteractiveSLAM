@@ -92,6 +92,13 @@ Eigen::Matrix4f GraphViewport::cameraViewMatrix() const {
     return mat;
 }
 
+void GraphViewport::requestPick(float mouseX, float mouseY) {
+    m_pickPending = true;
+    m_pickMouseX = mouseX;
+    m_pickMouseY = mouseY;
+    update();  // trigger render → synchronize → render with pick
+}
+
 QQuickFramebufferObject::Renderer* GraphViewport::createRenderer() const {
     return new GraphViewportRenderer();
 }
