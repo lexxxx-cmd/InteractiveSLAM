@@ -67,8 +67,8 @@ private:
     // Camera state (main thread)
     Eigen::Vector3f m_camCenter{0, 0, 0};
     double m_camDistance = 10.0;
-    double m_camTheta = 0.0;
-    double m_camPhi = -1.0472;  // -60°
+    double m_camTheta = -1.5708;  // -90° — look along -Y
+    double m_camPhi   =  1.0472;  // +60° — above, tilting down
     bool m_cameraDirty = true;
 
     // Pick state (main thread ↔ render thread via synchronize)

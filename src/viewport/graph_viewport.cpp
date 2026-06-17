@@ -52,8 +52,8 @@ void GraphViewport::onMouseZoom(float delta) {
 void GraphViewport::resetCamera() {
     m_camCenter   = Eigen::Vector3f(0, 0, 0);
     m_camDistance = 10.0;
-    m_camTheta    = 0.0;
-    m_camPhi      = -60.0 * M_PI / 180.0;
+    m_camTheta    = -90.0 * M_PI / 180.0;   // look along -Y (typical top-down)
+    m_camPhi      =  60.0 * M_PI / 180.0;   // high above, tilting down
     m_cameraDirty = true;
     update();
 }
@@ -63,8 +63,8 @@ void GraphViewport::fitView(const Eigen::Vector3f& bboxMin,
     m_camCenter = (bboxMin + bboxMax) * 0.5f;
     float diag = (bboxMax - bboxMin).norm();
     m_camDistance = std::max(1.0, (double)(diag * 1.5));
-    m_camTheta = 0.0;
-    m_camPhi   = -60.0 * M_PI / 180.0;
+    m_camTheta = -90.0 * M_PI / 180.0;   // look along -Y
+    m_camPhi   =  60.0 * M_PI / 180.0;   // above, tilting down
     m_cameraDirty = true;
     update();
 }

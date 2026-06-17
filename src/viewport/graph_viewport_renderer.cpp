@@ -262,15 +262,23 @@ void GraphViewportRenderer::render() {
         }
 
         m_lineBuffer->draw(*m_rainbowShader);
-    } else {
-        // Fallback: axes + grid when no graph is loaded
-        Eigen::Matrix4f model_m = Eigen::Matrix4f::Identity();
-        m_rainbowShader->set_uniform("model_matrix", model_m);
-        m_rainbowShader->set_uniform("color_mode", 1);
-        Eigen::Vector4f white(1.0f, 1.0f, 1.0f, 1.0f);
-        m_rainbowShader->set_uniform("material_color", white);
+    }
+
+    // Coordinate axes at origin — always visible as orientation reference
+    {
+        Eigen::Matrix4f id = Eigen::Matrix4f::Identity();
+        m_rainbowShader->set_uniform("model_matrix", id);
+        m_rainbowShader->set_uniform("color_mode", 2);  // uses vert_color
+        m_rainbowShader->set_uniform("info_values", Eigen::Vector4i(0,0,0,0));
         glk::Primitives::instance()->primitive(glk::Primitives::COORDINATE_SYSTEM)
             .draw(*m_rainbowShader);
+    }
+
+    if (m_drawables.empty()) {
+        // Extra grid when no graph is loaded
+        Eigen::Matrix4f id = Eigen::Matrix4f::Identity();
+        m_rainbowShader->set_uniform("model_matrix", id);
+        m_rainbowShader->set_uniform("color_mode", 1);
         Eigen::Vector4f grey(0.4f, 0.4f, 0.4f, 1.0f);
         m_rainbowShader->set_uniform("material_color", grey);
         glk::Primitives::instance()->primitive(glk::Primitives::GRID)
@@ -394,4 +402,16 @@ void GraphViewportRenderer::doPickReadback(float logicalX, float logicalY, float
     Eigen::Vector4f worldPos = invVP * clipPos;
 
     m_pickResult.worldPos = worldPos.head<3>() / worldPos.w();
+
+    // Verify: unprojected position vs keyframe center
+    if (m_renderGraph) {
+        auto it = m_renderGraph->keyframes.find(m_pickResult.vertexId);
+        if (it != m_renderGraph->keyframes.end() && it->second) {
+            Eigen::Vector3d c = it->second->estimate().translation();
+            qDebug() << "[PICK] worldPos" << m_pickResult.worldPos.x()
+                     << m_pickResult.worldPos.y() << m_pickResult.worldPos.z()
+                     << "center" << c.x() << c.y() << c.z()
+                     << "dist" << (m_pickResult.worldPos - c.cast<float>()).norm();
+        }
+    }
 }
