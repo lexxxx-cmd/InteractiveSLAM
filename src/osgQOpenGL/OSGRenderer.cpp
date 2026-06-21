@@ -187,6 +187,24 @@ void OSGRenderer::setupOSG(int windowWidth, int windowHeight, float windowScale)
     _camera->setViewport(new osg::Viewport(0, 0, windowWidth * windowScale,
                                            windowHeight * windowScale));
     _camera->setGraphicsContext(m_osgWinEmb.get());
+
+    // ---- Core Profile 3.3: tell OSG to use its modern GL3 pipeline ----
+    {
+        osg::State* state = m_osgWinEmb->getState();
+        if (state) {
+            // Map built-in vertex arrays (e.g. setVertexArray) to shader
+            // attributes (osg_Vertex, osg_Color, osg_Normal) automatically.
+            state->setUseVertexAttributeAliasing(true);
+
+            // Use uniform-based model-view-projection matrices instead of
+            // deprecated fixed-function built-ins (gl_ModelViewProjectionMatrix etc).
+            state->setUseModelViewAndProjectionUniforms(true);
+
+            // VAO is handled per-Geometry via setUseVertexBufferObjects(true) /
+            // setUseDisplayList(false), already set in osg_viewport_renderer.cpp.
+        }
+    }
+
     // disable key event (default is Escape key) that the viewer checks on each
     // frame to see
     // if the viewer's done flag should be set to signal end of viewers main
@@ -356,14 +374,14 @@ void OSGRenderer::wheelEvent(QWheelEvent* event)
     QPoint delta = event->angleDelta();
     if (!delta.isNull())
     {
-        // ´¹Ö±¹öÂÖ£¨ÉÏÏÂ£©
+        // ï¿½ï¿½Ö±ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ï¿½Â£ï¿½
         if (delta.y() != 0)
         {
             m_osgWinEmb->getEventQueue()->mouseScroll(
                 delta.y() > 0 ? osgGA::GUIEventAdapter::SCROLL_UP
                 : osgGA::GUIEventAdapter::SCROLL_DOWN);
         }
-        // Ë®Æ½¹öÂÖ£¨×óÓÒ£©
+        // Ë®Æ½ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ï¿½Ò£ï¿½
         else if (delta.x() != 0)
         {
             m_osgWinEmb->getEventQueue()->mouseScroll(
