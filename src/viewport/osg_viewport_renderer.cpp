@@ -81,12 +81,14 @@ osg::Program* buildCoreProgram()
 {
     const char* vertSrc = R"(#version 330 core
 uniform mat4 osg_ModelViewProjectionMatrix;
+uniform float osg_PointSize;
 in vec4 osg_Vertex;
 in vec4 osg_Color;
 out vec4 vColor;
 void main() {
     gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex;
     vColor = osg_Color;
+    gl_PointSize = osg_PointSize > 0.0 ? osg_PointSize : 3.0;
 }
 )";
     const char* fragSrc = R"(#version 330 core
