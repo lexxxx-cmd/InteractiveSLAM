@@ -16,7 +16,8 @@
 
 #include <osg/Point>
 #include <osg/LineWidth>
-#include <osg/ShapeDrawable>
+#include <osg/Shader>
+#include <osg/Program>
 #include <osg/StateSet>
 
 #include "data/hdl_graph_slam/interactive_graph.hpp"
@@ -72,6 +73,35 @@ osg::Group* buildAxesScene()
     return root;
 }
 
+// Minimal GLSL 330 shader for Core Profile 3.3.
+// OSG's auto-generated shaders may fail to activate with GraphicsWindowEmbedded;
+// attaching an explicit Program to the root StateSet with OVERRIDE ensures every
+// drawable has a valid shader bound.
+osg::Program* buildCoreProgram()
+{
+    const char* vertSrc = R"(#version 330 core
+uniform mat4 osg_ModelViewProjectionMatrix;
+in vec4 osg_Vertex;
+in vec4 osg_Color;
+out vec4 vColor;
+void main() {
+    gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex;
+    vColor = osg_Color;
+}
+)";
+    const char* fragSrc = R"(#version 330 core
+in vec4 vColor;
+out vec4 fragColor;
+void main() {
+    fragColor = vColor;
+}
+)";
+    auto* prog = new osg::Program;
+    prog->addShader(new osg::Shader(osg::Shader::VERTEX,   vertSrc));
+    prog->addShader(new osg::Shader(osg::Shader::FRAGMENT, fragSrc));
+    return prog;
+}
+
 } // namespace
 
 OSGViewportRenderer::OSGViewportRenderer()
@@ -109,6 +139,19 @@ void OSGViewportRenderer::buildDefaultScene()
     m_scene->addChild(m_graphContentGroup);
 
     m_osg->setSceneData(m_scene);
+
+    // ---- Core Profile 3.3: explicit shader + disable fixed-function ----
+    {
+        osg::StateSet* rootSS = m_scene->getOrCreateStateSet();
+        rootSS->setAttributeAndModes(buildCoreProgram(),
+                                     osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+        // Force-disable all fixed-function states — any child StateSet
+        // specifying these will fail in core profile.
+        rootSS->setMode(GL_LIGHTING,  osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+        rootSS->setMode(GL_FOG,       osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+        rootSS->setMode(GL_ALPHA_TEST, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+        rootSS->setMode(GL_CLIP_PLANE0, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+    }
 
     // osgGA manipulator gives us free orbit/pan/zoom. Trackball is the most
     // forgiving default for a viewer app.
