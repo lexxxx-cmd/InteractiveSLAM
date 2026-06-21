@@ -61,8 +61,8 @@ ApplicationWindow {
 
         Menu {
             title: qsTr("View")
-            Action { text: qsTr("Reset camera"); onTriggered: graphViewport.resetCamera() }
-            Action { 
+            Action { text: qsTr("Reset camera"); onTriggered: osgViewport.resetCamera() }
+            Action {
                 text: qsTr("Graph Rendering Setting")
                 checkable: true
                 checked: mainWindow.showRenderConfig
@@ -117,68 +117,18 @@ ApplicationWindow {
         anchors.right: parent.right
         color: "#0D0F12" 
 
-        // 3D Viewport (QQuickFramebufferObject — OpenGL rendering)
-        GraphViewport {
-            id: graphViewport
+        // 3D Viewport — OSG scene graph rendered into a QQuickFramebufferObject.
+        // Orbit/pan/zoom are handled by OSG's TrackballManipulator; raw mouse,
+        // wheel and key events are forwarded from the C++ item to OSG's event queue.
+        OSGViewport {
+            id: osgViewport
             anchors.fill: parent
-            graphManager: GraphManager
-        }
-
-        // Mouse capture overlay (on top of GraphViewport)
-        MouseArea {
-            id: viewportMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-
-            property real lastX: 0
-            property real lastY: 0
-            property real pressX: 0
-            property real pressY: 0
-            property bool isDragging: false
-
-            onPressed: (mouse) => {
-                lastX = mouse.x; lastY = mouse.y;
-                pressX = mouse.x; pressY = mouse.y;
-                isDragging = false;
-            }
-
-            onPositionChanged: (mouse) => {
-                var dx = mouse.x - lastX;
-                var dy = mouse.y - lastY;
-
-                if (!isDragging) {
-                    if (Math.abs(mouse.x - pressX) > 3 || Math.abs(mouse.y - pressY) > 3) {
-                        isDragging = true;
-                        lastX = mouse.x;  // eat accumulated delta to avoid jump
-                        lastY = mouse.y;
-                        return;
-                    }
-                }
-
-                if (isDragging) {
-                    if (mouse.buttons & Qt.LeftButton) {
-                        graphViewport.onMouseRotate(dx, dy);
-                    } else if (mouse.buttons & Qt.MiddleButton) {
-                        graphViewport.onMousePan(dx, dy);
-                    }
-                }
-                lastX = mouse.x;
-                lastY = mouse.y;
-            }
-
-            onReleased: (mouse) => {
-                if (!isDragging && mouse.button === Qt.LeftButton) {
-                    graphViewport.requestPick(mouse.x, mouse.y);
-                }
-            }
-
-            onWheel: (wheel) => { graphViewport.onMouseZoom(wheel.angleDelta.y); }
+            focus: true
         }
 
         // Keyboard shortcuts
-        Shortcut { sequence: "R"; onActivated: graphViewport.resetCamera() }
-        Shortcut { sequence: "F"; onActivated: graphViewport.resetCamera() }
+        Shortcut { sequence: "R"; onActivated: osgViewport.resetCamera() }
+        Shortcut { sequence: "F"; onActivated: osgViewport.resetCamera() }
 
         // Statistics overlay (real data from GraphManager)
         ColumnLayout {
@@ -258,19 +208,9 @@ ApplicationWindow {
         }
     }
 
-    // Pick result (one frame after requestPick)
+    // OSG viewport: FPS telemetry. (Picking is not wired up in the OSG skeleton yet.)
     Connections {
-        target: graphViewport
-
-        function onPickResultReady() {
-            if (graphViewport.pickedVertexId >= 0) {
-                graphViewport.selectedVertexId = graphViewport.pickedVertexId;
-                log("Picked vertex " + graphViewport.pickedVertexId
-                  + " at (" + graphViewport.pickedWorldX.toFixed(2) + ", "
-                  + graphViewport.pickedWorldY.toFixed(2) + ", "
-                  + graphViewport.pickedWorldZ.toFixed(2) + ")");
-            }
-        }
+        target: osgViewport
 
         function onFpsUpdated(fps) {
             mainWindow.fpsText = fps.toFixed(1) + " fps";
@@ -354,42 +294,15 @@ ApplicationWindow {
                     width: parent.width - 10
                     spacing: 18
 
-                    // General switches
-                    RowLayout {
-                        width: parent.width; spacing: 3
-                        Label { text: "General"; color: "#FF8C00"; font.pixelSize: 11; font.bold: true; Layout.bottomMargin: 3 }
-                        Switch {
-                            text: "Draw Vertices"
-                            checked: graphViewport.drawVertices
-                            onCheckedChanged: graphViewport.drawVertices = checked
-                        }
-                        Switch {
-                            text: "Draw Edges"
-                            checked: graphViewport.drawEdges
-                            onCheckedChanged: graphViewport.drawEdges = checked
-                        }
-                    }
-
-                    // Vertex switches
-                    RowLayout {
-                        width: parent.width; spacing: 3
-                        Label { text: "Vertex"; color: "#FF8C00"; font.pixelSize: 11; font.bold: true; Layout.bottomMargin: 3 }
-                        Switch {
-                            text: "Keyframes"
-                            checked: graphViewport.drawKeyframeVertices
-                            onCheckedChanged: graphViewport.drawKeyframeVertices = checked
-                        }
-                    }
-
-                    // Edge switches
-                    RowLayout {
-                        width: parent.width; spacing: 3
-                        Label { text: "Edge"; color: "#FF8C00"; font.pixelSize: 11; font.bold: true; Layout.bottomMargin: 3 }
-                        Switch {
-                            text: "SE3"
-                            checked: graphViewport.drawSE3Edges
-                            onCheckedChanged: graphViewport.drawSE3Edges = checked
-                        }
+                    // NOTE: draw-flag / picking switches are handled by the OSG
+                    // viewport once point-cloud rendering is migrated. For now the
+                    // skeleton renders an empty axes scene.
+                    Label {
+                        text: "OSG skeleton: point-cloud / draw-flag migration pending."
+                        color: "#A0AABF"
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                 }
             }

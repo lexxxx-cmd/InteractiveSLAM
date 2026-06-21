@@ -14,6 +14,7 @@
 // Backend
 #include "backend/graph_manager.hpp"
 #include "viewport/graph_viewport.hpp"
+#include "viewport/osg_viewport.hpp"
 
 int main(int argc, char *argv[]) {
     // ⚠ Must be set BEFORE QGuiApplication creation!
@@ -41,6 +42,7 @@ int main(int argc, char *argv[]) {
 
     // Register QML types
     qmlRegisterType<GraphViewport>("InteractiveSLAM", 1, 0, "GraphViewport");
+    qmlRegisterType<OSGViewport>("InteractiveSLAM", 1, 0, "OSGViewport");
 
     // Create backend manager and expose to QML as singleton
     GraphManager graphManager;

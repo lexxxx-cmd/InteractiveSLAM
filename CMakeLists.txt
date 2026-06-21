@@ -14,6 +14,10 @@ find_package(PCL REQUIRED COMPONENTS io common search features)
 find_package(g2o REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
+# OpenSceneGraph — powers the new OSGViewport rendering path.
+find_package(OpenSceneGraph REQUIRED
+    COMPONENTS osg osgViewer osgGA osgUtil osgDB OpenThreads)
+
 # Qt6
 find_package(Qt6 REQUIRED COMPONENTS Quick Concurrent)
 qt_standard_project_setup(REQUIRES 6.8)
@@ -48,7 +52,13 @@ set(VIEWPORT_SOURCES
     src/viewport/graph_viewport_renderer.cpp
     src/viewport/vertex_view.cpp
     src/viewport/edge_view.cpp
+    # OSG rendering path (replaces glk raw-GL viewport in Main.qml)
+    src/viewport/osg_viewport.cpp
+    src/viewport/osg_viewport_renderer.cpp
 )
+
+# osgQOpenGL adapter library (compiles only the widget-agnostic OSGRenderer)
+add_subdirectory(src/osgQOpenGL)
 
 qt_add_executable(appInteractiveSLAM
     main.cpp
@@ -103,6 +113,9 @@ target_link_libraries(appInteractiveSLAM PRIVATE
     ${PCL_LIBRARIES}
     ${G2O_LIBRARIES}
     Boost::filesystem
+    # OSG rendering
+    osgQOpenGL
+    ${OPENSCENEGRAPH_LIBRARIES}
 )
 
 # Ensure the target compiles despite PCL/g2o header warnings on MSVC
