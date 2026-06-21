@@ -6,6 +6,9 @@
 #include <memory>
 #include <vector>
 
+#include "backend/graph_manager.hpp"
+#include "viewport/drawable_object.hpp"
+
 class QMouseEvent;
 class QWheelEvent;
 class QKeyEvent;
@@ -27,11 +30,31 @@ class OSGViewport : public QQuickFramebufferObject
 {
     Q_OBJECT
     Q_PROPERTY(float currentFps READ currentFps NOTIFY fpsUpdated)
+    Q_PROPERTY(GraphManager* graphManager READ graphManager
+               WRITE setGraphManager NOTIFY graphManagerChanged)
+    Q_PROPERTY(bool drawVertices READ drawVertices WRITE setDrawVertices NOTIFY drawFlagsChanged)
+    Q_PROPERTY(bool drawEdges READ drawEdges WRITE setDrawEdges NOTIFY drawFlagsChanged)
+    Q_PROPERTY(bool drawKeyframeVertices READ drawKeyframeVertices WRITE setDrawKeyframeVertices NOTIFY drawFlagsChanged)
+    Q_PROPERTY(bool drawSE3Edges READ drawSE3Edges WRITE setDrawSE3Edges NOTIFY drawFlagsChanged)
 
 public:
     explicit OSGViewport(QQuickItem* parent = nullptr);
 
     float currentFps() const { return m_currentFps; }
+
+    // GraphManager access (mirrors GraphViewport)
+    GraphManager* graphManager() const { return m_graphManager; }
+    void setGraphManager(GraphManager* manager);
+
+    // DrawFlags accessors
+    bool drawVertices() const { return m_drawFlags.draw_verticies; }
+    void setDrawVertices(bool v);
+    bool drawEdges() const { return m_drawFlags.draw_edges; }
+    void setDrawEdges(bool v);
+    bool drawKeyframeVertices() const { return m_drawFlags.draw_keyframe_vertices; }
+    void setDrawKeyframeVertices(bool v);
+    bool drawSE3Edges() const { return m_drawFlags.draw_se3_edges; }
+    void setDrawSE3Edges(bool v);
 
     // QML-callable: reset the OSG camera manipulator to its home position.
     Q_INVOKABLE void resetCamera();
@@ -40,6 +63,8 @@ public:
 
 signals:
     void fpsUpdated(float fps);
+    void graphManagerChanged();
+    void drawFlagsChanged();
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -72,6 +97,9 @@ private:
 
     // Camera-reset request from QML (main thread → render thread via synchronize).
     bool   m_cameraResetRequested = false;
+
+    GraphManager* m_graphManager = nullptr;
+    hdl_graph_slam::DrawFlags m_drawFlags;
 
     float m_currentFps = 0.0f;
 };

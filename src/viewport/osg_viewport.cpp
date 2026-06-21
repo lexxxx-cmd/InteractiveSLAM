@@ -12,6 +12,28 @@ OSGViewport::OSGViewport(QQuickItem* parent)
     setFlag(ItemAcceptsInputMethod, true);
 }
 
+void OSGViewport::setGraphManager(GraphManager* manager)
+{
+    if (m_graphManager != manager) {
+        m_graphManager = manager;
+        emit graphManagerChanged();
+        update();
+    }
+}
+
+void OSGViewport::setDrawVertices(bool v) {
+    if (m_drawFlags.draw_verticies != v) { m_drawFlags.draw_verticies = v; emit drawFlagsChanged(); update(); }
+}
+void OSGViewport::setDrawEdges(bool v) {
+    if (m_drawFlags.draw_edges != v) { m_drawFlags.draw_edges = v; emit drawFlagsChanged(); update(); }
+}
+void OSGViewport::setDrawKeyframeVertices(bool v) {
+    if (m_drawFlags.draw_keyframe_vertices != v) { m_drawFlags.draw_keyframe_vertices = v; emit drawFlagsChanged(); update(); }
+}
+void OSGViewport::setDrawSE3Edges(bool v) {
+    if (m_drawFlags.draw_se3_edges != v) { m_drawFlags.draw_se3_edges = v; emit drawFlagsChanged(); update(); }
+}
+
 void OSGViewport::receiveFpsUpdate(float fps)
 {
     m_currentFps = fps;

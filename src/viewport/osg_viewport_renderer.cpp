@@ -14,8 +14,21 @@
 
 #include <osgGA/TrackballManipulator>
 
+#include <osg/Point>
+#include <osg/LineWidth>
+#include <osg/ShapeDrawable>
+#include <osg/StateSet>
+
+#include "data/hdl_graph_slam/interactive_graph.hpp"
+#include "data/hdl_graph_slam/interactive_keyframe.hpp"
+#include "backend/graph_manager.hpp"
+
+#include <g2o/types/slam3d/edge_se3.h>
+#include <g2o/types/slam3d/vertex_se3.h>
+
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLVertexArrayObject>
 #include <QQuickWindow>
 #include <QDebug>
 
@@ -39,6 +52,11 @@ osg::Geometry* makeAxis(float x, float y, float z, float r, float g, float b)
     geom->setColorArray(c, osg::Array::BIND_OVERALL);
 
     geom->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINES, 0, 2));
+
+    // OpenGL Core Profile 3.3+ compatibility: must disable display lists + enable VBO
+    geom->setUseDisplayList(false);
+    geom->setUseVertexBufferObjects(true);
+
     geom->getOrCreateStateSet()->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
     geom->getOrCreateStateSet()->setAttribute(new osg::LineWidth(3.0f));
     return geom;
@@ -76,7 +94,21 @@ OSGViewportRenderer::~OSGViewportRenderer()
 
 void OSGViewportRenderer::buildDefaultScene()
 {
-    m_scene = buildAxesScene();
+    // Root: axes + empty graph content container
+    m_scene = new osg::Group;
+    m_scene->addChild(buildAxesScene());
+
+    // Graph content container — populated by rebuildGraphScene()
+    m_graphContentGroup = new osg::Group;
+    m_graphContentGroup->setName("GraphContent");
+    m_keyframeGroup = new osg::Group;
+    m_keyframeGroup->setName("Keyframes");
+    m_edgeGroup = new osg::Group;
+    m_edgeGroup->setName("Edges");
+    m_graphContentGroup->addChild(m_keyframeGroup);
+    m_graphContentGroup->addChild(m_edgeGroup);
+    m_scene->addChild(m_graphContentGroup);
+
     m_osg->setSceneData(m_scene);
 
     // osgGA manipulator gives us free orbit/pan/zoom. Trackball is the most
@@ -131,6 +163,56 @@ void OSGViewportRenderer::synchronize(QQuickFramebufferObject* item)
         buildDefaultScene();
     }
 
+    // ---- Graph data sync: detect new/cleared graph and rebuild scene ----
+    {
+        auto* viewport = static_cast<OSGViewport*>(item);
+        auto* manager = viewport->graphManager();
+        if (manager && manager->isLoaded()) {
+            m_renderGraph = manager->sharedGraph();
+        } else {
+            m_renderGraph.reset();
+        }
+
+        const auto* currentGraphPtr = m_renderGraph.get();
+        if (currentGraphPtr != m_lastGraphPtr) {
+            m_lastGraphPtr = currentGraphPtr;
+            rebuildGraphScene();
+        }
+    }
+
+    // ---- DrawFlags sync: check for changes, update visibility ----
+    {
+        auto* viewport = static_cast<OSGViewport*>(item);
+        bool flagsChanged = false;
+        if (m_drawFlags.draw_verticies != viewport->drawVertices())
+            { m_drawFlags.draw_verticies = viewport->drawVertices(); flagsChanged = true; }
+        if (m_drawFlags.draw_edges != viewport->drawEdges())
+            { m_drawFlags.draw_edges = viewport->drawEdges(); flagsChanged = true; }
+        if (m_drawFlags.draw_keyframe_vertices != viewport->drawKeyframeVertices())
+            { m_drawFlags.draw_keyframe_vertices = viewport->drawKeyframeVertices(); flagsChanged = true; }
+        if (m_drawFlags.draw_se3_edges != viewport->drawSE3Edges())
+            { m_drawFlags.draw_se3_edges = viewport->drawSE3Edges(); flagsChanged = true; }
+        if (flagsChanged || m_drawFlagsDirty) {
+            m_drawFlagsDirty = false;
+            updateGraphVisibility();
+        }
+    }
+
+    // ---- Pose update: refresh MatrixTransforms from current estimates ----
+    if (m_renderGraph && !m_keyframeTransforms.empty()) {
+        for (auto& [id, mt] : m_keyframeTransforms) {
+            auto it = m_renderGraph->keyframes.find(id);
+            if (it != m_renderGraph->keyframes.end() && it->second) {
+                Eigen::Isometry3d pose = it->second->estimate();
+                osg::Matrixd mat;
+                for (int r = 0; r < 4; ++r)
+                    for (int c = 0; c < 4; ++c)
+                        mat(r, c) = pose.matrix()(r, c);
+                mt->setMatrix(mat);
+            }
+        }
+    }
+
     // Keep OSG's viewport in sync with the QML item size.
     if (item->width() > 0 && item->height() > 0) {
         m_osg->resize(static_cast<int>(item->width()),
@@ -167,12 +249,26 @@ void OSGViewportRenderer::render()
 {
     if (!m_osg) return;
 
+    auto* ctx = QOpenGLContext::currentContext();
+    if (!ctx) return;
+
     // Qt has bound our FBO. Tell OSG to render into that same framebuffer so it
     // composites into the QML scene instead of its own (offscreen) buffer.
-    if (auto* ctx = QOpenGLContext::currentContext())
-        m_osg->setDefaultFboId(static_cast<unsigned int>(ctx->defaultFramebufferObject()));
+    m_osg->setDefaultFboId(static_cast<unsigned int>(ctx->defaultFramebufferObject()));
+
+    // Save Qt's VAO before OSG renders — core profile requires a non-zero VAO
+    // for glVertexAttribPointer, and OSG creates its own VAOs internally.
+    // We restore it after the frame so Qt's scene-graph compositor sees its own VAO.
+    QOpenGLVertexArrayObject::Binder vaoBinder(nullptr);  // saves current VAO, restores on dtor
+    QOpenGLFunctions glFunc(ctx);
+    glFunc.initializeOpenGLFunctions();
 
     m_osg->frame();
+
+    // Restore Qt-expected state. OSG enables depth test internally; that's fine.
+    // But scissor test and other states may confuse Qt's compositor.
+    glFunc.glDisable(GL_SCISSOR_TEST);
+    // vaoBinder destructor restores Qt's VAO here
 
     // ---- FPS bookkeeping (rolling 60-frame average) ----
     auto now = std::chrono::steady_clock::now();
@@ -193,12 +289,6 @@ void OSGViewportRenderer::render()
         m_lastFpsEmitTime = now;
     }
 
-    // Restore Qt's expectations: the QQuickFramebufferObject pipeline expects the
-    // renderer to leave depth test/writing in a known state. OSG enables depth;
-    // that's fine, but disable scissor to avoid clipping Qt's later compositing.
-    QOpenGLFunctions f(QOpenGLContext::currentContext());
-    f.initializeOpenGLFunctions();
-    f.glDisable(GL_SCISSOR_TEST);
 }
 
 // ---- Input forwarding ----
@@ -253,4 +343,167 @@ void OSGViewportRenderer::drainInput(OSGViewport* viewport)
         }
         }
     }
+}
+
+// ---- Visibility toggles via OSG node masks ----
+void OSGViewportRenderer::updateGraphVisibility()
+{
+    if (!m_keyframeGroup || !m_edgeGroup) return;
+
+    // Keyframe group: point clouds + vertex spheres
+    const unsigned int cloudMask  = m_drawFlags.draw_keyframe_vertices ? ~0u : 0u;
+    const unsigned int sphereMask = (m_drawFlags.draw_verticies &&
+                                     m_drawFlags.draw_keyframe_vertices) ? ~0u : 0u;
+
+    // Apply masks to each keyframe's children (index 0 = cloud Geode, 1 = sphere Geode)
+    for (auto& [id, mt] : m_keyframeTransforms) {
+        if (mt->getNumChildren() > 0 && mt->getChild(0))
+            mt->getChild(0)->setNodeMask(cloudMask);
+        if (mt->getNumChildren() > 1 && mt->getChild(1))
+            mt->getChild(1)->setNodeMask(sphereMask);
+    }
+
+    // Edge group
+    const unsigned int edgeMask = (m_drawFlags.draw_edges &&
+                                   m_drawFlags.draw_se3_edges) ? ~0u : 0u;
+    m_edgeGroup->setNodeMask(edgeMask);
+}
+
+// ---- Full scene graph rebuild from current m_renderGraph ----
+void OSGViewportRenderer::rebuildGraphScene()
+{
+    if (!m_keyframeGroup || !m_edgeGroup) return;
+
+    // Clear existing content
+    m_keyframeGroup->removeChildren(0, m_keyframeGroup->getNumChildren());
+    m_edgeGroup->removeChildren(0, m_edgeGroup->getNumChildren());
+    m_keyframeTransforms.clear();
+
+    auto graph = m_renderGraph;
+    if (!graph) {
+        m_drawFlagsDirty = true;
+        return;
+    }
+
+    // ---- Keyframes: point cloud Geode + sphere Geode under a MatrixTransform ----
+    for (auto& [id, kf] : graph->keyframes) {
+        if (!kf) continue;
+
+        auto* mt = new osg::MatrixTransform;
+        mt->setName("kf_" + std::to_string(id));
+
+        // Initial pose
+        Eigen::Isometry3d pose = kf->estimate();
+        osg::Matrixd mat;
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c)
+                mat(r, c) = pose.matrix()(r, c);
+        mt->setMatrix(mat);
+
+        // ---- Point cloud (GL_POINTS) ----
+        const auto& ptCloud = kf->cloud;
+        if (ptCloud && !ptCloud->empty()) {
+            auto* verts = new osg::Vec3Array;
+            auto* colors = new osg::Vec4Array;
+            verts->reserve(ptCloud->size());
+            colors->reserve(ptCloud->size());
+
+            for (size_t i = 0; i < ptCloud->size(); ++i) {
+                const auto& pt = ptCloud->points[i];
+                verts->push_back(osg::Vec3(pt.x, pt.y, pt.z));
+                float iVal = pt.intensity;
+                if (iVal < 0.0f) iVal = 0.0f;
+                if (iVal > 1.0f) iVal = 1.0f;
+                colors->push_back(osg::Vec4(iVal, iVal, iVal, 1.0f));
+            }
+
+            auto* ptGeom = new osg::Geometry;
+            ptGeom->setVertexArray(verts);
+            ptGeom->setColorArray(colors, osg::Array::BIND_PER_VERTEX);
+            ptGeom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, verts->size()));
+
+            // OpenGL Core Profile 3.3+: disable display lists, use VBO
+            ptGeom->setUseDisplayList(false);
+            ptGeom->setUseVertexBufferObjects(true);
+
+            osg::StateSet* ss = ptGeom->getOrCreateStateSet();
+            ss->setAttribute(new osg::Point(3.0f), osg::StateAttribute::ON);
+            ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
+
+            auto* ptGeode = new osg::Geode;
+            ptGeode->setName("cloud_" + std::to_string(id));
+            ptGeode->addDrawable(ptGeom);
+            mt->addChild(ptGeode);
+        }
+
+        // ---- Vertex marker (large GL_POINT — avoids ShapeDrawable tessellation in core profile) ----
+        {
+            auto* v = new osg::Vec3Array;
+            v->push_back(osg::Vec3(0, 0, 0));
+            auto* c = new osg::Vec4Array;
+            c->push_back(osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f));  // red
+
+            auto* markerGeom = new osg::Geometry;
+            markerGeom->setVertexArray(v);
+            markerGeom->setColorArray(c, osg::Array::BIND_OVERALL);
+            markerGeom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, 1));
+            markerGeom->setUseDisplayList(false);
+            markerGeom->setUseVertexBufferObjects(true);
+
+            osg::StateSet* mss = markerGeom->getOrCreateStateSet();
+            mss->setAttribute(new osg::Point(8.0f), osg::StateAttribute::ON);
+            mss->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
+
+            auto* sphereGeode = new osg::Geode;
+            sphereGeode->setName("vertex_" + std::to_string(id));
+            sphereGeode->addDrawable(markerGeom);
+            mt->addChild(sphereGeode);
+        }
+
+        m_keyframeGroup->addChild(mt);
+        m_keyframeTransforms[id] = mt;
+    }
+
+    // ---- Edges: flat world-space lines between SE3 vertices ----
+    {
+        auto* edgeVerts = new osg::Vec3Array;
+        auto* edgeColors = new osg::Vec4Array;
+        osg::Vec4 red(0.95f, 0.0f, 0.0f, 1.0f);
+
+        for (auto& edge : graph->graph->edges()) {
+            auto* se3edge = dynamic_cast<g2o::EdgeSE3*>(edge);
+            if (!se3edge) continue;
+            auto* v1 = dynamic_cast<g2o::VertexSE3*>(se3edge->vertices()[0]);
+            auto* v2 = dynamic_cast<g2o::VertexSE3*>(se3edge->vertices()[1]);
+            if (!v1 || !v2) continue;
+            Eigen::Vector3d p1 = v1->estimate().translation();
+            Eigen::Vector3d p2 = v2->estimate().translation();
+            edgeVerts->push_back(osg::Vec3(p1.x(), p1.y(), p1.z()));
+            edgeVerts->push_back(osg::Vec3(p2.x(), p2.y(), p2.z()));
+            edgeColors->push_back(red);
+            edgeColors->push_back(red);
+        }
+
+        if (!edgeVerts->empty()) {
+            auto* edgeGeom = new osg::Geometry;
+            edgeGeom->setVertexArray(edgeVerts);
+            edgeGeom->setColorArray(edgeColors, osg::Array::BIND_PER_VERTEX);
+            edgeGeom->addPrimitiveSet(new osg::DrawArrays(GL_LINES, 0, edgeVerts->size()));
+
+            // OpenGL Core Profile 3.3+: disable display lists, use VBO
+            edgeGeom->setUseDisplayList(false);
+            edgeGeom->setUseVertexBufferObjects(true);
+
+            osg::StateSet* ss = edgeGeom->getOrCreateStateSet();
+            ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
+            ss->setAttribute(new osg::LineWidth(2.0f), osg::StateAttribute::ON);
+
+            auto* edgeGeode = new osg::Geode;
+            edgeGeode->setName("Edges");
+            edgeGeode->addDrawable(edgeGeom);
+            m_edgeGroup->addChild(edgeGeode);
+        }
+    }
+
+    m_drawFlagsDirty = true;  // apply current flags next frame
 }

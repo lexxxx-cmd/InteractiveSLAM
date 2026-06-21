@@ -5,12 +5,18 @@
 
 #include <array>
 #include <chrono>
+#include <unordered_map>
+#include <memory>
 #include <osg/ref_ptr>
 #include <osg/Group>
+#include <osg/MatrixTransform>
 #include <osgGA/CameraManipulator>
+
+#include "viewport/drawable_object.hpp"
 
 namespace osg  { class Group; }
 namespace osgGA{ class CameraManipulator; }
+namespace hdl_graph_slam { class InteractiveGraph; }
 class OSGRenderer;
 
 class OSGViewport;
@@ -46,9 +52,29 @@ public:
 private:
     void buildDefaultScene();
 
+    // Rebuild all graph-related OSG geometry (called on graph load/change).
+    void rebuildGraphScene();
+
+    // Apply current DrawFlags as node-mask visibility toggles.
+    void updateGraphVisibility();
+
     OSGRenderer*                                 m_osg {nullptr};
     osg::ref_ptr<osg::Group>                     m_scene;
     osg::ref_ptr<osgGA::CameraManipulator>       m_manipulator;
+
+    // Graph data snapshot (render thread copy, updated in synchronize)
+    std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_renderGraph;
+    const void*                                       m_lastGraphPtr = nullptr;
+    hdl_graph_slam::DrawFlags                         m_drawFlags;
+    bool                                              m_drawFlagsDirty = true;
+
+    // OSG nodes for graph content (children of m_scene)
+    osg::ref_ptr<osg::Group> m_graphContentGroup;
+    osg::ref_ptr<osg::Group> m_keyframeGroup;
+    osg::ref_ptr<osg::Group> m_edgeGroup;
+
+    // Track keyframe transforms for incremental pose updates
+    std::unordered_map<long, osg::ref_ptr<osg::MatrixTransform>> m_keyframeTransforms;
 
     bool      m_callbackInstalled    = false;
 

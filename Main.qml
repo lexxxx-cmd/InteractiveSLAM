@@ -124,6 +124,11 @@ ApplicationWindow {
             id: osgViewport
             anchors.fill: parent
             focus: true
+            graphManager: GraphManager
+            drawVertices: true
+            drawEdges: true
+            drawKeyframeVertices: true
+            drawSE3Edges: true
         }
 
         // Keyboard shortcuts
@@ -294,15 +299,72 @@ ApplicationWindow {
                     width: parent.width - 10
                     spacing: 18
 
-                    // NOTE: draw-flag / picking switches are handled by the OSG
-                    // viewport once point-cloud rendering is migrated. For now the
-                    // skeleton renders an empty axes scene.
+                    // Section: Visibility Toggles
                     Label {
-                        text: "OSG skeleton: point-cloud / draw-flag migration pending."
-                        color: "#A0AABF"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
+                        text: "Visibility"
+                        color: "#009688"
+                        font.bold: true
+                        font.pixelSize: 13
+                    }
+
+                    RowLayout {
+                        spacing: 8
+                        CheckBox {
+                            id: cbVertices
+                            checked: osgViewport.drawVertices
+                            onCheckedChanged: osgViewport.drawVertices = checked
+                            palette { text: "#E0E0E0" }
+                        }
+                        Label {
+                            text: "Vertices"
+                            color: "#E0E0E0"
+                            font.pixelSize: 13
+                        }
+                    }
+
+                    RowLayout {
+                        spacing: 8
+                        CheckBox {
+                            id: cbEdges
+                            checked: osgViewport.drawEdges
+                            onCheckedChanged: osgViewport.drawEdges = checked
+                            palette { text: "#E0E0E0" }
+                        }
+                        Label {
+                            text: "Edges"
+                            color: "#E0E0E0"
+                            font.pixelSize: 13
+                        }
+                    }
+
+                    RowLayout {
+                        spacing: 8
+                        CheckBox {
+                            id: cbKeyframeClouds
+                            checked: osgViewport.drawKeyframeVertices
+                            onCheckedChanged: osgViewport.drawKeyframeVertices = checked
+                            palette { text: "#E0E0E0" }
+                        }
+                        Label {
+                            text: "Keyframe Clouds"
+                            color: "#E0E0E0"
+                            font.pixelSize: 13
+                        }
+                    }
+
+                    RowLayout {
+                        spacing: 8
+                        CheckBox {
+                            id: cbSE3Edges
+                            checked: osgViewport.drawSE3Edges
+                            onCheckedChanged: osgViewport.drawSE3Edges = checked
+                            palette { text: "#E0E0E0" }
+                        }
+                        Label {
+                            text: "SE3 Edges"
+                            color: "#E0E0E0"
+                            font.pixelSize: 13
+                        }
                     }
                 }
             }
