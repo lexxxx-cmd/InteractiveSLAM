@@ -28,7 +28,6 @@
 
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
-#include <QOpenGLVertexArrayObject>
 #include <QQuickWindow>
 #include <QDebug>
 
@@ -257,18 +256,16 @@ void OSGViewportRenderer::render()
     m_osg->setDefaultFboId(static_cast<unsigned int>(ctx->defaultFramebufferObject()));
 
     // Save Qt's VAO before OSG renders — core profile requires a non-zero VAO
-    // for glVertexAttribPointer, and OSG creates its own VAOs internally.
-    // We restore it after the frame so Qt's scene-graph compositor sees its own VAO.
-    QOpenGLVertexArrayObject::Binder vaoBinder(nullptr);  // saves current VAO, restores on dtor
-    QOpenGLFunctions glFunc(ctx);
-    glFunc.initializeOpenGLFunctions();
+    // for glVertexAttribPointer; OSG creates its own VAOs internally.
+    auto* glFunc = ctx->extraFunctions();
+    GLint prevVao = 0;
+    glFunc->glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVao);
 
     m_osg->frame();
 
-    // Restore Qt-expected state. OSG enables depth test internally; that's fine.
-    // But scissor test and other states may confuse Qt's compositor.
-    glFunc.glDisable(GL_SCISSOR_TEST);
-    // vaoBinder destructor restores Qt's VAO here
+    // Restore Qt's VAO so the scene-graph compositor sees its expected binding.
+    glFunc->glBindVertexArray(prevVao);
+    glFunc->glDisable(GL_SCISSOR_TEST);
 
     // ---- FPS bookkeeping (rolling 60-frame average) ----
     auto now = std::chrono::steady_clock::now();
