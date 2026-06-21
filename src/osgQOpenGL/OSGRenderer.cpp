@@ -19,6 +19,8 @@
 #include <osgViewer/Viewer>
 #include <osg/Camera>
 #include <osg/GraphicsContext>
+#include <osg/Material>
+#include <osg/LightModel>
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -204,6 +206,21 @@ void OSGRenderer::setupOSG(int windowWidth, int windowHeight, float windowScale)
             // setUseDisplayList(false), already set in osg_viewport_renderer.cpp.
         }
     }
+
+    // Core Profile 3.3: disable OSG's default fixed-function lighting entirely.
+    setLightingMode(osg::View::NO_LIGHT);
+
+    // Also stomp the camera's StateSet so no fixed-function mode/attribute
+    // leaks through.  OSG's State applies default Material / LightModel /
+    // ShadeModel when nothing is explicitly set; all of those call deprecated
+    // GL functions (glMaterialfv, glLightModelfv, glShadeModel) that trigger
+    // GL_INVALID_ENUM / GL_INVALID_OPERATION in core profile.
+    osg::StateSet* css = _camera->getOrCreateStateSet();
+    css->setMode(GL_LIGHTING,       osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+    css->setMode(GL_FOG,            osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+    css->setMode(GL_ALPHA_TEST,     osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+    css->setAttribute(new osg::Material,   osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+    css->setAttribute(new osg::LightModel, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
 
     // disable key event (default is Escape key) that the viewer checks on each
     // frame to see

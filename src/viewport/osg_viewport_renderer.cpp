@@ -56,7 +56,7 @@ osg::Geometry* makeAxis(float x, float y, float z, float r, float g, float b)
     geom->setUseVertexBufferObjects(true);
 
     geom->getOrCreateStateSet()->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
-    geom->getOrCreateStateSet()->setAttribute(new osg::LineWidth(3.0f));
+    geom->getOrCreateStateSet()->setAttribute(new osg::LineWidth(1.0f));
     return geom;
 }
 
@@ -492,7 +492,7 @@ void OSGViewportRenderer::rebuildGraphScene()
 
             osg::StateSet* ss = edgeGeom->getOrCreateStateSet();
             ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
-            ss->setAttribute(new osg::LineWidth(2.0f), osg::StateAttribute::ON);
+            ss->setAttribute(new osg::LineWidth(1.0f), osg::StateAttribute::ON);
 
             auto* edgeGeode = new osg::Geode;
             edgeGeode->setName("Edges");
