@@ -27,6 +27,12 @@ GraphInfoPanel::GraphInfoPanel(GraphManager* manager, ViewportWidget* viewport,
     connect(m_drawSE3EdgesCb, &QCheckBox::toggled,
             m_viewport, &ViewportWidget::setDrawSE3Edges);
 
+    // --- Edge width slider ---
+    connect(m_edgeWidthSlider, &QSlider::valueChanged, this, [this](int val) {
+        m_edgeWidthLabel->setText(QString::number(val));
+        m_viewport->setEdgeWidth(val);
+    });
+
     // --- Sphere radius slider ---
     connect(m_sphereRadiusSlider, &QSlider::valueChanged, this, [this](int val) {
         float r = val / 100.0f;
@@ -103,6 +109,17 @@ void GraphInfoPanel::setupUi() {
     sphereRow->addWidget(m_sphereRadiusSlider);
     sphereRow->addWidget(m_sphereRadiusLabel);
     renderLayout->addLayout(sphereRow);
+
+    // Edge width
+    renderLayout->addWidget(new QLabel(tr("Edge Width:")));
+    m_edgeWidthSlider = new QSlider(Qt::Horizontal);
+    m_edgeWidthSlider->setRange(1, 10);
+    m_edgeWidthSlider->setValue(2);
+    m_edgeWidthLabel = new QLabel("2");
+    auto* edgeRow = new QHBoxLayout;
+    edgeRow->addWidget(m_edgeWidthSlider);
+    edgeRow->addWidget(m_edgeWidthLabel);
+    renderLayout->addLayout(edgeRow);
 
     // Point size
     renderLayout->addWidget(new QLabel(tr("Point Size:")));

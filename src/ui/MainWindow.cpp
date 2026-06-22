@@ -5,6 +5,7 @@
 
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QMenu>
 #include <QApplication>
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,33 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             statusBar()->showMessage(tr("Selected vertex: %1").arg(vertexId));
         else
             statusBar()->clearMessage();
+    });
+
+    // Right-click context menu
+    connect(m_viewport, &ViewportWidget::contextMenuRequested,
+            this, [this](long vertexId, long edgeId,
+                         long edgeV1, long edgeV2,
+                         double edgeDist, const QString& edgeKernel,
+                         QPoint pos) {
+        if (vertexId < 0 && edgeId < 0) return;
+        QMenu menu;
+        if (vertexId >= 0) {
+            menu.addAction(tr("Vertex ID: %1").arg(vertexId))->setEnabled(false);
+            menu.addSeparator();
+            menu.addAction(tr("Go to Vertex"))->setEnabled(false);
+            menu.addAction(tr("Vertex Details..."))->setEnabled(false);
+        } else if (edgeId >= 0) {
+            menu.addAction(tr("Edge ID: %1").arg(edgeId))->setEnabled(false);
+            menu.addAction(tr("Vertices: %1 → %2").arg(edgeV1).arg(edgeV2))
+                ->setEnabled(false);
+            menu.addAction(tr("Length: %1 m").arg(edgeDist, 0, 'f', 2))
+                ->setEnabled(false);
+            menu.addAction(tr("Kernel: %1").arg(edgeKernel))->setEnabled(false);
+            menu.addSeparator();
+            menu.addAction(tr("Go to Edge"))->setEnabled(false);
+            menu.addAction(tr("Edge Details..."))->setEnabled(false);
+        }
+        menu.exec(pos);
     });
 }
 

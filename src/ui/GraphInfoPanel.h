@@ -47,6 +47,10 @@ private:
     QSlider* m_sphereRadiusSlider;
     QLabel* m_sphereRadiusLabel;
 
+    // Edge width
+    QSlider* m_edgeWidthSlider;
+    QLabel* m_edgeWidthLabel;
+
     // Point settings
     QSlider* m_pointSizeSlider;
     QLabel* m_pointSizeLabel;

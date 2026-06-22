@@ -76,6 +76,11 @@ public:
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
     }
 
+    void setEdgeWidth(float width) {
+        m_edgeWidth = width;
+        if (m_edgeLineViz) m_edgeLineViz->setLineWidth(width);
+    }
+
     void setSphereRadius(float radius) {
         m_sphereRadius = radius;
         if (m_sphereViz && m_lastGraph) {
@@ -83,10 +88,14 @@ public:
         }
     }
 
-    /// Sphere-centers cache for picking.  Pointer stable, contents refreshed
-    /// on every rebuildSpheres() call.
+    /// Sphere-centers cache for picking.
     const std::vector<std::pair<osg::Vec3d, long>>& sphereCenters() const {
         return m_sphereCenters;
+    }
+
+    /// Edge segments for right-click picking (point-to-segment distance).
+    const std::vector<EdgeSegment>& edgeSegments() const {
+        return m_edgeLineViz ? m_edgeLineViz->edgeSegments() : m_emptySegments;
     }
 
     float sphereRadius() const { return m_sphereRadius; }
@@ -208,12 +217,15 @@ private:
 
     // Sphere centers cache for picking (parallel to VBO, refreshed on rebuild)
     std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;
+    // Fallback for edgeSegments() when no edges loaded
+    mutable std::vector<EdgeSegment> m_emptySegments;
     long m_selectedVertexId = -1;
 
     // State
     bool m_hasGraph    = false;
     bool m_drawClouds  = true;
     float m_sphereRadius  = 1.0f;
+    float m_edgeWidth     = 2.0f;
     float m_pointSize     = 3.0f;
     float m_pointOpacity  = 1.0f;
 };

@@ -52,7 +52,7 @@ void ViewportWidget::initOsg() {
     }
 
     // Dark background (matching interactive_slam)
-    viewer->getCamera()->setClearColor(osg::Vec4(0.1f, 0.5f, 0.12f, 1.0f));
+    viewer->getCamera()->setClearColor(osg::Vec4(0.1f, 0.1f, 0.12f, 1.0f));
 
     // Set up scene root
     viewer->setSceneData(m_sceneViz->getRootNode());
@@ -60,13 +60,36 @@ void ViewportWidget::initOsg() {
     // Trackball camera
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
 
-    // Register Ctrl+Click sphere picking handler
+    // Register picking handler with lazy providers — data is queried
+    // on each event, so graph load / pose updates are always reflected.
     m_pickingHandler = new SpherePickingHandler(
-        &m_sceneViz->sphereCenters(),
+        // sphere centers provider
+        [this]() -> const std::vector<std::pair<osg::Vec3d, long>>* {
+            return &m_sceneViz->sphereCenters();
+        },
+        // edge segments provider
+        [this]() -> const std::vector<EdgeSegment>* {
+            return &m_sceneViz->edgeSegments();
+        },
         m_sceneViz->sphereRadius(),
+        // --- selection callback (Ctrl+Click) ---
         [this](long vertexId) {
             QMetaObject::invokeMethod(this, [this, vertexId]() {
                 onVertexPicked(vertexId);
+            }, Qt::QueuedConnection);
+        },
+        // --- context menu callback (RightClick) ---
+        [this](const PickingHit& hit) {
+            QMetaObject::invokeMethod(this, [this, hit]() {
+                QPoint globalPos = m_osgWidget->mapToGlobal(
+                    QPoint(static_cast<int>(hit.screenX),
+                           static_cast<int>(hit.screenY)));
+                emit contextMenuRequested(
+                    hit.vertexId, hit.edgeId,
+                    hit.edgeV1, hit.edgeV2,
+                    hit.edgeDist,
+                    QString::fromStdString(hit.edgeKernel),
+                    globalPos);
             }, Qt::QueuedConnection);
         });
     viewer->addEventHandler(m_pickingHandler);
@@ -126,6 +149,11 @@ void ViewportWidget::setDrawSE3Edges(bool v) {
     m_flags.draw_se3_edges = v;
     // SE3 edges are part of the regular edge set
     m_sceneViz->setDrawEdges(v);
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setEdgeWidth(int width) {
+    m_sceneViz->setEdgeWidth(static_cast<float>(width));
     m_osgWidget->update();
 }
 

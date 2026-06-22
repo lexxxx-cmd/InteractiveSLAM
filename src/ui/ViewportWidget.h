@@ -36,6 +36,7 @@ public slots:
     void setDrawEdges(bool v);
     void setDrawKeyframeClouds(bool v);
     void setDrawSE3Edges(bool v);
+    void setEdgeWidth(int width);
     void setSphereRadius(float radius);
     void setPointSize(int size);
     void setPointOpacity(int opacity);
@@ -46,6 +47,10 @@ signals:
     void fpsUpdated(float fps);
     void initialized();
     void vertexSelected(long vertexId);
+    void contextMenuRequested(long vertexId, long edgeId,
+                              long edgeV1, long edgeV2,
+                              double edgeDist, const QString& edgeKernel,
+                              QPoint screenPos);
 
 private slots:
     void initOsg();        // called on osgQOpenGLWidget::initialized
