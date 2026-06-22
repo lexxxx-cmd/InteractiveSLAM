@@ -11,9 +11,17 @@
 
 #include "visualizers/EdgeLineVisualizer.h"   // for EdgeSegment
 
-/// Context menu payload.
+/// Context menu payload — populated in two stages:
+///   1. SpherePickingHandler fills screenX/Y + vertexId or edgeId/edge*.
+///   2. ViewportWidget fills vertex* fields by looking up the KeyFrame.
 struct PickingHit {
     long vertexId = -1;
+    // --- vertex fields (populated by ViewportWidget) ---
+    long   vtxCloudSize = 0;
+    double vtxPosX = 0, vtxPosY = 0, vtxPosZ = 0;
+    double vtxAccumDist = 0;
+    int    vtxDegree  = 0;       // incident edges count
+    // --- edge fields (populated by SpherePickingHandler) ---
     long edgeId   = -1;
     long edgeV1   = -1, edgeV2 = -1;
     double edgeDist = 0;

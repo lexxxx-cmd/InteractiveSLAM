@@ -81,15 +81,33 @@ void ViewportWidget::initOsg() {
         // --- context menu callback (RightClick) ---
         [this](const PickingHit& hit) {
             QMetaObject::invokeMethod(this, [this, hit]() {
+                // Enrich vertex fields from graph data
+                PickingHit enriched = hit;
+                if (hit.vertexId >= 0 && m_graph) {
+                    auto it = m_graph->keyframes.find(hit.vertexId);
+                    if (it != m_graph->keyframes.end()) {
+                        auto& kf = it->second;
+                        auto pos = kf->estimate().translation();
+                        enriched.vtxPosX = pos.x();
+                        enriched.vtxPosY = pos.y();
+                        enriched.vtxPosZ = pos.z();
+                        enriched.vtxCloudSize = kf->cloud ? static_cast<long>(kf->cloud->size()) : 0;
+                        enriched.vtxAccumDist = kf->accum_distance;
+                        enriched.vtxDegree = static_cast<int>(kf->node->edges().size());
+                    }
+                }
                 QPoint globalPos = m_osgWidget->mapToGlobal(
                     QPoint(static_cast<int>(hit.screenX),
                            static_cast<int>(hit.screenY)));
                 emit contextMenuRequested(
-                    hit.vertexId, hit.edgeId,
-                    hit.edgeV1, hit.edgeV2,
-                    hit.edgeDist,
-                    QString::fromStdString(hit.edgeKernel),
-                    globalPos);
+                    enriched.vertexId, enriched.edgeId,
+                    enriched.edgeV1, enriched.edgeV2,
+                    enriched.edgeDist,
+                    QString::fromStdString(enriched.edgeKernel),
+                    globalPos,
+                    enriched.vtxCloudSize,
+                    enriched.vtxPosX, enriched.vtxPosY, enriched.vtxPosZ,
+                    enriched.vtxAccumDist, enriched.vtxDegree);
             }, Qt::QueuedConnection);
         });
     viewer->addEventHandler(m_pickingHandler);

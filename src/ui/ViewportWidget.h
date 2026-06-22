@@ -50,7 +50,10 @@ signals:
     void contextMenuRequested(long vertexId, long edgeId,
                               long edgeV1, long edgeV2,
                               double edgeDist, const QString& edgeKernel,
-                              QPoint screenPos);
+                              QPoint screenPos,
+                              long vtxCloudSize,
+                              double vtxPosX, double vtxPosY, double vtxPosZ,
+                              double vtxAccumDist, int vtxDegree);
 
 private slots:
     void initOsg();        // called on osgQOpenGLWidget::initialized

@@ -45,11 +45,22 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             this, [this](long vertexId, long edgeId,
                          long edgeV1, long edgeV2,
                          double edgeDist, const QString& edgeKernel,
-                         QPoint pos) {
+                         QPoint pos,
+                         long vtxCloudSize,
+                         double vtxPosX, double vtxPosY, double vtxPosZ,
+                         double vtxAccumDist, int vtxDegree) {
         if (vertexId < 0 && edgeId < 0) return;
         QMenu menu;
         if (vertexId >= 0) {
             menu.addAction(tr("Vertex ID: %1").arg(vertexId))->setEnabled(false);
+            menu.addAction(tr("Position: (%1, %2, %3)")
+                .arg(vtxPosX, 0, 'f', 2)
+                .arg(vtxPosY, 0, 'f', 2)
+                .arg(vtxPosZ, 0, 'f', 2))->setEnabled(false);
+            menu.addAction(tr("Distance: %1 m").arg(vtxAccumDist, 0, 'f', 2))
+                ->setEnabled(false);
+            menu.addAction(tr("Degree: %1 edges").arg(vtxDegree))->setEnabled(false);
+            menu.addAction(tr("Cloud: %1 points").arg(vtxCloudSize))->setEnabled(false);
             menu.addSeparator();
             menu.addAction(tr("Go to Vertex"))->setEnabled(false);
             menu.addAction(tr("Vertex Details..."))->setEnabled(false);
