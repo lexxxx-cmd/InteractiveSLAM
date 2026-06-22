@@ -17,6 +17,9 @@
 ///        Each keyframe's local LiDAR points are transformed by the g2o pose
 ///        on the CPU, then appended to a single VBO — same pattern as
 ///        EdgeLineVisualizer and VertexSphereVisualizer.
+///
+///        Tracks per-keyframe vertex ranges so the selected keyframe's cloud
+///        can be highlighted without rebuilding the entire VBO.
 class KeyframePointCloudVisualizer {
 public:
     KeyframePointCloudVisualizer() {
@@ -24,7 +27,7 @@ public:
         m_geom->setUseDisplayList(false);
         m_geom->setUseVertexBufferObjects(true);
         m_geom->setUseVertexArrayObject(true);
-        m_geom->setDataVariance(osg::Object::DYNAMIC);  // allow uniform updates (point size)
+        m_geom->setDataVariance(osg::Object::DYNAMIC);
 
         m_vertices = new osg::Vec3Array;
         m_colors   = new osg::Vec4Array;
@@ -34,11 +37,8 @@ public:
         m_geom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, 0));
 
         auto* ss = m_geom->getOrCreateStateSet();
-
-        // Point-cloud shader with uPointSize uniform
         m_pointSizeUniform = applyPointCloudShader(ss, m_pointSize);
 
-        // Opacity via blend constant alpha
         m_blendColor = new osg::BlendColor(osg::Vec4(1, 1, 1, m_opacity));
         ss->setAttributeAndModes(m_blendColor, osg::StateAttribute::ON);
         ss->setAttributeAndModes(
@@ -50,13 +50,13 @@ public:
     }
 
     /// Append one keyframe's point cloud, transformed to world space.
-    /// @param cloud   LiDAR points in local (sensor) frame
-    /// @param pose    g2o-estimated world pose of this keyframe
     void appendCloud(pcl::PointCloud<pcl::PointXYZI>::ConstPtr cloud,
-                     const Eigen::Isometry3d& pose) {
+                     const Eigen::Isometry3d& pose,
+                     long vertexId) {
         if (!cloud || cloud->empty()) return;
 
-        // Track global Z range for turbo colour mapping
+        size_t start = m_allWorldPoints.size();
+
         for (const auto& pt : cloud->points) {
             Eigen::Vector3d wp = pose * Eigen::Vector3d(pt.x, pt.y, pt.z);
             float wz = static_cast<float>(wp.z());
@@ -64,10 +64,12 @@ public:
             if (wz > m_zMax) m_zMax = wz;
             m_allWorldPoints.push_back(wp);
         }
+
+        size_t count = m_allWorldPoints.size() - start;
+        m_cloudRanges.push_back({start, count, vertexId});
     }
 
-    /// Call after all appendCloud() calls.  Colours points by world-space Z
-    /// using the Turbo colormap and uploads to GPU.
+    /// Upload vertex data and apply initial turbo colouring.
     void finish() {
         if (m_allWorldPoints.empty()) return;
 
@@ -94,10 +96,29 @@ public:
         auto* prim = static_cast<osg::DrawArrays*>(m_geom->getPrimitiveSet(0));
         if (prim) prim->setCount(m_vertices->size());
         m_geom->dirtyBound();
+    }
 
-        // Free the intermediate buffer
-        m_allWorldPoints.clear();
-        m_allWorldPoints.shrink_to_fit();
+    /// Re-colour one keyframe's cloud for selection highlight without
+    /// rebuilding vertices.  Call after finish().
+    void recolorHighlight(long selectedVertexId) {
+        if (!m_colors || m_cloudRanges.empty()) return;
+
+        const osg::Vec4 orange(1.0f, 0.55f, 0.0f, 1.0f);
+
+        for (const auto& range : m_cloudRanges) {
+            if (range.vertexId == selectedVertexId) {
+                for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
+                    (*m_colors)[i] = orange;
+                }
+            } else {
+                // Restore turbo colour from world-space Z
+                for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
+                    float wz = static_cast<float>(m_allWorldPoints[i].z());
+                    (*m_colors)[i] = turboColor(wz, m_zMin, m_zMax);
+                }
+            }
+        }
+        m_colors->dirty();
     }
 
     void setPointSize(float size) {
@@ -120,6 +141,12 @@ public:
     }
 
 private:
+    struct CloudRange {
+        size_t startVertex;
+        size_t vertexCount;
+        long   vertexId;
+    };
+
     osg::ref_ptr<osg::Geode>     m_geode;
     osg::ref_ptr<osg::Geometry>  m_geom;
     osg::ref_ptr<osg::Vec3Array> m_vertices;
@@ -127,9 +154,12 @@ private:
     osg::ref_ptr<osg::BlendColor> m_blendColor;
     osg::ref_ptr<osg::Uniform>    m_pointSizeUniform;
 
-    // Intermediate buffer: collect world-space points before colour mapping
+    // World-space points (kept for recolouring on selection change)
     std::vector<Eigen::Vector3d,
                 Eigen::aligned_allocator<Eigen::Vector3d>> m_allWorldPoints;
+
+    // Per-keyframe cloud metadata for selective recolouring
+    std::vector<CloudRange> m_cloudRanges;
 
     float m_zMin   =  std::numeric_limits<float>::max();
     float m_zMax   = -std::numeric_limits<float>::max();

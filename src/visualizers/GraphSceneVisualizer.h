@@ -91,7 +91,10 @@ public:
 
     float sphereRadius() const { return m_sphereRadius; }
 
-    void setSelectedVertex(long id) { m_selectedVertexId = id; }
+    void setSelectedVertex(long id) {
+        m_selectedVertexId = id;
+        if (m_cloudViz) m_cloudViz->recolorHighlight(id);
+    }
     long selectedVertex() const { return m_selectedVertexId; }
 
     // ---- Scene construction ----
@@ -114,7 +117,7 @@ public:
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v || !kf->cloud || kf->cloud->empty()) continue;
-            m_cloudViz->appendCloud(kf->cloud, v->estimate());
+            m_cloudViz->appendCloud(kf->cloud, v->estimate(), id);
         }
         m_cloudViz->finish();
         m_cloudViz->setPointSize(m_pointSize);
