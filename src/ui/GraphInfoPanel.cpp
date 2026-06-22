@@ -27,6 +27,13 @@ GraphInfoPanel::GraphInfoPanel(GraphManager* manager, ViewportWidget* viewport,
     connect(m_drawSE3EdgesCb, &QCheckBox::toggled,
             m_viewport, &ViewportWidget::setDrawSE3Edges);
 
+    // --- Sphere radius slider ---
+    connect(m_sphereRadiusSlider, &QSlider::valueChanged, this, [this](int val) {
+        float r = val / 100.0f;
+        m_sphereRadiusLabel->setText(QString::number(r, 'f', 2));
+        m_viewport->setSphereRadius(r);
+    });
+
     // --- Point size slider ---
     connect(m_pointSizeSlider, &QSlider::valueChanged, this, [this](int val) {
         m_pointSizeLabel->setText(QString::number(val));
@@ -85,6 +92,17 @@ void GraphInfoPanel::setupUi() {
     renderLayout->addWidget(m_drawEdgesCb);
     renderLayout->addWidget(m_drawCloudsCb);
     renderLayout->addWidget(m_drawSE3EdgesCb);
+
+    // Sphere radius
+    renderLayout->addWidget(new QLabel(tr("Sphere Radius:")));
+    m_sphereRadiusSlider = new QSlider(Qt::Horizontal);
+    m_sphereRadiusSlider->setRange(1, 100);
+    m_sphereRadiusSlider->setValue(50);
+    m_sphereRadiusLabel = new QLabel("0.50");
+    auto* sphereRow = new QHBoxLayout;
+    sphereRow->addWidget(m_sphereRadiusSlider);
+    sphereRow->addWidget(m_sphereRadiusLabel);
+    renderLayout->addLayout(sphereRow);
 
     // Point size
     renderLayout->addWidget(new QLabel(tr("Point Size:")));

@@ -80,6 +80,9 @@ public:
         }
     }
 
+    void setRadius(float r) { m_radius = r; }
+    float radius() const { return m_radius; }
+
     /// Call after all spheres have been appended.
     void finish() {
         m_verts->dirty();

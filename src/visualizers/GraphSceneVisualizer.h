@@ -76,6 +76,13 @@ public:
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
     }
 
+    void setSphereRadius(float radius) {
+        m_sphereRadius = radius;
+        if (m_sphereViz && m_lastGraph) {
+            rebuildSpheres(m_lastGraph);
+        }
+    }
+
     // ---- Scene construction ----
 
     /// Build the entire scene graph from an InteractiveGraph.
@@ -85,15 +92,10 @@ public:
 
         if (!graph || graph->keyframes.empty()) return;
 
+        m_lastGraph = graph;
+
         // 1. Spheres — world-space, same vertex positions as edges
-        m_sphereViz = std::make_unique<VertexSphereVisualizer>(1.0f);
-        for (auto& [id, kf] : graph->keyframes) {
-            auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
-            if (!v) continue;
-            Eigen::Vector3d pos = v->estimate().translation();
-            m_sphereViz->appendSphere(osg::Vec3d(pos.x(), pos.y(), pos.z()));
-        }
-        m_sphereViz->finish();
+        rebuildSpheres(graph);
         m_sphereGroup->addChild(m_sphereViz->getNode());
 
         // 2. Point cloud — world-space, merged across all keyframes
@@ -119,20 +121,10 @@ public:
     /// Update spheres and edges after g2o optimization.
     void updatePoses(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
         if (!graph) return;
+        m_lastGraph = graph;
 
-        // Rebuild spheres from current g2o estimates
-        if (m_sphereViz) {
-            m_sphereViz->clear();
-            for (auto& [id, kf] : graph->keyframes) {
-                auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
-                if (!v) continue;
-                Eigen::Vector3d pos = v->estimate().translation();
-                m_sphereViz->appendSphere(osg::Vec3d(pos.x(), pos.y(), pos.z()));
-            }
-            m_sphereViz->finish();
-        }
+        rebuildSpheres(graph);
 
-        // Rebuild edges
         if (m_edgeLineViz) {
             m_edgeLineViz->rebuild(graph->graph.get());
         }
@@ -143,6 +135,21 @@ public:
     }
 
 private:
+    void rebuildSpheres(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
+        if (!m_sphereViz) {
+            m_sphereViz = std::make_unique<VertexSphereVisualizer>(m_sphereRadius);
+        }
+        m_sphereViz->clear();
+        m_sphereViz->setRadius(m_sphereRadius);
+        for (auto& [id, kf] : graph->keyframes) {
+            auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
+            if (!v) continue;
+            Eigen::Vector3d pos = v->estimate().translation();
+            m_sphereViz->appendSphere(osg::Vec3d(pos.x(), pos.y(), pos.z()));
+        }
+        m_sphereViz->finish();
+    }
+
     void clearGraph() {
         m_sphereGroup->removeChildren(0, m_sphereGroup->getNumChildren());
         m_edgeGroup->removeChildren(0, m_edgeGroup->getNumChildren());
@@ -166,13 +173,17 @@ private:
     osg::ref_ptr<osg::Group> m_cloudGroup;
 
     // Dynamic visualizers (world-space geometry)
-    std::unique_ptr<VertexSphereVisualizer>      m_sphereViz;
+    std::unique_ptr<VertexSphereVisualizer>       m_sphereViz;
     std::unique_ptr<KeyframePointCloudVisualizer> m_cloudViz;
     std::unique_ptr<EdgeLineVisualizer>           m_edgeLineViz;
+
+    // Cached graph reference for live parameter changes
+    std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_lastGraph;
 
     // State
     bool m_hasGraph    = false;
     bool m_drawClouds  = true;
-    float m_pointSize    = 3.0f;
-    float m_pointOpacity = 1.0f;
+    float m_sphereRadius  = 1.0f;
+    float m_pointSize     = 3.0f;
+    float m_pointOpacity  = 1.0f;
 };

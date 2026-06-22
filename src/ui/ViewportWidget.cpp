@@ -117,6 +117,11 @@ void ViewportWidget::setDrawSE3Edges(bool v) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setSphereRadius(float radius) {
+    m_sceneViz->setSphereRadius(radius);
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setPointSize(int size) {
     m_sceneViz->setPointSize(static_cast<float>(size));
     m_osgWidget->update();

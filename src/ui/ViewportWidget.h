@@ -35,6 +35,7 @@ public slots:
     void setDrawEdges(bool v);
     void setDrawKeyframeClouds(bool v);
     void setDrawSE3Edges(bool v);
+    void setSphereRadius(float radius);
     void setPointSize(int size);
     void setPointOpacity(int opacity);
     void setBackgroundColor(const QColor& color);

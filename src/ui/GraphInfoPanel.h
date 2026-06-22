@@ -43,6 +43,10 @@ private:
     QCheckBox* m_drawCloudsCb;
     QCheckBox* m_drawSE3EdgesCb;
 
+    // Sphere radius
+    QSlider* m_sphereRadiusSlider;
+    QLabel* m_sphereRadiusLabel;
+
     // Point settings
     QSlider* m_pointSizeSlider;
     QLabel* m_pointSizeLabel;

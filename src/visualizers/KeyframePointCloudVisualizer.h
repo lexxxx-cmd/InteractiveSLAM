@@ -24,7 +24,7 @@ public:
         m_geom->setUseDisplayList(false);
         m_geom->setUseVertexBufferObjects(true);
         m_geom->setUseVertexArrayObject(true);
-        m_geom->setDataVariance(osg::Object::STATIC);  // rebuilt only on load
+        m_geom->setDataVariance(osg::Object::DYNAMIC);  // allow uniform updates (point size)
 
         m_vertices = new osg::Vec3Array;
         m_colors   = new osg::Vec4Array;
