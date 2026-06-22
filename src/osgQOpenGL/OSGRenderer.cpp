@@ -169,8 +169,8 @@ void OSGRenderer::resize(int windowWidth, int windowHeight, float windowScale)
 
     m_windowScale = windowScale;
 
-    /*  _camera->setViewport(new osg::Viewport(0, 0, windowWidth * windowScale,
-                                           windowHeight * windowScale));*/
+    _camera->setViewport(new osg::Viewport(0, 0, windowWidth * windowScale,
+                                           windowHeight * windowScale));
 
     m_osgWinEmb->resized(0, 0,
                          windowWidth * windowScale,
@@ -362,14 +362,14 @@ void OSGRenderer::wheelEvent(QWheelEvent* event)
     QPoint delta = event->angleDelta();
     if (!delta.isNull())
     {
-        // ´¹Ö±¹öÂÖ£¨ÉÏÏÂ£©
+        // ï¿½ï¿½Ö±ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ï¿½Â£ï¿½
         if (delta.y() != 0)
         {
             m_osgWinEmb->getEventQueue()->mouseScroll(
                 delta.y() > 0 ? osgGA::GUIEventAdapter::SCROLL_UP
                 : osgGA::GUIEventAdapter::SCROLL_DOWN);
         }
-        // Ë®Æ½¹öÂÖ£¨×óÓÒ£©
+        // Ë®Æ½ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ï¿½Ò£ï¿½
         else if (delta.x() != 0)
         {
             m_osgWinEmb->getEventQueue()->mouseScroll(
