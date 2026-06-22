@@ -1,0 +1,139 @@
+#include "ui/GraphInfoPanel.h"
+#include "ui/ViewportWidget.h"
+#include "backend/graph_manager.hpp"
+
+#include <QVBoxLayout>
+#include <QGroupBox>
+#include <QFormLayout>
+
+GraphInfoPanel::GraphInfoPanel(GraphManager* manager, ViewportWidget* viewport,
+                               QWidget* parent)
+    : QWidget(parent), m_manager(manager), m_viewport(viewport) {
+    setupUi();
+
+    // --- Statistics ---
+    connect(m_manager, &GraphManager::statsChanged,
+            this, &GraphInfoPanel::onStatsChanged);
+    connect(m_manager, &GraphManager::isLoadingChanged,
+            this, &GraphInfoPanel::onLoadingStateChanged);
+
+    // --- Rendering toggles → ViewportWidget ---
+    connect(m_drawVerticesCb, &QCheckBox::toggled,
+            m_viewport, &ViewportWidget::setDrawVertices);
+    connect(m_drawEdgesCb, &QCheckBox::toggled,
+            m_viewport, &ViewportWidget::setDrawEdges);
+    connect(m_drawCloudsCb, &QCheckBox::toggled,
+            m_viewport, &ViewportWidget::setDrawKeyframeClouds);
+    connect(m_drawSE3EdgesCb, &QCheckBox::toggled,
+            m_viewport, &ViewportWidget::setDrawSE3Edges);
+
+    // --- Point size slider ---
+    connect(m_pointSizeSlider, &QSlider::valueChanged, this, [this](int val) {
+        m_pointSizeLabel->setText(QString::number(val));
+        m_viewport->setPointSize(val);
+    });
+
+    // --- Point opacity slider ---
+    connect(m_pointOpacitySlider, &QSlider::valueChanged, this, [this](int val) {
+        m_pointOpacityLabel->setText(QString::number(val) + "%");
+        m_viewport->setPointOpacity(val);
+    });
+
+    // --- FPS from viewport ---
+    connect(m_viewport, &ViewportWidget::fpsUpdated, this, [this](float fps) {
+        m_fpsLabel->setText(QString::number(fps, 'f', 1));
+    });
+
+    // Initial state
+    onStatsChanged();
+}
+
+void GraphInfoPanel::setupUi() {
+    auto* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(8, 8, 8, 8);
+
+    // --- Statistics group ---
+    auto* statsGroup = new QGroupBox(tr("Graph Statistics"));
+    auto* statsForm = new QFormLayout(statsGroup);
+
+    m_vertexCountLabel = new QLabel("0");
+    m_edgeCountLabel = new QLabel("0");
+    m_keyframeCountLabel = new QLabel("0");
+    m_fpsLabel = new QLabel("0.0");
+
+    statsForm->addRow(tr("Vertices:"), m_vertexCountLabel);
+    statsForm->addRow(tr("Edges:"), m_edgeCountLabel);
+    statsForm->addRow(tr("Keyframes:"), m_keyframeCountLabel);
+    statsForm->addRow(tr("FPS:"), m_fpsLabel);
+
+    mainLayout->addWidget(statsGroup);
+
+    // --- Rendering controls group ---
+    auto* renderGroup = new QGroupBox(tr("Rendering"));
+    auto* renderLayout = new QVBoxLayout(renderGroup);
+
+    m_drawVerticesCb = new QCheckBox(tr("Show Vertices"));
+    m_drawVerticesCb->setChecked(true);
+    m_drawEdgesCb = new QCheckBox(tr("Show Edges"));
+    m_drawEdgesCb->setChecked(true);
+    m_drawCloudsCb = new QCheckBox(tr("Show Keyframe Clouds"));
+    m_drawCloudsCb->setChecked(true);
+    m_drawSE3EdgesCb = new QCheckBox(tr("Show SE3 Edges"));
+    m_drawSE3EdgesCb->setChecked(true);
+
+    renderLayout->addWidget(m_drawVerticesCb);
+    renderLayout->addWidget(m_drawEdgesCb);
+    renderLayout->addWidget(m_drawCloudsCb);
+    renderLayout->addWidget(m_drawSE3EdgesCb);
+
+    // Point size
+    renderLayout->addWidget(new QLabel(tr("Point Size:")));
+    m_pointSizeSlider = new QSlider(Qt::Horizontal);
+    m_pointSizeSlider->setRange(1, 10);
+    m_pointSizeSlider->setValue(3);
+    m_pointSizeLabel = new QLabel("3");
+    auto* sizeRow = new QHBoxLayout;
+    sizeRow->addWidget(m_pointSizeSlider);
+    sizeRow->addWidget(m_pointSizeLabel);
+    renderLayout->addLayout(sizeRow);
+
+    // Point opacity
+    renderLayout->addWidget(new QLabel(tr("Point Opacity:")));
+    m_pointOpacitySlider = new QSlider(Qt::Horizontal);
+    m_pointOpacitySlider->setRange(10, 100);
+    m_pointOpacitySlider->setValue(100);
+    m_pointOpacityLabel = new QLabel("100%");
+    auto* opacityRow = new QHBoxLayout;
+    opacityRow->addWidget(m_pointOpacitySlider);
+    opacityRow->addWidget(m_pointOpacityLabel);
+    renderLayout->addLayout(opacityRow);
+
+    // Reset camera button
+    auto* resetBtn = new QPushButton(tr("Reset Camera"));
+    connect(resetBtn, &QPushButton::clicked, m_viewport, &ViewportWidget::resetCamera);
+    renderLayout->addWidget(resetBtn);
+
+    mainLayout->addWidget(renderGroup);
+
+    // --- Loading indicator ---
+    m_loadingLabel = new QLabel;
+    m_loadingLabel->setVisible(false);
+    m_loadingLabel->setStyleSheet("color: #ffaa00; font-weight: bold;");
+    mainLayout->addWidget(m_loadingLabel);
+
+    mainLayout->addStretch();
+}
+
+void GraphInfoPanel::onStatsChanged() {
+    m_vertexCountLabel->setText(QString::number(m_manager->vertexCount()));
+    m_edgeCountLabel->setText(QString::number(m_manager->edgeCount()));
+    m_keyframeCountLabel->setText(QString::number(m_manager->keyframeCount()));
+}
+
+void GraphInfoPanel::onLoadingStateChanged() {
+    bool loading = m_manager->isLoading();
+    m_loadingLabel->setVisible(loading);
+    if (loading) {
+        m_loadingLabel->setText(tr("Loading..."));
+    }
+}
