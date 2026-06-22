@@ -1,33 +1,52 @@
-# osgQOpenGL — minimal OSG-to-Qt adapter.
-#
-# Originally this folder shipped a QtWidgets QOpenGLWidget (osgQOpenGLWidget) and
-# a QOpenGLWindow variant. The app embeds rendering into QML via
-# QQuickFramebufferObject instead, so only the widget-agnostic OSGRenderer is
-# compiled here. It is consumed by src/viewport/osg_viewport_renderer.cpp.
+IF ( Qt6Widgets_FOUND )
+    include(GenerateExportHeader)
 
-set(LIB_NAME osgQOpenGL)
-set(CMAKE_INCLUDE_CURRENT_DIR yes)
+    SET(LIB_NAME osgQOpenGL)
 
-# OSGRenderer.h uses Q_OBJECT (timerEvent is a slot-able override) → run moc.
-set(SOURCE_H OSGRenderer.h)
-qt6_wrap_cpp(SOURCES_H_MOC ${SOURCE_H})
+    set(CMAKE_INCLUDE_CURRENT_DIR yes)
 
-set(TARGET_SRC
-    OSGRenderer.cpp
-    ${SOURCES_H_MOC}
-)
+    # 使用当前目录下的头文件，而不是不存在的include目录
+    SET(SOURCE_H 
+        osgQOpenGLWidget.h
+        osgQOpenGLWindow.h
+        OSGRenderer.h
+    )
 
-add_library(${LIB_NAME} STATIC ${TARGET_SRC})
+    qt6_wrap_cpp(SOURCES_H_MOC ${SOURCE_H})
 
-target_include_directories(${LIB_NAME} PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${OPENSCENEGRAPH_INCLUDE_DIRS}
-)
+    SET(TARGET_SRC
+        CullVisitorEx.cpp
+        GraphicsWindowEx.cpp
+        osgQOpenGLWidget.cpp
+        osgQOpenGLWindow.cpp
+        OSGRenderer.cpp
+        RenderStageEx.cpp
+        StateEx.cpp
+        ${SOURCES_H_MOC}
+    )
 
-# OSGRenderer needs QObject (Core) + the GUI event classes (QKeyEvent etc. live
-# in Qt6::Gui). No Widgets.
-target_link_libraries(${LIB_NAME} PUBLIC
-    Qt6::Core
-    Qt6::Gui
-    ${OPENSCENEGRAPH_LIBRARIES}
-)
+    # 创建静态库
+    add_library(${LIB_NAME} STATIC ${TARGET_SRC})
+
+    # 设置包含目录
+    target_include_directories(${LIB_NAME} PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        ${OPENSCENEGRAPH_INCLUDE_DIRS}
+    )
+
+    # 链接Qt6库
+    target_link_libraries(${LIB_NAME} PUBLIC
+        Qt6::Widgets
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
+        ${OPENSCENEGRAPH_LIBRARIES}
+    )
+
+    # 生成Export头文件
+    generate_export_header(${LIB_NAME} EXPORT_FILE_NAME "Export")
+
+    # 将库链接到主可执行文件
+    target_link_libraries(3DPCViewer PRIVATE ${LIB_NAME})
+
+ENDIF()

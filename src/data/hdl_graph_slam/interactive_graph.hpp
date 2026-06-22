@@ -8,7 +8,7 @@
 #include <Eigen/Dense>
 #include <boost/format.hpp>
 
-#include "guik/progress_interface.hpp"
+#include "data/hdl_graph_slam/progress_interface.hpp"
 #include "data/hdl_graph_slam/graph_slam.hpp"
 #include "data/hdl_graph_slam/parameter_server.hpp"
 #include "data/hdl_graph_slam/interactive_keyframe.hpp"
@@ -33,7 +33,7 @@ public:
     InteractiveGraph();
     virtual ~InteractiveGraph();
 
-    bool load_map_data(const std::string& directory, guik::ProgressInterface& progress);
+    bool load_map_data(const std::string& directory, hdl_graph_slam::ProgressInterface& progress);
 
     long anchor_node_id() const;
 
@@ -48,8 +48,8 @@ public:
     std::string graph_statistics(bool update = false);
     std::string optimization_messages() const;
 
-    void dump(const std::string& directory, guik::ProgressInterface& progress);
-    bool save_pointcloud(const std::string& filename, guik::ProgressInterface& progress);
+    void dump(const std::string& directory, hdl_graph_slam::ProgressInterface& progress);
+    bool save_pointcloud(const std::string& filename, hdl_graph_slam::ProgressInterface& progress);
 
     using GraphSLAM::graph;
     using GraphSLAM::num_edges;
@@ -57,8 +57,8 @@ public:
     using GraphSLAM::set_solver;
 
 private:
-    bool load_special_nodes(const std::string& directory, guik::ProgressInterface& progress);
-    bool load_keyframes(const std::string& directory, guik::ProgressInterface& progress);
+    bool load_special_nodes(const std::string& directory, hdl_graph_slam::ProgressInterface& progress);
+    bool load_keyframes(const std::string& directory, hdl_graph_slam::ProgressInterface& progress);
 
 private:
     g2o::VertexSE3* anchor_node;

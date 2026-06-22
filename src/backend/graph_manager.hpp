@@ -45,9 +45,9 @@ public:
     QString lastLogLevel() const;
     ProgressReporter* progress() const;
 
-    Q_INVOKABLE void logInfo(const QString& msg);
-    Q_INVOKABLE void logWarning(const QString& msg);
-    Q_INVOKABLE void logError(const QString& msg);
+    void logInfo(const QString& msg);
+    void logWarning(const QString& msg);
+    void logError(const QString& msg);
 
     // Returns shared_ptr for renderer to obtain its own reference in synchronize().
     // Caller gets independent refcount → graph cannot be destroyed during render().

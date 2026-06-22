@@ -16,11 +16,18 @@
 
 #include "OSGRenderer.h"
 
-#include <osgViewer/Viewer>
-#include <osg/Camera>
-#include <osg/GraphicsContext>
-#include <osg/Material>
-#include <osg/LightModel>
+#include "osgQOpenGLWindow.h"
+#include "osgQOpenGLWidget.h"
+
+//#include <osgQOpenGL/CullVisitorEx>
+//#include <osgQOpenGL/GraphicsWindowEx>
+
+#include <QApplication>
+#include <QScreen>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLVertexArrayObject>
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -139,21 +146,20 @@ OSGRenderer::~OSGRenderer()
 
 void OSGRenderer::update()
 {
-    // Request a Qt scenegraph update via the host-installed callback.
-    // Previously this dynamic_cast'd to osgQOpenGLWidget/osgQOpenGLWindow; that
-    // widget coupling is replaced with an injectable callback so the renderer
-    // can also drive a QQuickFramebufferObject (QML) host.
-    if (m_requestUpdate)
-        m_requestUpdate();
-}
+    osgQOpenGLWindow* osgWidgetRendered = dynamic_cast<osgQOpenGLWindow*>(parent());
 
-void OSGRenderer::setDefaultFboId(unsigned int fboId)
-{
-    // Point OSG's GraphicsContext at a host-managed framebuffer object.
-    // This is what lets OSG render into a QQuickFramebufferObject's FBO.
-    osg::Camera* cam = getCamera();
-    if (cam && cam->getGraphicsContext())
-        cam->getGraphicsContext()->setDefaultFboId(fboId);
+    if(osgWidgetRendered != nullptr)
+    {
+        osgWidgetRendered->_osgWantsToRenderFrame = true;
+        osgWidgetRendered->update();
+    }
+
+    else
+    {
+        osgQOpenGLWidget* osgWidget = dynamic_cast<osgQOpenGLWidget*>(parent());
+        osgWidget->_osgWantsToRenderFrame = true;
+        osgWidget->update();
+    }
 }
 
 void OSGRenderer::resize(int windowWidth, int windowHeight, float windowScale)
@@ -189,39 +195,6 @@ void OSGRenderer::setupOSG(int windowWidth, int windowHeight, float windowScale)
     _camera->setViewport(new osg::Viewport(0, 0, windowWidth * windowScale,
                                            windowHeight * windowScale));
     _camera->setGraphicsContext(m_osgWinEmb.get());
-
-    // ---- Core Profile 3.3: tell OSG to use its modern GL3 pipeline ----
-    {
-        osg::State* state = m_osgWinEmb->getState();
-        if (state) {
-            // Map built-in vertex arrays (e.g. setVertexArray) to shader
-            // attributes (osg_Vertex, osg_Color, osg_Normal) automatically.
-            state->setUseVertexAttributeAliasing(true);
-
-            // Use uniform-based model-view-projection matrices instead of
-            // deprecated fixed-function built-ins (gl_ModelViewProjectionMatrix etc).
-            state->setUseModelViewAndProjectionUniforms(true);
-
-            // VAO is handled per-Geometry via setUseVertexBufferObjects(true) /
-            // setUseDisplayList(false), already set in osg_viewport_renderer.cpp.
-        }
-    }
-
-    // Core Profile 3.3: disable OSG's default fixed-function lighting entirely.
-    setLightingMode(osg::View::NO_LIGHT);
-
-    // Also stomp the camera's StateSet so no fixed-function mode/attribute
-    // leaks through.  OSG's State applies default Material / LightModel /
-    // ShadeModel when nothing is explicitly set; all of those call deprecated
-    // GL functions (glMaterialfv, glLightModelfv, glShadeModel) that trigger
-    // GL_INVALID_ENUM / GL_INVALID_OPERATION in core profile.
-    osg::StateSet* css = _camera->getOrCreateStateSet();
-    css->setMode(GL_LIGHTING,       osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
-    css->setMode(GL_FOG,            osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
-    css->setMode(GL_ALPHA_TEST,     osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
-    css->setAttribute(new osg::Material,   osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
-    css->setAttribute(new osg::LightModel, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
-
     // disable key event (default is Escape key) that the viewer checks on each
     // frame to see
     // if the viewer's done flag should be set to signal end of viewers main
@@ -233,9 +206,7 @@ void OSGRenderer::setupOSG(int windowWidth, int windowHeight, float windowScale)
     osgViewer::Viewer::Windows windows;
     getWindows(windows);
 
-    // In FBO/QML mode the host drives frame timing; skip the internal QTimer.
-    if (!m_driveExternally)
-        _timerId = startTimer(10, Qt::PreciseTimer);
+    _timerId = startTimer(10, Qt::PreciseTimer);
     _lastFrameStartTime.setStartTick(0);
 }
 
@@ -391,14 +362,14 @@ void OSGRenderer::wheelEvent(QWheelEvent* event)
     QPoint delta = event->angleDelta();
     if (!delta.isNull())
     {
-        // ï¿½ï¿½Ö±ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ï¿½Â£ï¿½
+        // ´¹Ö±¹öÂÖ£¨ÉÏÏÂ£©
         if (delta.y() != 0)
         {
             m_osgWinEmb->getEventQueue()->mouseScroll(
                 delta.y() > 0 ? osgGA::GUIEventAdapter::SCROLL_UP
                 : osgGA::GUIEventAdapter::SCROLL_DOWN);
         }
-        // Ë®Æ½ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ï¿½Ò£ï¿½
+        // Ë®Æ½¹öÂÖ£¨×óÓÒ£©
         else if (delta.x() != 0)
         {
             m_osgWinEmb->getEventQueue()->mouseScroll(

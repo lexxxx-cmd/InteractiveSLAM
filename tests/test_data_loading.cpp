@@ -2,7 +2,7 @@
 #include <iostream>
 #include <cassert>
 
-struct ConsoleProgress : guik::ProgressInterface {
+struct ConsoleProgress : hdl_graph_slam::ProgressInterface {
     void set_title(const std::string& title) override {
         std::cout << "=== " << title << " ===" << std::endl;
     }

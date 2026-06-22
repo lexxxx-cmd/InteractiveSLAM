@@ -34,7 +34,7 @@ InteractiveGraph::~InteractiveGraph() {
 }
 
 bool InteractiveGraph::load_map_data(const std::string& directory,
-                                      guik::ProgressInterface& progress) {
+                                      hdl_graph_slam::ProgressInterface& progress) {
     progress.set_title("Opening " + directory);
     progress.set_text("loading graph");
     if (!load(directory + "/graph.g2o")) {
@@ -61,7 +61,7 @@ bool InteractiveGraph::load_map_data(const std::string& directory,
 }
 
 bool InteractiveGraph::load_special_nodes(const std::string& directory,
-                                           guik::ProgressInterface& progress) {
+                                           hdl_graph_slam::ProgressInterface& progress) {
     std::ifstream ifs(directory + "/special_nodes.csv");
     if (ifs) {
         while (!ifs.eof()) {
@@ -133,7 +133,7 @@ bool InteractiveGraph::load_special_nodes(const std::string& directory,
 }
 
 bool InteractiveGraph::load_keyframes(const std::string& directory,
-                                       guik::ProgressInterface& progress) {
+                                       hdl_graph_slam::ProgressInterface& progress) {
     progress.set_maximum(graph->vertices().size());
     for (int i = 0;; i++) {
         std::string keyframe_dir = (boost::format("%s/%06d") % directory % i).str();
@@ -276,7 +276,7 @@ std::string InteractiveGraph::optimization_messages() const {
     return optimization_stream.str();
 }
 
-void InteractiveGraph::dump(const std::string& directory, guik::ProgressInterface& progress) {
+void InteractiveGraph::dump(const std::string& directory, hdl_graph_slam::ProgressInterface& progress) {
     progress.set_maximum(keyframes.size());
     progress.set_text("saving graph");
     progress.increment();
@@ -300,7 +300,7 @@ void InteractiveGraph::dump(const std::string& directory, guik::ProgressInterfac
 }
 
 bool InteractiveGraph::save_pointcloud(const std::string& filename,
-                                        guik::ProgressInterface& progress) {
+                                        hdl_graph_slam::ProgressInterface& progress) {
     progress.set_maximum(keyframes.size() + 1);
     progress.set_text("accumulate points");
 

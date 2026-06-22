@@ -1,27 +1,39 @@
+// Copyright (C) 2017 Mike Krus
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License as
+// published by the Free Software Foundation; either version 2 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program; if not, write to the Free Software
+// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
 #ifndef OSGRENDERER_H
 #define OSGRENDERER_H
 
-#include <QObject>
-#include <functional>
+#include "Export"
 
-#include <osg/ArgumentParser>
+#include <QObject>
+
 #include <osgViewer/Viewer>
 
 class QInputEvent;
 class QKeyEvent;
 class QMouseEvent;
 class QWheelEvent;
+namespace eveBIM
+{
+    class ViewerWidget;
+}
 
-// OSGRenderer wraps an osgViewer::Viewer and adapts Qt input events into OSG's
-// event queue. Originally coupled to osgQOpenGLWidget/osgQOpenGLWindow; it is now
-// widget-agnostic so it can also drive rendering from a QQuickFramebufferObject
-// (QML). When used inside a Qt FBO, call setDriveExternally(true) to disable the
-// internal QTimer, and install a callback via setUpdateCallback() so the host
-// can trigger Qt scenegraph updates on demand.
 class OSGRenderer : public QObject, public osgViewer::Viewer
 {
-    Q_OBJECT
-
     bool                                       m_osgInitialized {false};
     osg::ref_ptr<osgViewer::GraphicsWindow>    m_osgWinEmb;
     float                                      m_windowScale {1.0f};
@@ -32,12 +44,9 @@ class OSGRenderer : public QObject, public osgViewer::Viewer
     bool                                       _applicationAboutToQuit {false};
     bool                                       _osgWantsToRenderFrame{true};
 
-    // FBO path: the host installs a callback to request a Qt scenegraph update
-    // (replaces the former dynamic_cast<osgQOpenGLWidget> coupling).
-    std::function<void()>                      m_requestUpdate;
+    Q_OBJECT
 
-    // When true, the host drives frame timing and the internal QTimer is off.
-    bool                                       m_driveExternally {false};
+    friend class eveBIM::ViewerWidget;
 
 public:
 
@@ -46,16 +55,15 @@ public:
 
     ~OSGRenderer() override;
 
-    bool continuousUpdate() const { return m_continuousUpdate; }
-    void setContinuousUpdate(bool continuousUpdate) { m_continuousUpdate = continuousUpdate; }
+    bool continuousUpdate() const
+    {
+        return m_continuousUpdate;
+    }
+    void setContinuousUpdate(bool continuousUpdate)
+    {
+        m_continuousUpdate = continuousUpdate;
+    }
 
-    //! Disable the internal QTimer — the host will trigger updates instead.
-    void setDriveExternally(bool v) { m_driveExternally = v; }
-
-    //! Install a host callback used to request a Qt scenegraph update.
-    void setUpdateCallback(std::function<void()> cb) { m_requestUpdate = std::move(cb); }
-
-    //! Forward Qt input events into the OSG event queue (thread-safe queue).
     virtual void keyPressEvent(QKeyEvent* event);
     virtual void keyReleaseEvent(QKeyEvent* event);
     virtual void mousePressEvent(QMouseEvent* event);
@@ -67,9 +75,6 @@ public:
     virtual void resize(int windowWidth, int windowHeight, float windowScale);
 
     void setupOSG(int windowWidth, int windowHeight, float windowScale);
-
-    //! Direct subsequent OSG rendering at a Qt-managed framebuffer object.
-    void setDefaultFboId(unsigned int fboId);
 
     // overrided from osgViewer::Viewer
     virtual bool checkNeedToDoFrame() override;

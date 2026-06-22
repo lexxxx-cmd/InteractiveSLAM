@@ -4,17 +4,17 @@
 #include <QString>
 #include <QThread>
 #include <string>
-#include "guik/progress_interface.hpp"
+#include "data/hdl_graph_slam/progress_interface.hpp"
 
 /**
- * @brief Thread-safe progress reporter — bridges guik::ProgressInterface to QML.
+ * @brief Thread-safe progress reporter — bridges hdl_graph_slam::ProgressInterface to Qt.
  *
  * Worker threads call set_title/set_text/etc. The implementation detects
  * the calling thread and uses QMetaObject::invokeMethod with
  * Qt::QueuedConnection to forward the call to the main thread, where
- * Qt signals are safely emitted for QML consumption.
+ * Qt signals are safely emitted for Widgets consumption.
  */
-class ProgressReporter : public QObject, public guik::ProgressInterface {
+class ProgressReporter : public QObject, public hdl_graph_slam::ProgressInterface {
     Q_OBJECT
 public:
     explicit ProgressReporter(QObject* parent = nullptr);

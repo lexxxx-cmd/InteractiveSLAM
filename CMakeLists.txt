@@ -4,9 +4,11 @@ project(InteractiveSLAM VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTORCC ON)  # Auto-process .qrc files in source lists
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
-# Third-party find modules (before Qt, so vcpkg toolchain can inject paths)
+# Third-party find modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 find_package(Eigen3 REQUIRED)
@@ -14,15 +16,16 @@ find_package(PCL REQUIRED COMPONENTS io common search features)
 find_package(g2o REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
-# OpenSceneGraph — powers the new OSGViewport rendering path.
+# OpenSceneGraph
 find_package(OpenSceneGraph REQUIRED
     COMPONENTS osg osgViewer osgGA osgUtil osgDB OpenThreads)
 
-# Qt6
-find_package(Qt6 REQUIRED COMPONENTS Quick Concurrent)
-qt_standard_project_setup(REQUIRES 6.8)
+# Qt6 — Widgets-based UI (replaces QML)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets Concurrent)
 
-# Source files (Phase B: data loading layer)
+# --- Source files ---
+
+# Data layer (unchanged except for progress_interface.hpp shim)
 set(DATA_SOURCES
     src/data/hdl_graph_slam/keyframe.cpp
     src/data/hdl_graph_slam/graph_slam.cpp
@@ -32,46 +35,55 @@ set(DATA_SOURCES
     src/data/g2o/robust_kernel_io.cpp
 )
 
-# Phase C: Qt backend
+# Qt backend bridge (adapted for Widgets)
 set(BACKEND_SOURCES
     src/backend/progress_reporter.cpp
     src/backend/graph_manager.cpp
 )
 
-# Phase D: OpenGL rendering
-set(GLK_SOURCES
-    src/glk/glsl_shader.cpp
-    src/glk/mesh.cpp
-    src/glk/primitives.cpp
-    src/glk/pointcloud_buffer.cpp
-    src/glk/lines.cpp
+# Qt Widgets UI (new — replaces Main.qml + QML viewport)
+set(UI_SOURCES
+    src/ui/MainWindow.cpp
+    src/ui/ViewportWidget.cpp
+    src/ui/GraphInfoPanel.cpp
 )
 
-set(VIEWPORT_SOURCES
-    src/viewport/graph_viewport.cpp
-    src/viewport/graph_viewport_renderer.cpp
-    src/viewport/vertex_view.cpp
-    src/viewport/edge_view.cpp
-    # OSG rendering path (replaces glk raw-GL viewport in Main.qml)
-    src/viewport/osg_viewport.cpp
-    src/viewport/osg_viewport_renderer.cpp
-)
-
-# osgQOpenGL adapter library (compiles only the widget-agnostic OSGRenderer)
+# osgQOpenGL adapter library (now full Widgets integration)
 add_subdirectory(src/osgQOpenGL)
 
+# --- Main executable ---
 qt_add_executable(appInteractiveSLAM
     main.cpp
     ${DATA_SOURCES}
     ${BACKEND_SOURCES}
-    ${GLK_SOURCES}
-    ${VIEWPORT_SOURCES}
-    resources/shaders.qrc
+    ${UI_SOURCES}
 )
 
-# Shader resources — .qrc processed by CMAKE_AUTORCC
+target_include_directories(appInteractiveSLAM PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${EIGEN3_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${G2O_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
 
-# Standalone CLI test for data loading (Phase B verification)
+target_link_libraries(appInteractiveSLAM PRIVATE
+    Qt6::Widgets
+    Qt6::OpenGL
+    Qt6::OpenGLWidgets
+    Qt6::Concurrent
+    osgQOpenGL
+    ${PCL_LIBRARIES}
+    ${G2O_LIBRARIES}
+    Boost::filesystem
+    ${OPENSCENEGRAPH_LIBRARIES}
+)
+
+if(MSVC)
+    target_compile_options(appInteractiveSLAM PRIVATE /W3 /wd4996)
+endif()
+
+# --- Standalone CLI test (unchanged) ---
 add_executable(test_data_loading
     tests/test_data_loading.cpp
     ${DATA_SOURCES}
@@ -90,37 +102,6 @@ target_link_libraries(test_data_loading PRIVATE
 )
 if(MSVC)
     target_compile_options(test_data_loading PRIVATE /W3 /wd4996)
-endif()
-
-qt_add_qml_module(appInteractiveSLAM
-    URI InteractiveSLAM
-    VERSION 1.0
-    QML_FILES
-        Main.qml
-)
-
-target_include_directories(appInteractiveSLAM PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${EIGEN3_INCLUDE_DIRS}
-    ${PCL_INCLUDE_DIRS}
-    ${G2O_INCLUDE_DIRS}
-    ${Boost_INCLUDE_DIRS}
-)
-
-target_link_libraries(appInteractiveSLAM PRIVATE
-    Qt6::Quick
-    Qt6::Concurrent
-    ${PCL_LIBRARIES}
-    ${G2O_LIBRARIES}
-    Boost::filesystem
-    # OSG rendering
-    osgQOpenGL
-    ${OPENSCENEGRAPH_LIBRARIES}
-)
-
-# Ensure the target compiles despite PCL/g2o header warnings on MSVC
-if(MSVC)
-    target_compile_options(appInteractiveSLAM PRIVATE /W3 /wd4996)
 endif()
 
 install(TARGETS appInteractiveSLAM
