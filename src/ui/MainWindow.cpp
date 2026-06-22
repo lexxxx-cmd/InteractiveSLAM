@@ -29,6 +29,15 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             this, &MainWindow::onLoadingFailed);
     connect(m_manager, &GraphManager::lastMessageChanged,
             this, &MainWindow::onLogMessage);
+
+    // Picking feedback in status bar
+    connect(m_viewport, &ViewportWidget::vertexSelected,
+            this, [this](long vertexId) {
+        if (vertexId >= 0)
+            statusBar()->showMessage(tr("Selected vertex: %1").arg(vertexId));
+        else
+            statusBar()->clearMessage();
+    });
 }
 
 // ---------------------------------------------------------------------------

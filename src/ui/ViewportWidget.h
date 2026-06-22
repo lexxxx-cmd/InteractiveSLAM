@@ -12,6 +12,7 @@
 
 class osgQOpenGLWidget;
 class GraphManager;
+class SpherePickingHandler;
 
 namespace hdl_graph_slam {
 class InteractiveGraph;
@@ -44,10 +45,12 @@ public slots:
 signals:
     void fpsUpdated(float fps);
     void initialized();
+    void vertexSelected(long vertexId);
 
 private slots:
     void initOsg();        // called on osgQOpenGLWidget::initialized
     void updateScene();    // timer-driven pose/edge refresh
+    void onVertexPicked(long vertexId);  // picking callback
 
 private:
     osgQOpenGLWidget* m_osgWidget = nullptr;
@@ -56,6 +59,7 @@ private:
     hdl_graph_slam::DrawFlags m_flags;
 
     QTimer* m_updateTimer = nullptr;
+    osg::ref_ptr<SpherePickingHandler> m_pickingHandler;
 
     // FPS tracking (rolling average)
     int m_frameCount = 0;

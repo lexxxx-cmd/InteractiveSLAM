@@ -9,6 +9,7 @@
 #include "osgQOpenGL/osgQOpenGLWidget.h"
 #include "osgQOpenGL/OSGRenderer.h"
 #include "backend/graph_manager.hpp"
+#include "visualizers/SpherePickingHandler.h"
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -58,6 +59,17 @@ void ViewportWidget::initOsg() {
 
     // Trackball camera
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
+
+    // Register Ctrl+Click sphere picking handler
+    m_pickingHandler = new SpherePickingHandler(
+        &m_sceneViz->sphereCenters(),
+        m_sceneViz->sphereRadius(),
+        [this](long vertexId) {
+            QMetaObject::invokeMethod(this, [this, vertexId]() {
+                onVertexPicked(vertexId);
+            }, Qt::QueuedConnection);
+        });
+    viewer->addEventHandler(m_pickingHandler);
 
     emit initialized();
 }
@@ -171,4 +183,20 @@ void ViewportWidget::updateScene() {
         lastTime = now;
         emit fpsUpdated(m_fps);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Picking
+// ---------------------------------------------------------------------------
+
+void ViewportWidget::onVertexPicked(long vertexId) {
+    m_sceneViz->setSelectedVertex(vertexId);
+
+    // Rebuild spheres to apply/dismiss highlight colour
+    if (m_graph) {
+        m_sceneViz->updatePoses(m_graph);
+        m_osgWidget->update();
+    }
+
+    emit vertexSelected(vertexId);
 }

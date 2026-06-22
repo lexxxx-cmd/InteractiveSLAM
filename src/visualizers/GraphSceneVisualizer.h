@@ -83,6 +83,17 @@ public:
         }
     }
 
+    /// Sphere-centers cache for picking.  Pointer stable, contents refreshed
+    /// on every rebuildSpheres() call.
+    const std::vector<std::pair<osg::Vec3d, long>>& sphereCenters() const {
+        return m_sphereCenters;
+    }
+
+    float sphereRadius() const { return m_sphereRadius; }
+
+    void setSelectedVertex(long id) { m_selectedVertexId = id; }
+    long selectedVertex() const { return m_selectedVertexId; }
+
     // ---- Scene construction ----
 
     /// Build the entire scene graph from an InteractiveGraph.
@@ -141,11 +152,23 @@ private:
         }
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
+
+        m_sphereCenters.clear();
+        m_sphereCenters.reserve(graph->keyframes.size());
+
+        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // red
+        const osg::Vec4 highlightColor(1.0f, 0.8f, 0.0f, 1.0f);   // orange
+
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v) continue;
             Eigen::Vector3d pos = v->estimate().translation();
-            m_sphereViz->appendSphere(osg::Vec3d(pos.x(), pos.y(), pos.z()));
+            osg::Vec3d center(pos.x(), pos.y(), pos.z());
+
+            m_sphereCenters.emplace_back(center, id);
+
+            osg::Vec4 color = (id == m_selectedVertexId) ? highlightColor : defaultColor;
+            m_sphereViz->appendSphere(center, color);
         }
         m_sphereViz->finish();
     }
@@ -179,6 +202,10 @@ private:
 
     // Cached graph reference for live parameter changes
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_lastGraph;
+
+    // Sphere centers cache for picking (parallel to VBO, refreshed on rebuild)
+    std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;
+    long m_selectedVertexId = -1;
 
     // State
     bool m_hasGraph    = false;

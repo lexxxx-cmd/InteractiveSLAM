@@ -41,10 +41,10 @@ public:
     }
 
     /// Append one sphere centred at @p center (world-space).
-    void appendSphere(const osg::Vec3d& center) {
+    void appendSphere(const osg::Vec3d& center,
+                      const osg::Vec4& color = osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f)) {
         const float pi = 3.14159265f;
         unsigned int base = m_verts->size();
-        const osg::Vec4 red(1.0f, 0.0f, 0.0f, 1.0f);
 
         // Generate Y-up sphere vertices (same tessellation as glk::buildSphere)
         for (int r = 0; r <= m_rings; ++r) {
@@ -61,7 +61,7 @@ public:
                     center.x() + m_radius * sinPhi * cosT,
                     center.y() + m_radius * cosPhi,
                     center.z() + m_radius * sinPhi * sinT));
-                m_colors->push_back(red);
+                m_colors->push_back(color);
             }
         }
 
