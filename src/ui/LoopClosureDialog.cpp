@@ -20,6 +20,7 @@
 
 #include <algorithm>
 
+#include <pcl/common/transforms.h>
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/features/fpfh.h>
 #include <pcl/registration/sample_consensus_prerejective.h>
@@ -28,11 +29,47 @@
 #include <g2o/types/slam3d/types_slam3d.h>
 
 // ---------------------------------------------------------------------------
+// mergeAdjacentClouds — free function
+// ---------------------------------------------------------------------------
+
+pcl::PointCloud<pcl::PointXYZI>::Ptr mergeAdjacentClouds(
+    const hdl_graph_slam::InteractiveGraph* graph, long centerId) {
+
+    using PointT = pcl::PointXYZI;
+    auto merged = pcl::make_shared<pcl::PointCloud<PointT>>();
+
+    // Find center keyframe (required)
+    auto itCenter = graph->keyframes.find(centerId);
+    if (itCenter == graph->keyframes.end()) return merged;
+    auto& centerKf = itCenter->second;
+    if (!centerKf->cloud || centerKf->cloud->empty()) return merged;
+    Eigen::Isometry3d centerPose = centerKf->estimate();
+
+    // Merge centerId-1, centerId, centerId+1
+    for (long id = centerId - 1; id <= centerId + 1; ++id) {
+        auto it = graph->keyframes.find(id);
+        if (it == graph->keyframes.end()) continue;
+        auto& kf = it->second;
+        if (!kf->cloud || kf->cloud->empty()) continue;
+
+        Eigen::Isometry3d T_rel = centerPose.inverse() * kf->estimate();
+
+        pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
+        pcl::transformPointCloud(*kf->cloud, *transformed, T_rel.matrix());
+        *merged += *transformed;
+    }
+
+    return merged;
+}
+
+// ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
 
 LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
-                                     GraphManager* manager, QWidget* parent)
+                                     GraphManager* manager,
+                                     CloudPtr beginCloud, CloudPtr endCloud,
+                                     QWidget* parent)
     : QDialog(parent),
       m_manager(manager),
       m_beginVertexId(beginVertexId),
@@ -48,7 +85,16 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
         return;
     }
 
-    // Look up keyframes
+    // Use pre-merged clouds from caller
+    m_beginCloud = beginCloud;
+    m_endCloud   = endCloud;
+    if (!m_beginCloud || !m_endCloud || m_beginCloud->empty() || m_endCloud->empty()) {
+        QMessageBox::warning(parent, tr("Error"),
+                             tr("One or both keyframes have no point cloud data"));
+        return;
+    }
+
+    // Look up keyframes for poses
     auto itBegin = m_graph->keyframes.find(m_beginVertexId);
     auto itEnd   = m_graph->keyframes.find(m_endVertexId);
     if (itBegin == m_graph->keyframes.end() || itEnd == m_graph->keyframes.end()) {
@@ -56,19 +102,8 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
         return;
     }
 
-    auto& beginKf = itBegin->second;
-    auto& endKf   = itEnd->second;
-
-    m_beginCloud = beginKf->cloud;
-    m_endCloud   = endKf->cloud;
-    if (!m_beginCloud || !m_endCloud || m_beginCloud->empty() || m_endCloud->empty()) {
-        QMessageBox::warning(parent, tr("Error"),
-                             tr("One or both keyframes have no point cloud data"));
-        return;
-    }
-
-    m_beginPose    = beginKf->estimate();
-    m_endPoseInit  = endKf->estimate();
+    m_beginPose    = itBegin->second->estimate();
+    m_endPoseInit  = itEnd->second->estimate();
     m_endPose      = m_endPoseInit;
 
     m_regMethods = std::make_unique<hdl_graph_slam::RegistrationMethods>();

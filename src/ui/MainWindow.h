@@ -20,6 +20,7 @@ public:
 private slots:
     void onOpenMap();
     void onCloseMap();
+    void onSavePoseGraph();
     void onOptimize();
     void onResetCamera();
     void onLoadingStarted();

@@ -21,14 +21,25 @@ class RegistrationMethods;
 class InteractiveGraph;
 }  // namespace hdl_graph_slam
 
+/// Merge point clouds of keyframes adjacent to @p centerId (±1) into
+/// @p centerId's local coordinate frame.
+/// Clouds from keyframes that do not exist (or have empty clouds) are
+/// silently skipped — the result may contain 1–3 keyframes' points.
+pcl::PointCloud<pcl::PointXYZI>::Ptr mergeAdjacentClouds(
+    const hdl_graph_slam::InteractiveGraph* graph, long centerId);
+
 /// @brief Modal dialog for manually closing a loop between two keyframes.
 ///
 /// Flow:
 ///   1. User right-clicks vertex A → "Loop Begin" (MainWindow stores vertex ID)
-///   2. User right-clicks vertex B → "Loop End" (MainWindow opens this dialog)
-///   3. Dialog shows relative-pose preview, fitness score, adjustment controls
-///   4. User can auto-align (FPFH), scan-match (ICP/GICP/NDT), or manually adjust
-///   5. "Add Edge" commits the relative pose to the graph; "Cancel" discards
+///   2. MainWindow merges adjacent-clouds for both A and B
+///   3. User right-clicks vertex B → "Loop End" (MainWindow opens this dialog)
+///   4. Dialog shows relative-pose preview, fitness score, adjustment controls
+///   5. User can auto-align (FPFH), scan-match (ICP/GICP/NDT), or manually adjust
+///   6. "Add Edge" commits the relative pose to the graph; "Cancel" discards
+///
+/// @param beginCloud  Pre-merged cloud for begin vertex (center-frame local)
+/// @param endCloud    Pre-merged cloud for end vertex (center-frame local)
 class LoopClosureDialog : public QDialog {
     Q_OBJECT
 public:
@@ -38,9 +49,13 @@ public:
     /// @param beginVertexId   ID of the "Loop Begin" vertex
     /// @param endVertexId     ID of the "Loop End" vertex
     /// @param manager         GraphManager for accessing the graph
+    /// @param beginCloud      Pre-merged cloud for begin vertex (center-frame local coords)
+    /// @param endCloud        Pre-merged cloud for end vertex (center-frame local coords)
     /// @param parent          Parent widget
     LoopClosureDialog(long beginVertexId, long endVertexId,
-                      GraphManager* manager, QWidget* parent = nullptr);
+                      GraphManager* manager,
+                      CloudPtr beginCloud, CloudPtr endCloud,
+                      QWidget* parent = nullptr);
     ~LoopClosureDialog() override;
 
 private slots:

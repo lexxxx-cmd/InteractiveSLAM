@@ -56,6 +56,7 @@ public:
     using GraphSLAM::graph;
     using GraphSLAM::num_edges;
     using GraphSLAM::num_vertices;
+    using GraphSLAM::save;
     using GraphSLAM::set_solver;
 
 private:

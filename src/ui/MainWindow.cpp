@@ -95,11 +95,13 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                     return;
                 }
 
-                // 查找两端 KeyFrame
-                auto itBegin = graph->keyframes.find(m_loopBeginVertexId);
-                auto itEnd   = graph->keyframes.find(vertexId);
-                if (itBegin == graph->keyframes.end() || itEnd == graph->keyframes.end()) {
-                    statusBar()->showMessage(tr("Vertex not found"), 3000);
+                // 合并相邻帧（±1）点云到中心帧局部坐标系，用于更好观察
+                auto mergedBegin = mergeAdjacentClouds(graph, m_loopBeginVertexId);
+                auto mergedEnd   = mergeAdjacentClouds(graph, vertexId);
+                if (!mergedBegin || !mergedEnd ||
+                    mergedBegin->empty() || mergedEnd->empty()) {
+                    statusBar()->showMessage(
+                        tr("Vertex has no point cloud data"), 3000);
                     m_loopBeginVertexId = -1;
                     return;
                 }
@@ -108,7 +110,8 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                 long beginId = m_loopBeginVertexId;
                 m_loopBeginVertexId = -1;  // 提前清除，防止重复进入
 
-                LoopClosureDialog dlg(beginId, vertexId, m_manager, this);
+                LoopClosureDialog dlg(beginId, vertexId, m_manager,
+                                      mergedBegin, mergedEnd, this);
                 if (dlg.exec() == QDialog::Accepted) {
                     m_viewport->refreshScene();
                     m_viewport->rebuildPointClouds();
@@ -187,6 +190,12 @@ void MainWindow::setupMenus() {
 
     fileMenu->addSeparator();
 
+    auto* savePoseAction = fileMenu->addAction(tr("Save Pose Graph..."));
+    savePoseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
+    connect(savePoseAction, &QAction::triggered, this, &MainWindow::onSavePoseGraph);
+
+    fileMenu->addSeparator();
+
     auto* quitAction = fileMenu->addAction(tr("&Quit"));
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
@@ -225,6 +234,27 @@ void MainWindow::onCloseMap() {
     m_viewport->onGraphClosed();
     m_loopBeginVertexId = -1;
     statusBar()->showMessage(tr("Map closed"));
+}
+
+void MainWindow::onSavePoseGraph() {
+    if (!m_manager->isLoaded()) {
+        statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+
+    QString path = QFileDialog::getSaveFileName(
+        this, tr("Save Pose Graph"), QString(),
+        tr("Pose Graph Files (*.g2o);;All Files (*)"));
+    if (path.isEmpty()) return;
+
+    try {
+        m_manager->graph()->save(path.toStdString());
+        statusBar()->showMessage(
+            tr("Pose graph saved: %1").arg(path), 5000);
+    } catch (const std::exception& e) {
+        statusBar()->showMessage(
+            tr("Save failed: %1").arg(e.what()), 5000);
+    }
 }
 
 // ---------------------------------------------------------------------------
