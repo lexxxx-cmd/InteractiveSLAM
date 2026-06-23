@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <pcl/point_types.h>
 #include <pcl/registration/registration.h>
 
 namespace hdl_graph_slam {

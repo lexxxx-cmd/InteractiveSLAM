@@ -18,6 +18,8 @@
 #include <QTimer>
 #include <QtConcurrent/QtConcurrent>
 
+#include <algorithm>
+
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/features/fpfh.h>
 #include <pcl/registration/sample_consensus_prerejective.h>
