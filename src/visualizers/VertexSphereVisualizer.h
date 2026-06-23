@@ -42,7 +42,7 @@ public:
 
     /// Append one sphere centred at @p center (world-space).
     void appendSphere(const osg::Vec3d& center,
-                      const osg::Vec4& color = osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f)) {
+                      const osg::Vec4& color = osg::Vec4(0.2f, 0.0f, 0.0f, 1.0f)) {
         const float pi = 3.14159265f;
         unsigned int base = m_verts->size();
 

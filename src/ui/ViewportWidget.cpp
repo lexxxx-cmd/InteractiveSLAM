@@ -208,6 +208,16 @@ void ViewportWidget::resetCamera() {
 }
 
 // ---------------------------------------------------------------------------
+// Manual scene refresh (called after data changes like edge deletion)
+// ---------------------------------------------------------------------------
+
+void ViewportWidget::refreshScene() {
+    if (!m_graph) return;
+    m_sceneViz->updatePoses(m_graph);
+    m_osgWidget->update();
+}
+
+// ---------------------------------------------------------------------------
 // Frame update (timer-driven)
 // ---------------------------------------------------------------------------
 

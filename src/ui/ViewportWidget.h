@@ -30,6 +30,7 @@ public:
 public slots:
     void onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph);
     void onGraphClosed();
+    void refreshScene();
 
     // Rendering controls
     void setDrawVertices(bool v);

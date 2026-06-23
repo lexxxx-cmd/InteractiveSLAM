@@ -34,4 +34,6 @@ private:
     GraphManager* m_manager;
     ViewportWidget* m_viewport;
     GraphInfoPanel* m_infoPanel;
+
+    long m_loopBeginVertexId = -1;  // -1 = 未选择 Loop Begin
 };

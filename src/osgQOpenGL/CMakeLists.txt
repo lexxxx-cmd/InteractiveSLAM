@@ -47,6 +47,6 @@ IF ( Qt6Widgets_FOUND )
     generate_export_header(${LIB_NAME} EXPORT_FILE_NAME "Export")
 
     # 将库链接到主可执行文件
-    target_link_libraries(3DPCViewer PRIVATE ${LIB_NAME})
+    # (osgQOpenGL is linked via main CMakeLists.txt to appInteractiveSLAM)
 
 ENDIF()

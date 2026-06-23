@@ -42,6 +42,8 @@ public:
                            const std::string& robust_kernel = "NONE",
                            double robust_kernel_delta = 0.1);
 
+    bool removeEdge(long edgeId);
+
     void optimize(int num_iterations = -1);
     void optimize_background(int num_iterations = -1);
 

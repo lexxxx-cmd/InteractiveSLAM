@@ -155,6 +155,21 @@ bool InteractiveGraph::load_keyframes(const std::string& directory,
     return true;
 }
 
+bool InteractiveGraph::removeEdge(long edgeId) {
+    std::lock_guard<std::mutex> lock(optimization_mutex);
+    g2o::SparseOptimizer* g = dynamic_cast<g2o::SparseOptimizer*>(this->graph.get());
+    if (!g) return false;
+
+    for (auto* edge : g->edges()) {
+        auto* se3 = dynamic_cast<g2o::EdgeSE3*>(edge);
+        if (!se3) continue;
+        if (static_cast<long>(se3->id()) == edgeId) {
+            return g->removeEdge(se3);
+        }
+    }
+    return false;
+}
+
 long InteractiveGraph::anchor_node_id() const {
     return anchor_node ? anchor_node->id() : -1;
 }

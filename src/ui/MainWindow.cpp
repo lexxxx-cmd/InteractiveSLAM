@@ -62,6 +62,85 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             menu.addAction(tr("Degree: %1 edges").arg(vtxDegree))->setEnabled(false);
             menu.addAction(tr("Cloud: %1 points").arg(vtxCloudSize))->setEnabled(false);
             menu.addSeparator();
+
+            // --- Loop Begin ---
+            QAction* loopBeginAction = menu.addAction(tr("Loop Begin"));
+            connect(loopBeginAction, &QAction::triggered, this, [this, vertexId]() {
+                m_loopBeginVertexId = vertexId;
+                statusBar()->showMessage(
+                    tr("Loop begin set to vertex %1. Right-click another vertex → Loop End.")
+                        .arg(vertexId), 5000);
+            });
+
+            // --- Loop End ---
+            QAction* loopEndAction = menu.addAction(tr("Loop End"));
+            if (m_loopBeginVertexId < 0) {
+                loopEndAction->setEnabled(false);       // 未设 begin 时灰色
+            }
+            connect(loopEndAction, &QAction::triggered, this, [this, vertexId]() {
+                if (m_loopBeginVertexId < 0) return;
+
+                auto* graph = m_manager->graph();
+                if (!graph) {
+                    statusBar()->showMessage(tr("No graph loaded"), 3000);
+                    m_loopBeginVertexId = -1;
+                    return;
+                }
+
+                // 拒绝相同顶点
+                if (m_loopBeginVertexId == vertexId) {
+                    statusBar()->showMessage(tr("Cannot loop to the same vertex"), 3000);
+                    m_loopBeginVertexId = -1;
+                    return;
+                }
+
+                // 查找两端 KeyFrame
+                auto itBegin = graph->keyframes.find(m_loopBeginVertexId);
+                auto itEnd   = graph->keyframes.find(vertexId);
+                if (itBegin == graph->keyframes.end() || itEnd == graph->keyframes.end()) {
+                    statusBar()->showMessage(tr("Vertex not found"), 3000);
+                    m_loopBeginVertexId = -1;
+                    return;
+                }
+
+                auto& beginKf = itBegin->second;
+                auto& endKf   = itEnd->second;
+
+                // 检查是否已连接（使用 g2o 基类 API，无需 include SE3 头文件）
+                bool alreadyConnected = false;
+                if (beginKf->node && endKf->node) {
+                    for (auto* edge : beginKf->node->edges()) {
+                        const auto& verts = edge->vertices();
+                        bool hasBegin = false, hasEnd = false;
+                        for (size_t i = 0; i < verts.size(); ++i) {
+                            if (verts[i] == beginKf->node) hasBegin = true;
+                            if (verts[i] == endKf->node)   hasEnd   = true;
+                        }
+                        if (hasBegin && hasEnd) { alreadyConnected = true; break; }
+                    }
+                }
+                if (alreadyConnected) {
+                    statusBar()->showMessage(
+                        tr("Vertices %1 and %2 are already connected")
+                            .arg(m_loopBeginVertexId).arg(vertexId), 3000);
+                    m_loopBeginVertexId = -1;
+                    return;
+                }
+
+                // 以单位矩阵为相对位姿添加边（不做配准）
+                graph->add_edge(beginKf, endKf, Eigen::Isometry3d::Identity());
+
+                // 全局优化 + 刷新场景
+                graph->optimize();
+                m_viewport->refreshScene();
+
+                statusBar()->showMessage(
+                    tr("Loop edge added: %1 → %2").arg(m_loopBeginVertexId).arg(vertexId), 5000);
+
+                m_loopBeginVertexId = -1;
+            });
+
+            menu.addSeparator();
             menu.addAction(tr("Go to Vertex"))->setEnabled(false);
             menu.addAction(tr("Vertex Details..."))->setEnabled(false);
         } else if (edgeId >= 0) {
@@ -74,6 +153,20 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             menu.addSeparator();
             menu.addAction(tr("Go to Edge"))->setEnabled(false);
             menu.addAction(tr("Edge Details..."))->setEnabled(false);
+            menu.addSeparator();
+            QAction* deleteAction = menu.addAction(tr("Delete Edge"));
+            connect(deleteAction, &QAction::triggered, this, [this, edgeId]() {
+                auto* graph = m_manager->graph();
+                if (!graph) return;
+                if (graph->removeEdge(edgeId)) {
+                    m_viewport->refreshScene();
+                    statusBar()->showMessage(
+                        tr("Edge %1 deleted").arg(edgeId), 3000);
+                } else {
+                    statusBar()->showMessage(
+                        tr("Failed to delete edge %1").arg(edgeId), 3000);
+                }
+            });
         }
         menu.exec(pos);
     });
@@ -151,6 +244,7 @@ void MainWindow::onOpenMap() {
 void MainWindow::onCloseMap() {
     m_manager->closeMap();
     m_viewport->onGraphClosed();
+    m_loopBeginVertexId = -1;
     statusBar()->showMessage(tr("Map closed"));
 }
 
@@ -186,6 +280,7 @@ void MainWindow::onLoadingStarted() {
 }
 
 void MainWindow::onLoadingSucceeded() {
+    m_loopBeginVertexId = -1;
     statusBar()->showMessage(
         tr("Map loaded — %1 vertices, %2 edges, %3 keyframes")
             .arg(m_manager->vertexCount())
