@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 #include "ui/ViewportWidget.h"
 #include "ui/GraphInfoPanel.h"
+#include "ui/AutoLoopClosurePanel.h"
 #include "ui/LoopClosureDialog.h"
 #include "backend/graph_manager.hpp"
 
@@ -172,6 +173,24 @@ void MainWindow::setupUi() {
     dock->setWidget(m_infoPanel);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 
+    // Right dock panel: Auto Loop Closure
+    m_autoLoopDock = new QDockWidget(tr("Auto Loop Closure"), this);
+    m_autoLoopDock->setFeatures(QDockWidget::DockWidgetMovable |
+                                 QDockWidget::DockWidgetFloatable);
+    m_autoLoopDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
+
+    m_autoLoopPanel = new AutoLoopClosurePanel(m_manager, m_autoLoopDock);
+    m_autoLoopDock->setWidget(m_autoLoopPanel);
+    addDockWidget(Qt::RightDockWidgetArea, m_autoLoopDock);
+
+    // Refresh viewport when a loop edge is inserted by auto detection
+    connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopEdgeInserted,
+            this, [this]() {
+        m_viewport->refreshScene();
+        m_viewport->rebuildPointClouds();
+        statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
+    });
+
     // Status bar
     statusBar()->showMessage(tr("Ready — open a map folder to begin"));
 }
@@ -207,6 +226,13 @@ void MainWindow::setupMenus() {
     resetCamAction->setShortcut(QKeySequence(Qt::Key_R));
     connect(resetCamAction, &QAction::triggered, this, &MainWindow::onResetCamera);
 
+    viewMenu->addSeparator();
+
+    auto* autoLoopAction = viewMenu->addAction(tr("Auto Loop Closure Panel"));
+    autoLoopAction->setCheckable(true);
+    autoLoopAction->setChecked(true);
+    connect(autoLoopAction, &QAction::toggled, m_autoLoopDock, &QDockWidget::setVisible);
+
     // ---- Graph menu ----
     auto* graphMenu = menuBar()->addMenu(tr("&Graph"));
 
@@ -230,6 +256,11 @@ void MainWindow::onOpenMap() {
 }
 
 void MainWindow::onCloseMap() {
+    // Stop auto loop detection before tearing down the graph
+    if (m_autoLoopPanel) {
+        m_autoLoopPanel->stopDetection();
+    }
+
     m_manager->closeMap();
     m_viewport->onGraphClosed();
     m_loopBeginVertexId = -1;

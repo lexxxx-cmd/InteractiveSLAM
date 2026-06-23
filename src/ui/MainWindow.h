@@ -8,9 +8,11 @@
 class GraphManager;
 class ViewportWidget;
 class GraphInfoPanel;
+class AutoLoopClosurePanel;
 
 /// @brief Main application window — replaces Main.qml.
-///        Layout: central ViewportWidget + left-docked GraphInfoPanel.
+///        Layout: central ViewportWidget + left-docked GraphInfoPanel
+///                + right-docked AutoLoopClosurePanel.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -35,6 +37,10 @@ private:
     GraphManager* m_manager;
     ViewportWidget* m_viewport;
     GraphInfoPanel* m_infoPanel;
+
+    // Auto loop closure
+    AutoLoopClosurePanel* m_autoLoopPanel = nullptr;
+    QDockWidget* m_autoLoopDock = nullptr;
 
     long m_loopBeginVertexId = -1;  // -1 = 未选择 Loop Begin
 };

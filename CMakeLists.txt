@@ -33,6 +33,7 @@ set(DATA_SOURCES
     src/data/hdl_graph_slam/interactive_keyframe.cpp
     src/data/hdl_graph_slam/interactive_graph.cpp
     src/data/hdl_graph_slam/registration_methods.cpp
+    src/data/hdl_graph_slam/automatic_loop_closure.cpp
     src/data/g2o/robust_kernel_io.cpp
 )
 
@@ -49,6 +50,7 @@ set(UI_SOURCES
     src/ui/GraphInfoPanel.cpp
     src/ui/MiniViewportWidget.cpp
     src/ui/LoopClosureDialog.cpp
+    src/ui/AutoLoopClosurePanel.cpp
 )
 
 # osgQOpenGL adapter library (now full Widgets integration)
