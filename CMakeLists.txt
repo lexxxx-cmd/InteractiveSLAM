@@ -53,6 +53,9 @@ set(UI_SOURCES
 
 # osgQOpenGL adapter library (now full Widgets integration)
 add_subdirectory(src/osgQOpenGL)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 # --- Main executable ---
 qt_add_executable(appInteractiveSLAM

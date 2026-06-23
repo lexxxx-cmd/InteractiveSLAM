@@ -14,10 +14,10 @@ public:
   RegistrationMethods();
   ~RegistrationMethods();
 
-  /// 工厂方法：根据当前选中索引返回配准器实例
+  // Factory: returns registration instance by current method index
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr method() const;
 
-  /// 参数读写接口（替代 ImGui 直接操作成员）
+  // Parameter getters/setters
   int get_method_index() const { return registration_method; }
   void set_method_index(int idx) { registration_method = idx; }
 
