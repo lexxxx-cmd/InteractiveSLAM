@@ -121,17 +121,8 @@ public:
         rebuildSpheres(graph);
         m_sphereGroup->addChild(m_sphereViz->getNode());
 
-        // 2. Point cloud — local-space per keyframe under MatrixTransform
-        m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
-        for (auto& [id, kf] : graph->keyframes) {
-            auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
-            if (!v || !kf->cloud || kf->cloud->empty()) continue;
-            m_cloudViz->addKeyframeCloud(kf->cloud, v->estimate(), id);
-        }
-        m_cloudViz->finish();
-        m_cloudViz->setPointSize(m_pointSize);
-        m_cloudViz->setOpacity(m_pointOpacity);
-        m_cloudGroup->addChild(m_cloudViz->getNode());
+        // 2. Point cloud — world-space, merged across all keyframes
+        rebuildPointClouds(graph);
 
         // 3. Edges — world-space lines
         m_edgeLineViz = std::make_unique<EdgeLineVisualizer>();
@@ -141,8 +132,8 @@ public:
         m_hasGraph = true;
     }
 
-    /// Update spheres, edges, and point-cloud transforms after g2o optimization.
-    /// Point clouds use MatrixTransform updates (cheap, no vertex uploads).
+    /// Update spheres and edges every frame.  Point clouds are NOT updated
+    /// here (too expensive) — call rebuildPointClouds() after optimization.
     void updatePoses(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
         if (!graph) return;
         m_lastGraph = graph;
@@ -152,13 +143,32 @@ public:
         if (m_edgeLineViz) {
             m_edgeLineViz->rebuild(graph->graph.get());
         }
+    }
 
-        // Only update per-keyframe transform matrices — no vertex rebuild
+    /// Rebuild the merged world-space point cloud from current g2o poses.
+    /// Expensive (CPU transform + GPU upload of all points) — call only
+    /// after optimization, NOT every frame.
+    void rebuildPointClouds(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
+        if (!graph) return;
+
+        if (!m_cloudViz) {
+            m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
+            m_cloudViz->setPointSize(m_pointSize);
+            m_cloudViz->setOpacity(m_pointOpacity);
+            m_cloudGroup->addChild(m_cloudViz->getNode());
+        }
+
+        m_cloudViz->clear();
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
-            if (v && m_cloudViz) {
-                m_cloudViz->updateTransform(id, v->estimate());
-            }
+            if (!v || !kf->cloud || kf->cloud->empty()) continue;
+            m_cloudViz->appendCloud(kf->cloud, v->estimate(), id);
+        }
+        m_cloudViz->finish();
+
+        // Re-apply highlight if one was selected
+        if (m_selectedVertexId >= 0) {
+            m_cloudViz->recolorHighlight(m_selectedVertexId);
         }
     }
 

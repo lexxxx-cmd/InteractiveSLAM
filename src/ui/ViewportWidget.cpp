@@ -217,6 +217,12 @@ void ViewportWidget::refreshScene() {
     m_osgWidget->update();
 }
 
+void ViewportWidget::rebuildPointClouds() {
+    if (!m_graph) return;
+    m_sceneViz->rebuildPointClouds(m_graph);
+    m_osgWidget->update();
+}
+
 // ---------------------------------------------------------------------------
 // Frame update (timer-driven)
 // ---------------------------------------------------------------------------

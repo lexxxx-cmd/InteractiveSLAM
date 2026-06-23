@@ -31,6 +31,7 @@ public slots:
     void onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph);
     void onGraphClosed();
     void refreshScene();
+    void rebuildPointClouds();  // heavy — call only after optimization
 
     // Rendering controls
     void setDrawVertices(bool v);

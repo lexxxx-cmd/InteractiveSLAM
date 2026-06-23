@@ -111,6 +111,7 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                 LoopClosureDialog dlg(beginId, vertexId, m_manager, this);
                 if (dlg.exec() == QDialog::Accepted) {
                     m_viewport->refreshScene();
+                    m_viewport->rebuildPointClouds();
                     statusBar()->showMessage(
                         tr("Loop edge added: %1 → %2").arg(beginId).arg(vertexId), 5000);
                 } else {
@@ -241,6 +242,7 @@ void MainWindow::onOptimize() {
     auto* graph = m_manager->graph();
     if (graph) {
         graph->optimize();
+        m_viewport->rebuildPointClouds();
     }
     statusBar()->showMessage(tr("Optimization complete"), 3000);
 }
