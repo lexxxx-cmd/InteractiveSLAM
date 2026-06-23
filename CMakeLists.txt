@@ -12,7 +12,7 @@ set(CMAKE_AUTORCC ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL REQUIRED COMPONENTS io common search features)
+find_package(PCL REQUIRED COMPONENTS io common search features registration)
 find_package(g2o REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
@@ -32,6 +32,7 @@ set(DATA_SOURCES
     src/data/hdl_graph_slam/information_matrix_calculator.cpp
     src/data/hdl_graph_slam/interactive_keyframe.cpp
     src/data/hdl_graph_slam/interactive_graph.cpp
+    src/data/hdl_graph_slam/registration_methods.cpp
     src/data/g2o/robust_kernel_io.cpp
 )
 
@@ -46,6 +47,8 @@ set(UI_SOURCES
     src/ui/MainWindow.cpp
     src/ui/ViewportWidget.cpp
     src/ui/GraphInfoPanel.cpp
+    src/ui/MiniViewportWidget.cpp
+    src/ui/LoopClosureDialog.cpp
 )
 
 # osgQOpenGL adapter library (now full Widgets integration)

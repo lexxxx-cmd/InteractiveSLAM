@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 #include "ui/ViewportWidget.h"
 #include "ui/GraphInfoPanel.h"
+#include "ui/LoopClosureDialog.h"
 #include "backend/graph_manager.hpp"
 
 #include <QFileDialog>
@@ -103,41 +104,18 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                     return;
                 }
 
-                auto& beginKf = itBegin->second;
-                auto& endKf   = itEnd->second;
+                // 打开 Loop Closure 对话框（配准预览 + 手动调整 + Add Edge）
+                long beginId = m_loopBeginVertexId;
+                m_loopBeginVertexId = -1;  // 提前清除，防止重复进入
 
-                // 检查是否已连接（使用 g2o 基类 API，无需 include SE3 头文件）
-                bool alreadyConnected = false;
-                if (beginKf->node && endKf->node) {
-                    for (auto* edge : beginKf->node->edges()) {
-                        const auto& verts = edge->vertices();
-                        bool hasBegin = false, hasEnd = false;
-                        for (size_t i = 0; i < verts.size(); ++i) {
-                            if (verts[i] == beginKf->node) hasBegin = true;
-                            if (verts[i] == endKf->node)   hasEnd   = true;
-                        }
-                        if (hasBegin && hasEnd) { alreadyConnected = true; break; }
-                    }
-                }
-                if (alreadyConnected) {
+                LoopClosureDialog dlg(beginId, vertexId, m_manager, this);
+                if (dlg.exec() == QDialog::Accepted) {
+                    m_viewport->refreshScene();
                     statusBar()->showMessage(
-                        tr("Vertices %1 and %2 are already connected")
-                            .arg(m_loopBeginVertexId).arg(vertexId), 3000);
-                    m_loopBeginVertexId = -1;
-                    return;
+                        tr("Loop edge added: %1 → %2").arg(beginId).arg(vertexId), 5000);
+                } else {
+                    statusBar()->showMessage(tr("Loop closure cancelled"), 3000);
                 }
-
-                // 以单位矩阵为相对位姿添加边（不做配准）
-                graph->add_edge(beginKf, endKf, Eigen::Isometry3d::Identity());
-
-                // 全局优化 + 刷新场景
-                graph->optimize();
-                m_viewport->refreshScene();
-
-                statusBar()->showMessage(
-                    tr("Loop edge added: %1 → %2").arg(m_loopBeginVertexId).arg(vertexId), 5000);
-
-                m_loopBeginVertexId = -1;
             });
 
             menu.addSeparator();
