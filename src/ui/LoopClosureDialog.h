@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QPushButton>
@@ -97,6 +98,7 @@ private:
     // === UI Widgets ===
     MiniViewportWidget* m_miniViewport;
     QLabel* m_fitnessLabel;
+    QComboBox* m_stepCombo;             // step-size gear selector
     QDoubleSpinBox* m_sliders[6];       // PX, PY, PZ, RX, RY, RZ
     double m_sliderPrevValues[6];        // track previous values for delta computation
     QPushButton* m_autoAlignBtn;

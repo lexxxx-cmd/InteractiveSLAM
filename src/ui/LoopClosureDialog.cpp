@@ -111,6 +111,19 @@ void LoopClosureDialog::setupUi() {
     auto* sliderGroup = new QGroupBox(tr("Manual Adjustment (local frame)"));
     auto* sliderLayout = new QVBoxLayout(sliderGroup);
 
+    // Step-size gear selector
+    auto* stepRow = new QHBoxLayout;
+    stepRow->addWidget(new QLabel(tr("Step:")));
+    m_stepCombo = new QComboBox;
+    m_stepCombo->addItem(tr("Fine     — 0.01m /  0.6°"),  0);
+    m_stepCombo->addItem(tr("Medium   — 0.10m /  2.9°"),  1);
+    m_stepCombo->addItem(tr("Coarse   — 0.50m / 11.5°"),  2);
+    m_stepCombo->addItem(tr("Large    — 1.00m / 45.0°"),  3);
+    m_stepCombo->setCurrentIndex(1);  // default: Medium
+    stepRow->addWidget(m_stepCombo);
+    stepRow->addStretch();
+    sliderLayout->addLayout(stepRow);
+
     // Translation row: PX  PY  PZ
     auto* transRow = new QHBoxLayout;
     const char* transLabels[] = {"PX", "PY", "PZ"};
@@ -118,8 +131,8 @@ void LoopClosureDialog::setupUi() {
         transRow->addWidget(new QLabel(tr(transLabels[i])));
         m_sliders[i] = new QDoubleSpinBox;
         m_sliders[i]->setRange(-100.0, 100.0);
-        m_sliders[i]->setDecimals(3);
-        m_sliders[i]->setSingleStep(0.01);
+        m_sliders[i]->setDecimals(2);
+        m_sliders[i]->setSingleStep(0.10);   // default: Medium
         m_sliders[i]->setValue(0.0);
         m_sliders[i]->setKeyboardTracking(false);
         m_sliders[i]->setFixedWidth(100);
@@ -134,8 +147,8 @@ void LoopClosureDialog::setupUi() {
         rotRow->addWidget(new QLabel(tr(rotLabels[i])));
         m_sliders[3 + i] = new QDoubleSpinBox;
         m_sliders[3 + i]->setRange(-100.0, 100.0);
-        m_sliders[3 + i]->setDecimals(3);
-        m_sliders[3 + i]->setSingleStep(0.01);
+        m_sliders[3 + i]->setDecimals(2);
+        m_sliders[3 + i]->setSingleStep(0.05);  // default: Medium
         m_sliders[3 + i]->setValue(0.0);
         m_sliders[3 + i]->setKeyboardTracking(false);
         m_sliders[3 + i]->setFixedWidth(100);
@@ -158,6 +171,23 @@ void LoopClosureDialog::setupUi() {
             this, &LoopClosureDialog::onSliderRYChanged);
     connect(m_sliders[5], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &LoopClosureDialog::onSliderRZChanged);
+
+    // Step gear selector
+    connect(m_stepCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+        // Gear presets: {trans_step, rot_step}
+        static const double presets[][2] = {
+            {0.01, 0.01},   // Fine
+            {0.10, 0.05},   // Medium
+            {0.50, 0.20},   // Coarse
+            {1.00, 0.785},  // Large (45° ≈ 0.785 rad)
+        };
+        int i = std::clamp(index, 0, 3);
+        for (int j = 0; j < 3; ++j) {
+            m_sliders[j]->setSingleStep(presets[i][0]);
+            m_sliders[3 + j]->setSingleStep(presets[i][1]);
+        }
+    });
 
     // --- Action buttons ---
     auto* btnRow = new QHBoxLayout;
