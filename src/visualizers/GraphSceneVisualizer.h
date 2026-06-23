@@ -121,12 +121,12 @@ public:
         rebuildSpheres(graph);
         m_sphereGroup->addChild(m_sphereViz->getNode());
 
-        // 2. Point cloud — world-space, merged across all keyframes
+        // 2. Point cloud — local-space per keyframe under MatrixTransform
         m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v || !kf->cloud || kf->cloud->empty()) continue;
-            m_cloudViz->appendCloud(kf->cloud, v->estimate(), id);
+            m_cloudViz->addKeyframeCloud(kf->cloud, v->estimate(), id);
         }
         m_cloudViz->finish();
         m_cloudViz->setPointSize(m_pointSize);
@@ -141,7 +141,8 @@ public:
         m_hasGraph = true;
     }
 
-    /// Update spheres and edges after g2o optimization.
+    /// Update spheres, edges, and point-cloud transforms after g2o optimization.
+    /// Point clouds use MatrixTransform updates (cheap, no vertex uploads).
     void updatePoses(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
         if (!graph) return;
         m_lastGraph = graph;
@@ -150,6 +151,14 @@ public:
 
         if (m_edgeLineViz) {
             m_edgeLineViz->rebuild(graph->graph.get());
+        }
+
+        // Only update per-keyframe transform matrices — no vertex rebuild
+        for (auto& [id, kf] : graph->keyframes) {
+            auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
+            if (v && m_cloudViz) {
+                m_cloudViz->updateTransform(id, v->estimate());
+            }
         }
     }
 
