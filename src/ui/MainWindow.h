@@ -5,14 +5,17 @@
 #include <QMenuBar>
 #include <QDockWidget>
 
+class QAction;
 class GraphManager;
 class ViewportWidget;
 class GraphInfoPanel;
 class AutoLoopClosurePanel;
+class EdgeListPanel;
+class OverlayPanelWidget;
 
 /// @brief Main application window — replaces Main.qml.
 ///        Layout: central ViewportWidget + left-docked GraphInfoPanel
-///                + right-docked AutoLoopClosurePanel.
+///                + floating overlay panels (AutoLoopClosure / LoopEdges).
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -38,9 +41,16 @@ private:
     ViewportWidget* m_viewport;
     GraphInfoPanel* m_infoPanel;
 
-    // Auto loop closure
     AutoLoopClosurePanel* m_autoLoopPanel = nullptr;
-    QDockWidget* m_autoLoopDock = nullptr;
+    EdgeListPanel* m_edgeListPanel = nullptr;
+
+    // View menu actions (stored for check-state sync with overlays)
+    QAction* m_autoLoopViewAction = nullptr;
+    QAction* m_edgeListViewAction = nullptr;
+
+    // Overlay wrappers (floating over viewport)
+    OverlayPanelWidget* m_autoLoopOverlay = nullptr;
+    OverlayPanelWidget* m_edgeListOverlay = nullptr;
 
     long m_loopBeginVertexId = -1;  // -1 = 未选择 Loop Begin
 };

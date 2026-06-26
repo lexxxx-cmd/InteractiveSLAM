@@ -2,6 +2,8 @@
 #include "ui/ViewportWidget.h"
 #include "ui/GraphInfoPanel.h"
 #include "ui/AutoLoopClosurePanel.h"
+#include "ui/EdgeListPanel.h"
+#include "ui/OverlayPanelWidget.h"
 #include "ui/LoopClosureDialog.h"
 #include "backend/graph_manager.hpp"
 
@@ -9,6 +11,7 @@
 #include <QMessageBox>
 #include <QMenu>
 #include <QApplication>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -77,7 +80,7 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             // --- Loop End ---
             QAction* loopEndAction = menu.addAction(tr("Loop End"));
             if (m_loopBeginVertexId < 0) {
-                loopEndAction->setEnabled(false);       // 未设 begin 时灰色
+                loopEndAction->setEnabled(false);
             }
             connect(loopEndAction, &QAction::triggered, this, [this, vertexId]() {
                 if (m_loopBeginVertexId < 0) return;
@@ -89,14 +92,12 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                     return;
                 }
 
-                // 拒绝相同顶点
                 if (m_loopBeginVertexId == vertexId) {
                     statusBar()->showMessage(tr("Cannot loop to the same vertex"), 3000);
                     m_loopBeginVertexId = -1;
                     return;
                 }
 
-                // 合并相邻帧（±1）点云到中心帧局部坐标系，用于更好观察
                 auto mergedBegin = mergeAdjacentClouds(graph, m_loopBeginVertexId);
                 auto mergedEnd   = mergeAdjacentClouds(graph, vertexId);
                 if (!mergedBegin || !mergedEnd ||
@@ -107,9 +108,8 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                     return;
                 }
 
-                // 打开 Loop Closure 对话框（配准预览 + 手动调整 + Add Edge）
                 long beginId = m_loopBeginVertexId;
-                m_loopBeginVertexId = -1;  // 提前清除，防止重复进入
+                m_loopBeginVertexId = -1;
 
                 LoopClosureDialog dlg(beginId, vertexId, m_manager,
                                       mergedBegin, mergedEnd, this);
@@ -173,27 +173,67 @@ void MainWindow::setupUi() {
     dock->setWidget(m_infoPanel);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 
-    // Right dock panel: Auto Loop Closure
-    m_autoLoopDock = new QDockWidget(tr("Auto Loop Closure"), this);
-    m_autoLoopDock->setFeatures(QDockWidget::DockWidgetMovable |
-                                 QDockWidget::DockWidgetFloatable);
-    m_autoLoopDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
+    // ── Floating overlay panels (over viewport, no dock squeezing) ──────
+    // Create panels (parent = nullptr, will be reparented into overlays)
+    m_autoLoopPanel = new AutoLoopClosurePanel(m_manager, nullptr);
+    m_edgeListPanel = new EdgeListPanel(m_manager, nullptr);
 
-    m_autoLoopPanel = new AutoLoopClosurePanel(m_manager, m_autoLoopDock);
-    m_autoLoopDock->setWidget(m_autoLoopPanel);
-    addDockWidget(Qt::RightDockWidgetArea, m_autoLoopDock);
+    m_autoLoopOverlay = new OverlayPanelWidget(tr("Auto Loop Closure"), m_autoLoopPanel);
+    m_edgeListOverlay = new OverlayPanelWidget(tr("Loop Edges"), m_edgeListPanel);
+
+    // Register with viewport (reparents, positions, shows)
+    m_viewport->registerOverlay(m_autoLoopOverlay);
+    m_viewport->registerOverlay(m_edgeListOverlay);
+
+    // Connect overlay close buttons to hide and re-stack
+    connect(m_autoLoopOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_autoLoopOverlay) {
+            m_autoLoopOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_autoLoopViewAction) m_autoLoopViewAction->setChecked(false);
+        }
+    });
+    connect(m_edgeListOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_edgeListOverlay) {
+            m_edgeListOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_edgeListViewAction) m_edgeListViewAction->setChecked(false);
+        }
+    });
 
     // Refresh viewport when a loop edge is inserted by auto detection
     connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopEdgeInserted,
             this, [this]() {
         m_viewport->refreshScene();
         m_viewport->rebuildPointClouds();
+        m_edgeListPanel->refreshList();
         statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
+    });
+
+    // Sphere highlight: blue=source, green=candidates during auto loop search
+    connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopDetectionStatus,
+            this, [this](long sourceId, QVector<long> candidateIds) {
+        std::vector<long> vec(candidateIds.begin(), candidateIds.end());
+        m_viewport->setLoopHighlight(sourceId, vec);
+        m_viewport->refreshScene();
+    });
+
+    // Refresh viewport when hidden edges change
+    connect(m_edgeListPanel, &EdgeListPanel::hiddenEdgesChanged,
+            this, [this]() {
+        m_viewport->setHiddenEdges(m_edgeListPanel->hiddenEdgeIds());
+        m_viewport->refreshScene();
     });
 
     // Status bar
     statusBar()->showMessage(tr("Ready — open a map folder to begin"));
 }
+
+// ---------------------------------------------------------------------------
+// Menus
+// ---------------------------------------------------------------------------
 
 void MainWindow::setupMenus() {
     // ---- File menu ----
@@ -228,10 +268,27 @@ void MainWindow::setupMenus() {
 
     viewMenu->addSeparator();
 
-    auto* autoLoopAction = viewMenu->addAction(tr("Auto Loop Closure Panel"));
-    autoLoopAction->setCheckable(true);
-    autoLoopAction->setChecked(true);
-    connect(autoLoopAction, &QAction::toggled, m_autoLoopDock, &QDockWidget::setVisible);
+    // Auto Loop Closure toggle — controls overlay visibility
+    m_autoLoopViewAction = viewMenu->addAction(tr("Auto Loop Closure Panel"));
+    m_autoLoopViewAction->setCheckable(true);
+    m_autoLoopViewAction->setChecked(true);
+    connect(m_autoLoopViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_autoLoopOverlay) {
+            m_autoLoopOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
+
+    // Loop Edges toggle — controls overlay visibility
+    m_edgeListViewAction = viewMenu->addAction(tr("Loop Edges Panel"));
+    m_edgeListViewAction->setCheckable(true);
+    m_edgeListViewAction->setChecked(true);
+    connect(m_edgeListViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_edgeListOverlay) {
+            m_edgeListOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
 
     // ---- Graph menu ----
     auto* graphMenu = menuBar()->addMenu(tr("&Graph"));
@@ -256,13 +313,16 @@ void MainWindow::onOpenMap() {
 }
 
 void MainWindow::onCloseMap() {
-    // Stop auto loop detection before tearing down the graph
     if (m_autoLoopPanel) {
         m_autoLoopPanel->stopDetection();
     }
 
     m_manager->closeMap();
     m_viewport->onGraphClosed();
+    m_viewport->setLoopHighlight(-1, {});  // clear loop highlights
+    if (m_edgeListPanel) {
+        m_edgeListPanel->clearList();
+    }
     m_loopBeginVertexId = -1;
     statusBar()->showMessage(tr("Map closed"));
 }
@@ -299,7 +359,6 @@ void MainWindow::onOptimize() {
     }
 
     statusBar()->showMessage(tr("Optimizing..."));
-    // Trigger optimization via the data layer
     auto* graph = m_manager->graph();
     if (graph) {
         graph->optimize();
@@ -330,6 +389,9 @@ void MainWindow::onLoadingSucceeded() {
         5000);
 
     m_viewport->onGraphLoaded(m_manager->sharedGraph());
+    if (m_edgeListPanel) {
+        m_edgeListPanel->refreshList();
+    }
 }
 
 void MainWindow::onLoadingFailed(const QString& error) {
