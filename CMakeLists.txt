@@ -16,6 +16,15 @@ find_package(PCL REQUIRED COMPONENTS io common search features registration)
 find_package(g2o REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
+# OpenMP (for ndt_omp multi-threaded GICP / NDT)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    set(HAS_PCLOMP ON)
+    message(STATUS "OpenMP found — enabling GICP_OMP / NDT_OMP")
+else()
+    message(WARNING "OpenMP not found — GICP_OMP / NDT_OMP will be unavailable")
+endif()
+
 # OpenSceneGraph
 find_package(OpenSceneGraph REQUIRED
     COMPONENTS osg osgViewer osgGA osgUtil osgDB OpenThreads)
@@ -51,7 +60,13 @@ set(UI_SOURCES
     src/ui/MiniViewportWidget.cpp
     src/ui/LoopClosureDialog.cpp
     src/ui/AutoLoopClosurePanel.cpp
+    src/ui/EdgeListPanel.cpp
 )
+
+# ndt_omp_MSVC — multi-threaded GICP / NDT (forked with PCL 1.12+/MSVC fixes)
+if(HAS_PCLOMP)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/ndt_omp_MSVC)
+endif()
 
 # osgQOpenGL adapter library (now full Widgets integration)
 add_subdirectory(src/osgQOpenGL)
@@ -85,7 +100,19 @@ target_link_libraries(appInteractiveSLAM PRIVATE
     ${G2O_LIBRARIES}
     Boost::filesystem
     ${OPENSCENEGRAPH_LIBRARIES}
+    ${OpenMP_CXX_LIBRARIES}
 )
+
+# ndt_omp: link + include propagation
+if(HAS_PCLOMP)
+    target_link_libraries(appInteractiveSLAM PRIVATE ndt_omp)
+endif()
+
+# Enable HAS_PCLOMP macro so registration_methods.cpp can use GICP_OMP / NDT_OMP
+if(HAS_PCLOMP AND OpenMP_CXX_FOUND)
+    target_compile_definitions(appInteractiveSLAM PRIVATE HAS_PCLOMP)
+    target_compile_options(appInteractiveSLAM PRIVATE ${OpenMP_CXX_FLAGS})
+endif()
 
 if(MSVC)
     target_compile_options(appInteractiveSLAM PRIVATE /W3 /wd4996)
