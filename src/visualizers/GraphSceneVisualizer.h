@@ -124,9 +124,9 @@ public:
         // 2. Point cloud — world-space, merged across all keyframes
         rebuildPointClouds(graph);
 
-        // 3. Edges — world-space lines
+        // 3. Edges — world-space lines, colored by EdgeSource
         m_edgeLineViz = std::make_unique<EdgeLineVisualizer>();
-        m_edgeLineViz->rebuild(graph->graph.get());
+        m_edgeLineViz->rebuild(graph.get(), m_hiddenEdgeIds);
         m_edgeGroup->addChild(m_edgeLineViz->getNode());
 
         m_hasGraph = true;
@@ -141,8 +141,22 @@ public:
         rebuildSpheres(graph);
 
         if (m_edgeLineViz) {
-            m_edgeLineViz->rebuild(graph->graph.get());
+            m_edgeLineViz->rebuild(graph.get(), m_hiddenEdgeIds);
         }
+    }
+
+    /// Replace the set of hidden edge IDs (called from MainWindow).
+    void setHiddenEdges(const std::set<long>& ids) {
+        m_hiddenEdgeIds = ids;
+    }
+
+    /// Highlight spheres for auto loop detection visualization.
+    /// @param sourceId      Vertex ID of the current search source (colored blue).
+    /// @param candidateIds  Vertex IDs of loop candidates (colored green).
+    void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds) {
+        m_loopSourceId = sourceId;
+        m_loopCandidateIds.clear();
+        m_loopCandidateIds.insert(candidateIds.begin(), candidateIds.end());
     }
 
     /// Rebuild the merged world-space point cloud from current g2o poses.
@@ -188,7 +202,9 @@ private:
         m_sphereCenters.reserve(graph->keyframes.size());
 
         const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // red
-        const osg::Vec4 highlightColor(1.0f, 0.8f, 0.0f, 1.0f);   // orange
+        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // orange
+        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // blue
+        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // green
 
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
@@ -198,7 +214,14 @@ private:
 
             m_sphereCenters.emplace_back(center, id);
 
-            osg::Vec4 color = (id == m_selectedVertexId) ? highlightColor : defaultColor;
+            osg::Vec4 color = defaultColor;
+            if (id == m_selectedVertexId) {
+                color = selectedColor;
+            } else if (id == m_loopSourceId) {
+                color = loopSourceColor;
+            } else if (m_loopCandidateIds.count(id)) {
+                color = loopCandColor;
+            }
             m_sphereViz->appendSphere(center, color);
         }
         m_sphereViz->finish();
@@ -238,6 +261,11 @@ private:
     std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;
     // Fallback for edgeSegments() when no edges loaded
     mutable std::vector<EdgeSegment> m_emptySegments;
+    // Edge IDs hidden by user via EdgeListPanel
+    std::set<long> m_hiddenEdgeIds;
+    // Auto loop detection highlights
+    long m_loopSourceId = -1;
+    std::set<long> m_loopCandidateIds;
     long m_selectedVertexId = -1;
 
     // State
