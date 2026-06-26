@@ -22,6 +22,16 @@ class EdgeSE3;
 namespace hdl_graph_slam {
 
 /**
+ * @brief Marks how an edge was created — used by EdgeListPanel to filter display.
+ */
+enum class EdgeSource {
+    Original,    // loaded from graph file (hidden in EdgeListPanel)
+    ManualLoop,  // manually added loop closure
+    AutoLoop,    // automatic loop detection
+    Anchor       // anchor-related edge
+};
+
+/**
  * @brief Core class to interactively manipulate a pose graph — SE3-only adaptation
  *
  * Plane-related methods (add_plane, add_edge_identity, add_edge_parallel, etc.)
@@ -40,9 +50,15 @@ public:
     g2o::EdgeSE3* add_edge(const KeyFrame::Ptr& key1, const KeyFrame::Ptr& key2,
                            const Eigen::Isometry3d& relative_pose,
                            const std::string& robust_kernel = "NONE",
-                           double robust_kernel_delta = 0.1);
+                           double robust_kernel_delta = 0.1,
+                           EdgeSource source = EdgeSource::ManualLoop);
 
     bool removeEdge(long edgeId);
+
+    EdgeSource edge_source(long edge_id) const {
+        auto it = edge_sources.find(edge_id);
+        return (it != edge_sources.end()) ? it->second : EdgeSource::Original;
+    }
 
     void optimize(int num_iterations = -1);
     void optimize_background(int num_iterations = -1);
@@ -84,6 +100,7 @@ public:
     double elapsed_time_msec;
 
     std::unordered_map<long, InteractiveKeyFrame::Ptr> keyframes;
+    std::unordered_map<long, EdgeSource> edge_sources;
     std::unique_ptr<InformationMatrixCalculator> inf_calclator;
 };
 

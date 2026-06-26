@@ -41,10 +41,13 @@ bool InteractiveGraph::load_map_data(const std::string& directory,
         return false;
     }
 
-    // re-assign edge ids
+    // re-assign edge ids and mark all loaded edges as Original
     edge_id_gen = 0;
+    edge_sources.clear();
     for (auto& edge : graph->edges()) {
-        edge->setId(edge_id_gen++);
+        edge->setId(edge_id_gen);
+        edge_sources[edge_id_gen] = EdgeSource::Original;
+        edge_id_gen++;
     }
 
     progress.increment();
@@ -177,11 +180,14 @@ long InteractiveGraph::anchor_node_id() const {
 g2o::EdgeSE3* InteractiveGraph::add_edge(const KeyFrame::Ptr& key1, const KeyFrame::Ptr& key2,
                                           const Eigen::Isometry3d& relative_pose,
                                           const std::string& robust_kernel,
-                                          double robust_kernel_delta) {
+                                          double robust_kernel_delta,
+                                          EdgeSource source) {
     Eigen::MatrixXd inf = inf_calclator->calc_information_matrix(key1->cloud, key2->cloud,
                                                                   relative_pose);
     g2o::EdgeSE3* edge = add_se3_edge(key1->node, key2->node, relative_pose, inf);
-    edge->setId(edge_id_gen++);
+    long eid = edge_id_gen++;
+    edge->setId(eid);
+    edge_sources[eid] = source;
 
     if (robust_kernel != "NONE") {
         add_robust_kernel(edge, robust_kernel, robust_kernel_delta);
