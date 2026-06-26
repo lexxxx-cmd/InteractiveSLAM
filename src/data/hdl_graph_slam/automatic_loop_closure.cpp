@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <iostream>
 #include <thread>
 
 namespace hdl_graph_slam {
@@ -198,6 +199,19 @@ void AutomaticLoopClosure::loop_detection() {
     // Cache sorted IDs for SEQUENTIAL mode
     refresh_sorted_ids();
 
+    // ── Create registration ONCE, reused across all iterations ──────
+    pcl::Registration<PointT, PointT>::Ptr registration;
+    try {
+        registration = m_reg_methods.method();
+    } catch (const std::runtime_error&) {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        m_status.running = false;
+        return;
+    }
+
+    const char* method_name = m_reg_methods.method_names()[m_reg_methods.get_method_index()];
+    std::cerr << "[auto-loop] using " << method_name << std::endl;
+
     while (m_running.load(std::memory_order_acquire)) {
         // ── Guard: need at least 2 keyframes ──────────────────────────
         if (m_graph->keyframes.size() < 2) {
@@ -241,17 +255,10 @@ void AutomaticLoopClosure::loop_detection() {
         update_status(source_id, candidates);
 
         // ── Step 4: Verify each candidate with scan matching ──────────
-        pcl::Registration<PointT, PointT>::Ptr registration;
-        try {
-            registration = m_reg_methods.method();
-        } catch (const std::runtime_error&) {
-            // Method unavailable (e.g. NDT_OMP without OpenMP) — skip
-            m_current_index++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            continue;
-        }
-
         registration->setInputTarget(source_kf->cloud);
+
+        // ── Debug: timing for this iteration ─────────────────────────
+        auto t_iter_start = std::chrono::steady_clock::now();
 
         bool edge_inserted = false;
 
@@ -269,24 +276,45 @@ void AutomaticLoopClosure::loop_detection() {
 
             registration->setInputSource(cand_kf->cloud);
 
+            // ── Time the ICP align ──────────────────────────────────
+            auto t_align_start = std::chrono::steady_clock::now();
+
             pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
             registration->align(*aligned, relative.matrix().cast<float>());
+
+            auto t_align_end = std::chrono::steady_clock::now();
+            double align_ms = std::chrono::duration<double, std::milli>(t_align_end - t_align_start).count();
 
             // Get refined transformation
             relative.matrix() =
                 registration->getFinalTransformation().cast<double>();
+
+            // ── Time the fitness calculation ────────────────────────
+            auto t_fit_start = std::chrono::steady_clock::now();
 
             double fitness =
                 InformationMatrixCalculator::calc_fitness_score(
                     source_kf->cloud, cand_kf->cloud, relative,
                     m_fitness_score_max_range);
 
+            auto t_fit_end = std::chrono::steady_clock::now();
+            double fit_ms = std::chrono::duration<double, std::milli>(t_fit_end - t_fit_start).count();
+
+            std::cerr << "[auto-loop] " << method_name
+                      << " | src=" << source_id << " → cand=" << cand_id
+                      << " | align=" << align_ms << " ms"
+                      << " | fitness=" << fit_ms << " ms"
+                      << " | score=" << fitness
+                      << (fitness < m_fitness_score_thresh ? " ✓" : "")
+                      << std::endl;
+
             update_last_match(source_id, cand_id, fitness);
 
             if (fitness < static_cast<double>(m_fitness_score_thresh)) {
                 m_graph->add_edge(source_kf, cand_kf, relative,
                                   kernel_name(m_kernel_type),
-                                  static_cast<double>(m_kernel_delta));
+                                  static_cast<double>(m_kernel_delta),
+                                  EdgeSource::AutoLoop);
                 edge_inserted = true;
 
                 {
@@ -295,6 +323,14 @@ void AutomaticLoopClosure::loop_detection() {
                 }
             }
         }
+
+        auto t_iter_end = std::chrono::steady_clock::now();
+        double iter_ms = std::chrono::duration<double, std::milli>(t_iter_end - t_iter_start).count();
+        std::cerr << "[auto-loop] " << method_name
+                  << " | iteration done: " << candidates.size() << " candidates"
+                  << " | total=" << iter_ms << " ms"
+                  << (edge_inserted ? " | edge inserted!" : "")
+                  << std::endl;
 
         // ── Step 5: Optional global optimization ──────────────────────
         if (edge_inserted && m_optimize) {
