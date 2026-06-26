@@ -304,14 +304,26 @@ void AutoLoopClosurePanel::onPollStatus() {
         tr("Edges inserted: %1").arg(status.edges_inserted));
 
     if (status.last_begin_id >= 0) {
+        QString fitnessStr;
+        if (status.last_fitness_score >= 1e100) {
+            fitnessStr = QString::fromUtf8("∞ (no overlap)");
+        } else {
+            fitnessStr = QString::number(status.last_fitness_score, 'f', 4);
+        }
         m_lastMatchLabel->setText(
             tr("Last: %1 → %2  fitness=%3")
                 .arg(status.last_begin_id)
                 .arg(status.last_end_id)
-                .arg(status.last_fitness_score, 0, 'f', 4));
+                .arg(fitnessStr));
     } else {
         m_lastMatchLabel->setText(tr("Last: —"));
     }
+
+    // ── Sphere colour highlights (blue=source, green=candidates) ──
+    QVector<long> qCandidates;
+    qCandidates.reserve(static_cast<int>(status.candidate_ids.size()));
+    for (long id : status.candidate_ids) qCandidates.append(id);
+    emit loopDetectionStatus(status.current_source_id, qCandidates);
 
     // ── Detect new edge insertions ──────────────────────────────
     if (status.edges_inserted > m_lastKnownEdgesInserted) {

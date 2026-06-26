@@ -36,6 +36,8 @@ public:
 signals:
     /// Emitted when a new loop edge is inserted — MainWindow refreshes the viewport.
     void loopEdgeInserted();
+    /// Emitted on every poll tick (~10 Hz) — source=blue, candidates=green in viewport.
+    void loopDetectionStatus(long sourceId, QVector<long> candidateIds);
 
 private slots:
     void onStartStop();
