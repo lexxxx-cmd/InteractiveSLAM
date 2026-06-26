@@ -61,6 +61,7 @@ set(UI_SOURCES
     src/ui/LoopClosureDialog.cpp
     src/ui/AutoLoopClosurePanel.cpp
     src/ui/EdgeListPanel.cpp
+    src/ui/OverlayPanelWidget.cpp
 )
 
 # ndt_omp_MSVC — multi-threaded GICP / NDT (forked with PCL 1.12+/MSVC fixes)

@@ -3,6 +3,8 @@
 #include <QWidget>
 #include <QTimer>
 #include <memory>
+#include <set>
+#include <vector>
 #include <osg/Group>
 #include <osgGA/TrackballManipulator>
 #include <osgViewer/Viewer>
@@ -12,6 +14,7 @@
 
 class osgQOpenGLWidget;
 class GraphManager;
+class OverlayPanelWidget;
 class SpherePickingHandler;
 
 namespace hdl_graph_slam {
@@ -43,7 +46,13 @@ public slots:
     void setPointSize(int size);
     void setPointOpacity(int opacity);
     void setBackgroundColor(const QColor& color);
+    void setHiddenEdges(const std::set<long>& ids);
+    void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);
     void resetCamera();
+
+    // Overlay panel management (floating panels over viewport)
+    void registerOverlay(OverlayPanelWidget* overlay);
+    void updateOverlayPositions();
 
 signals:
     void fpsUpdated(float fps);
@@ -56,6 +65,9 @@ signals:
                               long vtxCloudSize,
                               double vtxPosX, double vtxPosY, double vtxPosZ,
                               double vtxAccumDist, int vtxDegree);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void initOsg();        // called on osgQOpenGLWidget::initialized
@@ -70,6 +82,10 @@ private:
 
     QTimer* m_updateTimer = nullptr;
     osg::ref_ptr<SpherePickingHandler> m_pickingHandler;
+
+    // Overlay panels (floating over viewport)
+    QVector<OverlayPanelWidget*> m_overlays;
+    int m_overlayMargin = 10;
 
     // FPS tracking (rolling average)
     int m_frameCount = 0;

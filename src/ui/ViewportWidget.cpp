@@ -2,6 +2,7 @@
 
 #include <QVBoxLayout>
 #include <QColor>
+#include <QResizeEvent>
 #include <chrono>
 
 #include <osg/Notify>
@@ -10,6 +11,7 @@
 #include "osgQOpenGL/OSGRenderer.h"
 #include "backend/graph_manager.hpp"
 #include "visualizers/SpherePickingHandler.h"
+#include "ui/OverlayPanelWidget.h"
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -199,6 +201,14 @@ void ViewportWidget::setBackgroundColor(const QColor& color) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setHiddenEdges(const std::set<long>& ids) {
+    m_sceneViz->setHiddenEdges(ids);
+}
+
+void ViewportWidget::setLoopHighlight(long sourceId, const std::vector<long>& candidateIds) {
+    m_sceneViz->setLoopHighlight(sourceId, candidateIds);
+}
+
 void ViewportWidget::resetCamera() {
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
@@ -261,4 +271,57 @@ void ViewportWidget::onVertexPicked(long vertexId) {
     }
 
     emit vertexSelected(vertexId);
+}
+
+// ---------------------------------------------------------------------------
+// Overlay panel management
+// ---------------------------------------------------------------------------
+
+void ViewportWidget::registerOverlay(OverlayPanelWidget* overlay) {
+    if (!overlay) return;
+
+    // Reparent to this viewport
+    overlay->setParent(this);
+
+    // Add to tracking list
+    m_overlays.append(overlay);
+
+    // Set initial size hint
+    overlay->adjustSize();
+
+    // Position and show
+    updateOverlayPositions();
+    overlay->raise();
+    overlay->show();
+}
+
+void ViewportWidget::updateOverlayPositions() {
+    int yOffset = m_overlayMargin;
+
+    for (auto* overlay : m_overlays) {
+        if (!overlay->isVisible()) continue;
+
+        int panelW = overlay->width();
+        int panelH = overlay->height();
+
+        // Anchor to top-right corner
+        int newX = width() - panelW - m_overlayMargin;
+        int newY = yOffset;
+
+        // Clamp within viewport bounds
+        newX = std::max(m_overlayMargin,
+                        std::min(newX, width() - panelW - m_overlayMargin));
+        newY = std::max(m_overlayMargin,
+                        std::min(newY, height() - panelH - m_overlayMargin));
+
+        overlay->move(newX, newY);
+
+        // Next overlay stacks below
+        yOffset = newY + panelH + 6;
+    }
+}
+
+void ViewportWidget::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    updateOverlayPositions();
 }
