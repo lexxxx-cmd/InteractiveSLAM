@@ -11,6 +11,7 @@
 #include <pcl/point_types.h>
 #include <Eigen/Geometry>
 
+#include <set>
 #include <vector>
 
 #include "visualizers/TurboColormap.h"
@@ -122,17 +123,21 @@ public:
         m_geom->dirtyBound();
     }
 
-    /// Re-colour one keyframe's cloud for selection highlight without
-    /// rebuilding vertices.  Call after finish().
-    void recolorHighlight(long selectedVertexId) {
+    /// Re-colour point clouds for a set of highlighted keyframes (white)
+    /// and restore all others to turbo elevation colouring.
+    /// Call after finish().
+    /// @param highlightIds  Set of vertex IDs whose clouds should be
+    ///                      highlighted white.  Pass an empty set to
+    ///                      restore all clouds to turbo colouring.
+    void recolorHighlight(const std::set<long>& highlightIds) {
         if (!m_colors || m_cloudRanges.empty()) return;
 
-        const osg::Vec4 orange(1.0f, 0.55f, 0.0f, 1.0f);
+        const osg::Vec4 white(1.0f, 1.0f, 1.0f, 1.0f);
 
         for (const auto& range : m_cloudRanges) {
-            if (range.vertexId == selectedVertexId) {
+            if (highlightIds.count(range.vertexId)) {
                 for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
-                    (*m_colors)[i] = orange;
+                    (*m_colors)[i] = white;
                 }
             } else {
                 // Restore turbo colour from world-space Z

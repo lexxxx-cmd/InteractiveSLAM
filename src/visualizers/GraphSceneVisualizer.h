@@ -3,7 +3,9 @@
 #include <osg/Group>
 #include <osg/MatrixTransform>
 
+#include <algorithm>
 #include <memory>
+#include <set>
 #include <unordered_map>
 #include <Eigen/Geometry>
 
@@ -129,9 +131,16 @@ public:
 
     void setSelectedVertex(long id) {
         m_selectedVertexId = id;
-        if (m_cloudViz) m_cloudViz->recolorHighlight(id);
+        if (m_cloudViz) {
+            m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
+        }
     }
     long selectedVertex() const { return m_selectedVertexId; }
+
+    /// Number of temporal neighbours on each side of the selected vertex
+    /// whose point clouds are highlighted white (total = 2*half+1 frames).
+    void setHighlightWindowHalf(int half) { m_highlightWindowHalf = half; }
+    int  highlightWindowHalf() const { return m_highlightWindowHalf; }
 
     // ---- Scene construction ----
 
@@ -224,7 +233,7 @@ public:
 
         // Re-apply highlight if one was selected
         if (m_selectedVertexId >= 0) {
-            m_cloudViz->recolorHighlight(m_selectedVertexId);
+            m_cloudViz->recolorHighlight(getTemporalNeighbors(m_selectedVertexId));
         }
     }
 
@@ -279,6 +288,45 @@ private:
         m_hasGraph = false;
     }
 
+    /// Collect vertex IDs centred on `centerId` within
+    /// ±m_highlightWindowHalf temporal neighbours, sorted by stamp_nsec.
+    /// Returns an empty set when centerId < 0 (deselection) or no graph.
+    std::set<long> getTemporalNeighbors(long centerId) const {
+        std::set<long> result;
+        if (!m_lastGraph || centerId < 0) return result;
+
+        auto itCenter = m_lastGraph->keyframes.find(centerId);
+        if (itCenter == m_lastGraph->keyframes.end()) {
+            result.insert(centerId);
+            return result;
+        }
+
+        // Collect (stamp_nsec, vertexId) pairs and sort by timestamp
+        std::vector<std::pair<uint64_t, long>> sorted;
+        sorted.reserve(m_lastGraph->keyframes.size());
+        for (const auto& [id, kf] : m_lastGraph->keyframes) {
+            sorted.emplace_back(kf->stamp_nsec, id);
+        }
+        std::sort(sorted.begin(), sorted.end());
+
+        // Find position of centerId in the sorted sequence
+        auto it = std::find_if(sorted.begin(), sorted.end(),
+            [centerId](const auto& p) { return p.second == centerId; });
+        if (it == sorted.end()) {
+            result.insert(centerId);
+            return result;
+        }
+
+        size_t pos  = static_cast<size_t>(std::distance(sorted.begin(), it));
+        size_t half = static_cast<size_t>(m_highlightWindowHalf);
+        size_t start = (pos > half) ? pos - half : 0;
+        size_t end   = std::min(pos + half + 1, sorted.size());
+        for (size_t i = start; i < end; ++i) {
+            result.insert(sorted[i].second);
+        }
+        return result;
+    }
+
     // Root
     osg::ref_ptr<osg::Group> m_root;
 
@@ -309,6 +357,7 @@ private:
     long m_loopSourceId = -1;
     std::set<long> m_loopCandidateIds;
     long m_selectedVertexId = -1;
+    int  m_highlightWindowHalf = 3;  // temporal half-window (total = 2*half+1 frames)
 
     // State
     bool m_hasGraph    = false;
