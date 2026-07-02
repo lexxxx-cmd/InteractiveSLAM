@@ -3,19 +3,20 @@
 #include <QMainWindow>
 #include <QStatusBar>
 #include <QMenuBar>
-#include <QDockWidget>
 
 class QAction;
 class GraphManager;
 class ViewportWidget;
-class GraphInfoPanel;
+class GraphStatsPanel;
+class RenderingPanel;
+class ZClippingPanel;
+class ColorRangePanel;
 class AutoLoopClosurePanel;
 class EdgeListPanel;
 class OverlayPanelWidget;
 
 /// @brief Main application window — replaces Main.qml.
-///        Layout: central ViewportWidget + left-docked GraphInfoPanel
-///                + floating overlay panels (AutoLoopClosure / LoopEdges).
+///        Layout: central ViewportWidget + floating overlay panels.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -40,16 +41,29 @@ private:
 
     GraphManager* m_manager;
     ViewportWidget* m_viewport;
-    GraphInfoPanel* m_infoPanel;
+
+    // New overlay panels (content + wrapper)
+    GraphStatsPanel*    m_statsPanel    = nullptr;
+    RenderingPanel*     m_renderPanel   = nullptr;
+    ZClippingPanel*     m_zClipPanel    = nullptr;
+    ColorRangePanel*    m_colorPanel    = nullptr;
 
     AutoLoopClosurePanel* m_autoLoopPanel = nullptr;
     EdgeListPanel* m_edgeListPanel = nullptr;
 
     // View menu actions (stored for check-state sync with overlays)
+    QAction* m_statsViewAction  = nullptr;
+    QAction* m_renderViewAction = nullptr;
+    QAction* m_zClipViewAction  = nullptr;
+    QAction* m_colorViewAction  = nullptr;
     QAction* m_autoLoopViewAction = nullptr;
     QAction* m_edgeListViewAction = nullptr;
 
     // Overlay wrappers (floating over viewport)
+    OverlayPanelWidget* m_statsOverlay  = nullptr;
+    OverlayPanelWidget* m_renderOverlay = nullptr;
+    OverlayPanelWidget* m_zClipOverlay  = nullptr;
+    OverlayPanelWidget* m_colorOverlay  = nullptr;
     OverlayPanelWidget* m_autoLoopOverlay = nullptr;
     OverlayPanelWidget* m_edgeListOverlay = nullptr;
 

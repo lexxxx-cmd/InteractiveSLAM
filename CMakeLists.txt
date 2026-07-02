@@ -56,7 +56,10 @@ set(BACKEND_SOURCES
 set(UI_SOURCES
     src/ui/MainWindow.cpp
     src/ui/ViewportWidget.cpp
-    src/ui/GraphInfoPanel.cpp
+    src/ui/GraphStatsPanel.cpp
+    src/ui/RenderingPanel.cpp
+    src/ui/ZClippingPanel.cpp
+    src/ui/ColorRangePanel.cpp
     src/ui/MiniViewportWidget.cpp
     src/ui/LoopClosureDialog.cpp
     src/ui/AutoLoopClosurePanel.cpp

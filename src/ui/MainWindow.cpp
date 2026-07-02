@@ -1,6 +1,9 @@
 #include "ui/MainWindow.h"
 #include "ui/ViewportWidget.h"
-#include "ui/GraphInfoPanel.h"
+#include "ui/GraphStatsPanel.h"
+#include "ui/RenderingPanel.h"
+#include "ui/ZClippingPanel.h"
+#include "ui/ColorRangePanel.h"
 #include "ui/AutoLoopClosurePanel.h"
 #include "ui/EdgeListPanel.h"
 #include "ui/OverlayPanelWidget.h"
@@ -164,28 +167,79 @@ void MainWindow::setupUi() {
     m_viewport = new ViewportWidget(this);
     setCentralWidget(m_viewport);
 
-    // Left dock panel (statistics + rendering controls)
-    auto* dock = new QDockWidget(tr("Controls"), this);
-    dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
-    dock->setAllowedAreas(Qt::LeftDockWidgetArea);
+    // ── New floating overlay panels (default hidden) ──────────────────
+    m_statsPanel  = new GraphStatsPanel(m_manager, m_viewport, nullptr);
+    m_renderPanel = new RenderingPanel(m_viewport, nullptr);
+    m_zClipPanel  = new ZClippingPanel(m_viewport, nullptr);
+    m_colorPanel  = new ColorRangePanel(m_viewport, nullptr);
 
-    m_infoPanel = new GraphInfoPanel(m_manager, m_viewport, dock);
-    dock->setWidget(m_infoPanel);
-    addDockWidget(Qt::LeftDockWidgetArea, dock);
+    m_statsOverlay  = new OverlayPanelWidget(tr("Graph Statistics"), m_statsPanel);
+    m_renderOverlay = new OverlayPanelWidget(tr("Rendering"), m_renderPanel);
+    m_zClipOverlay  = new OverlayPanelWidget(tr("Z-Clipping"), m_zClipPanel);
+    m_colorOverlay  = new OverlayPanelWidget(tr("Color Range"), m_colorPanel);
 
-    // ── Floating overlay panels (over viewport, no dock squeezing) ──────
-    // Create panels (parent = nullptr, will be reparented into overlays)
+    // Register with viewport (reparents, positions, shows)
+    m_viewport->registerOverlay(m_statsOverlay);
+    m_viewport->registerOverlay(m_renderOverlay);
+    m_viewport->registerOverlay(m_zClipOverlay);
+    m_viewport->registerOverlay(m_colorOverlay);
+
+    // Hide all 4 by default (they'll be toggled from View menu)
+    m_statsOverlay->hide();
+    m_renderOverlay->hide();
+    m_zClipOverlay->hide();
+    m_colorOverlay->hide();
+    m_viewport->updateOverlayPositions();
+
+    // Close button → hide + sync menu action
+    connect(m_statsOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_statsOverlay) {
+            m_statsOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_statsViewAction) m_statsViewAction->setChecked(false);
+        }
+    });
+    connect(m_renderOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_renderOverlay) {
+            m_renderOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_renderViewAction) m_renderViewAction->setChecked(false);
+        }
+    });
+    connect(m_zClipOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_zClipOverlay) {
+            m_zClipOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_zClipViewAction) m_zClipViewAction->setChecked(false);
+        }
+    });
+    connect(m_colorOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_colorOverlay) {
+            m_colorOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_colorViewAction) m_colorViewAction->setChecked(false);
+        }
+    });
+
+    // ── Existing floating overlay panels ──────────────────────────────
     m_autoLoopPanel = new AutoLoopClosurePanel(m_manager, nullptr);
     m_edgeListPanel = new EdgeListPanel(m_manager, nullptr);
 
     m_autoLoopOverlay = new OverlayPanelWidget(tr("Auto Loop Closure"), m_autoLoopPanel);
     m_edgeListOverlay = new OverlayPanelWidget(tr("Loop Edges"), m_edgeListPanel);
 
-    // Register with viewport (reparents, positions, shows)
     m_viewport->registerOverlay(m_autoLoopOverlay);
     m_viewport->registerOverlay(m_edgeListOverlay);
 
-    // Connect overlay close buttons to hide and re-stack
+    // Default hidden (toggled from View menu)
+    m_autoLoopOverlay->hide();
+    m_edgeListOverlay->hide();
+    m_viewport->updateOverlayPositions();
+
     connect(m_autoLoopOverlay, &OverlayPanelWidget::closeRequested,
             this, [this]() {
         if (m_autoLoopOverlay) {
@@ -272,10 +326,56 @@ void MainWindow::setupMenus() {
 
     viewMenu->addSeparator();
 
-    // Auto Loop Closure toggle — controls overlay visibility
+    // Graph Statistics toggle
+    m_statsViewAction = viewMenu->addAction(tr("Graph Statistics"));
+    m_statsViewAction->setCheckable(true);
+    m_statsViewAction->setChecked(false);
+    connect(m_statsViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_statsOverlay) {
+            m_statsOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
+
+    // Rendering toggle
+    m_renderViewAction = viewMenu->addAction(tr("Rendering"));
+    m_renderViewAction->setCheckable(true);
+    m_renderViewAction->setChecked(false);
+    connect(m_renderViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_renderOverlay) {
+            m_renderOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
+
+    // Z-Clipping toggle
+    m_zClipViewAction = viewMenu->addAction(tr("Z-Clipping"));
+    m_zClipViewAction->setCheckable(true);
+    m_zClipViewAction->setChecked(false);
+    connect(m_zClipViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_zClipOverlay) {
+            m_zClipOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
+
+    // Color Range toggle
+    m_colorViewAction = viewMenu->addAction(tr("Color Range"));
+    m_colorViewAction->setCheckable(true);
+    m_colorViewAction->setChecked(false);
+    connect(m_colorViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_colorOverlay) {
+            m_colorOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
+
+    viewMenu->addSeparator();
+
+    // Auto Loop Closure toggle
     m_autoLoopViewAction = viewMenu->addAction(tr("Auto Loop Closure Panel"));
     m_autoLoopViewAction->setCheckable(true);
-    m_autoLoopViewAction->setChecked(true);
+    m_autoLoopViewAction->setChecked(false);
     connect(m_autoLoopViewAction, &QAction::toggled, this, [this](bool checked) {
         if (m_autoLoopOverlay) {
             m_autoLoopOverlay->setVisible(checked);
@@ -283,10 +383,10 @@ void MainWindow::setupMenus() {
         }
     });
 
-    // Loop Edges toggle — controls overlay visibility
+    // Loop Edges toggle
     m_edgeListViewAction = viewMenu->addAction(tr("Loop Edges Panel"));
     m_edgeListViewAction->setCheckable(true);
-    m_edgeListViewAction->setChecked(true);
+    m_edgeListViewAction->setChecked(false);
     connect(m_edgeListViewAction, &QAction::toggled, this, [this](bool checked) {
         if (m_edgeListOverlay) {
             m_edgeListOverlay->setVisible(checked);
