@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QSlider>
 #include <QPushButton>
+#include <QDoubleSpinBox>
 
 class ViewportWidget;
 class GraphManager;
@@ -21,6 +22,7 @@ public:
 public slots:
     void onStatsChanged();    // connected to GraphManager::statsChanged
     void onLoadingStateChanged();  // connected to GraphManager::isLoadingChanged
+    void onCloudDataReady(float dataZMin, float dataZMax);
 
 signals:
     void resetCameraRequested();
@@ -56,6 +58,17 @@ private:
     QLabel* m_pointSizeLabel;
     QSlider* m_pointOpacitySlider;
     QLabel* m_pointOpacityLabel;
+
+    // Z-Clipping controls
+    QCheckBox* m_zClipCb;
+    QDoubleSpinBox* m_zClipMinSpinBox;
+    QDoubleSpinBox* m_zClipMaxSpinBox;
+
+    // Color elevation range controls
+    QLabel* m_dataZRangeLabel;
+    QCheckBox* m_autoColorRangeCb;
+    QDoubleSpinBox* m_colorZMinSpinBox;
+    QDoubleSpinBox* m_colorZMaxSpinBox;
 
     // Loading indicator
     QLabel* m_loadingLabel;

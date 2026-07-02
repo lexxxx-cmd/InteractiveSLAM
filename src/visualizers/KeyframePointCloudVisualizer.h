@@ -42,6 +42,10 @@ public:
         auto* ss = m_geom->getOrCreateStateSet();
         m_pointSizeUniform = applyPointCloudShader(ss, m_pointSize);
 
+        // Look up z-clip uniforms (added by applyPointCloudShader)
+        m_zClipUniform  = ss->getUniform("z_clipping");
+        m_zRangeUniform = ss->getUniform("z_range");
+
         m_blendColor = new osg::BlendColor(osg::Vec4(1, 1, 1, m_opacity));
         ss->setAttributeAndModes(m_blendColor, osg::StateAttribute::ON);
         ss->setAttributeAndModes(
@@ -81,6 +85,23 @@ public:
             m_zMax += 0.5f;
         }
 
+        // Initialize color range from data (only if auto mode)
+        if (m_useAutoColorRange) {
+            m_colorZMin = m_zMin;
+            m_colorZMax = m_zMax;
+        }
+
+        // Initialize clip range from data on first load
+        if (!m_clipRangeInitialized) {
+            m_zClipMin = m_zMin;
+            m_zClipMax = m_zMax;
+            m_clipRangeInitialized = true;
+        }
+
+        // Push z-clip range to GPU (always, so shader has valid values)
+        if (m_zRangeUniform)
+            m_zRangeUniform->set(osg::Vec2(m_zClipMin, m_zClipMax));
+
         m_vertices->reserve(m_allWorldPoints.size());
         m_colors->reserve(m_allWorldPoints.size());
 
@@ -90,7 +111,7 @@ public:
                 static_cast<float>(wp.y()),
                 static_cast<float>(wp.z())));
             m_colors->push_back(
-                turboColor(static_cast<float>(wp.z()), m_zMin, m_zMax));
+                turboColor(static_cast<float>(wp.z()), m_colorZMin, m_colorZMax));
         }
 
         m_vertices->dirty();
@@ -117,7 +138,7 @@ public:
                 // Restore turbo colour from world-space Z
                 for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
                     float wz = static_cast<float>(m_allWorldPoints[i].z());
-                    (*m_colors)[i] = turboColor(wz, m_zMin, m_zMax);
+                    (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
                 }
             }
         }
@@ -132,6 +153,8 @@ public:
         m_colors->clear();
         m_zMin =  std::numeric_limits<float>::max();
         m_zMax = -std::numeric_limits<float>::max();
+        m_useAutoColorRange = true;
+        m_clipRangeInitialized = false;
     }
 
     void setPointSize(float size) {
@@ -145,6 +168,52 @@ public:
         if (m_blendColor)
             m_blendColor->setConstantColor(osg::Vec4(1, 1, 1, opacity));
     }
+
+    // ---- Z-clip controls (shader-based, no VBO rebuild) ----
+
+    void setZClipping(bool enabled) {
+        m_zClipping = enabled;
+        if (m_zClipUniform)
+            m_zClipUniform->set(enabled ? 1 : 0);
+    }
+
+    void setZClipRange(float minZ, float maxZ) {
+        m_zClipMin = minZ;
+        m_zClipMax = maxZ;
+        if (m_zRangeUniform)
+            m_zRangeUniform->set(osg::Vec2(minZ, maxZ));
+    }
+
+    bool isZClipping() const { return m_zClipping; }
+    float getZClipMin() const { return m_zClipMin; }
+    float getZClipMax() const { return m_zClipMax; }
+
+    // ---- Elevation color range controls (CPU recolor, no vertex rebuild) ----
+
+    void setColorZRange(float minZ, float maxZ) {
+        m_colorZMin = minZ;
+        m_colorZMax = maxZ;
+        m_useAutoColorRange = false;
+        recolorAll();
+    }
+
+    void setAutoColorRange(bool autoRange) {
+        m_useAutoColorRange = autoRange;
+        if (autoRange) {
+            m_colorZMin = m_zMin;
+            m_colorZMax = m_zMax;
+        }
+        recolorAll();
+    }
+
+    bool isAutoColorRange() const { return m_useAutoColorRange; }
+
+    // ---- Data range accessors (for UI initialization) ----
+
+    float getDataZMin() const { return m_zMin; }
+    float getDataZMax() const { return m_zMax; }
+    float getColorZMin() const { return m_colorZMin; }
+    float getColorZMax() const { return m_colorZMax; }
 
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
 
@@ -160,12 +229,27 @@ private:
         long   vertexId;
     };
 
+    /// Recompute all vertex colors from current color Z range.
+    /// Does NOT rebuild vertices — only updates the color array.
+    void recolorAll() {
+        if (!m_colors || m_allWorldPoints.empty()) return;
+        if (m_colorZMax - m_colorZMin < 0.001f) return;
+
+        for (size_t i = 0; i < m_allWorldPoints.size(); ++i) {
+            float wz = static_cast<float>(m_allWorldPoints[i].z());
+            (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
+        }
+        m_colors->dirty();
+    }
+
     osg::ref_ptr<osg::Geode>     m_geode;
     osg::ref_ptr<osg::Geometry>  m_geom;
     osg::ref_ptr<osg::Vec3Array> m_vertices;
     osg::ref_ptr<osg::Vec4Array> m_colors;
     osg::ref_ptr<osg::BlendColor> m_blendColor;
     osg::ref_ptr<osg::Uniform>    m_pointSizeUniform;
+    osg::ref_ptr<osg::Uniform>    m_zClipUniform;
+    osg::ref_ptr<osg::Uniform>    m_zRangeUniform;
 
     // World-space points (kept for recolouring on selection change)
     std::vector<Eigen::Vector3d,
@@ -178,4 +262,15 @@ private:
     float m_zMax   = -std::numeric_limits<float>::max();
     float m_pointSize = 3.0f;
     float m_opacity   = 1.0f;
+
+    // Z-clip state (shader-based, no rebuild needed on change)
+    bool  m_zClipping = false;
+    float m_zClipMin  = -10.0f;
+    float m_zClipMax  = 10.0f;
+    bool  m_clipRangeInitialized = false;
+
+    // Elevation color range (CPU recolor on change)
+    float m_colorZMin = 0.0f;
+    float m_colorZMax = 1.0f;
+    bool  m_useAutoColorRange = true;
 };

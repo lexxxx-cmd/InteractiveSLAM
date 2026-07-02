@@ -26,6 +26,7 @@ private slots:
     void onOpenMap();
     void onCloseMap();
     void onSavePoseGraph();
+    void onSaveMap();
     void onOptimize();
     void onResetCamera();
     void onLoadingStarted();

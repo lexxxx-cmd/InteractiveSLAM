@@ -50,6 +50,14 @@ public slots:
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);
     void resetCamera();
 
+    // Z-clip + elevation color range
+    void setZClipping(bool enabled);
+    void setZClipMin(double minZ);
+    void setZClipMax(double maxZ);
+    void setColorZMin(double minZ);
+    void setColorZMax(double maxZ);
+    void setAutoColorRange(bool autoRange);
+
     // Overlay panel management (floating panels over viewport)
     void registerOverlay(OverlayPanelWidget* overlay);
     void updateOverlayPositions();
@@ -57,6 +65,7 @@ public slots:
 signals:
     void fpsUpdated(float fps);
     void initialized();
+    void cloudDataReady(float dataZMin, float dataZMax);
     void vertexSelected(long vertexId);
     void contextMenuRequested(long vertexId, long edgeId,
                               long edgeV1, long edgeV2,

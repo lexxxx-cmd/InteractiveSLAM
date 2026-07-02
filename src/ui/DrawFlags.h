@@ -9,6 +9,7 @@ struct DrawFlags {
     bool draw_edges            = true;
     bool draw_keyframe_vertices = true;
     bool draw_se3_edges        = true;
+    bool z_clipping            = false;
 };
 
 }  // namespace hdl_graph_slam

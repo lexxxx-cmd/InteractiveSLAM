@@ -129,6 +129,9 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
     m_sceneViz->setPointOpacity(m_flags.draw_keyframe_vertices ? 1.0f : 0.0f);
     m_osgWidget->update();
 
+    // Emit data range for UI initialization
+    emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
+
     // Home camera to see the whole scene
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
@@ -192,6 +195,36 @@ void ViewportWidget::setPointOpacity(int opacity) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setZClipping(bool enabled) {
+    m_sceneViz->setZClipping(enabled);
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setZClipMin(double minZ) {
+    m_sceneViz->setZClipRange(static_cast<float>(minZ), m_sceneViz->getZClipMax());
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setZClipMax(double maxZ) {
+    m_sceneViz->setZClipRange(m_sceneViz->getZClipMin(), static_cast<float>(maxZ));
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setColorZMin(double minZ) {
+    m_sceneViz->setColorZRange(static_cast<float>(minZ), m_sceneViz->getColorZMax());
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setColorZMax(double maxZ) {
+    m_sceneViz->setColorZRange(m_sceneViz->getColorZMin(), static_cast<float>(maxZ));
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setAutoColorRange(bool autoRange) {
+    m_sceneViz->setAutoColorRange(autoRange);
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setBackgroundColor(const QColor& color) {
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
@@ -230,6 +263,7 @@ void ViewportWidget::refreshScene() {
 void ViewportWidget::rebuildPointClouds() {
     if (!m_graph) return;
     m_sceneViz->rebuildPointClouds(m_graph);
+    emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
     m_osgWidget->update();
 }
 
@@ -240,9 +274,10 @@ void ViewportWidget::rebuildPointClouds() {
 void ViewportWidget::updateScene() {
     if (!m_graph) return;
 
-    // Update keyframe transforms and edge geometry from g2o estimates
-    m_sceneViz->updatePoses(m_graph);
-    m_osgWidget->update();
+    // Geometry is static after loading / explicit refresh.  Rebuilding
+    // 20 000+ spheres and edges every 16 ms destroys FPS on large graphs.
+    // OSGRenderer has its own 10 ms timer to drive the render loop, so we
+    // only track FPS here — no per-frame geometry work.
 
     // FPS tracking (rolling 1-second average)
     m_frameCount++;

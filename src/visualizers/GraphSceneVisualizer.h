@@ -76,6 +76,33 @@ public:
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
     }
 
+    // ---- Z-clip controls ----
+
+    void setZClipping(bool enabled) {
+        if (m_cloudViz) m_cloudViz->setZClipping(enabled);
+    }
+
+    void setZClipRange(float minZ, float maxZ) {
+        if (m_cloudViz) m_cloudViz->setZClipRange(minZ, maxZ);
+    }
+
+    void setColorZRange(float minZ, float maxZ) {
+        if (m_cloudViz) m_cloudViz->setColorZRange(minZ, maxZ);
+    }
+
+    void setAutoColorRange(bool autoRange) {
+        if (m_cloudViz) m_cloudViz->setAutoColorRange(autoRange);
+    }
+
+    float getDataZMin() const { return m_cloudViz ? m_cloudViz->getDataZMin() : 0.0f; }
+    float getDataZMax() const { return m_cloudViz ? m_cloudViz->getDataZMax() : 0.0f; }
+    float getColorZMin() const { return m_cloudViz ? m_cloudViz->getColorZMin() : 0.0f; }
+    float getColorZMax() const { return m_cloudViz ? m_cloudViz->getColorZMax() : 0.0f; }
+    float getZClipMin() const { return m_cloudViz ? m_cloudViz->getZClipMin() : 0.0f; }
+    float getZClipMax() const { return m_cloudViz ? m_cloudViz->getZClipMax() : 0.0f; }
+    bool  isZClipping()  const { return m_cloudViz ? m_cloudViz->isZClipping()  : false; }
+    bool  isAutoColorRange() const { return m_cloudViz ? m_cloudViz->isAutoColorRange() : true; }
+
     void setEdgeWidth(float width) {
         m_edgeWidth = width;
         if (m_edgeLineViz) m_edgeLineViz->setLineWidth(width);
@@ -172,6 +199,14 @@ public:
             m_cloudGroup->addChild(m_cloudViz->getNode());
         }
 
+        // Save user's z-clip and color range settings before clear
+        bool  savedZClip   = m_cloudViz->isZClipping();
+        float savedClipMin = m_cloudViz->getZClipMin();
+        float savedClipMax = m_cloudViz->getZClipMax();
+        bool  savedAutoColor = m_cloudViz->isAutoColorRange();
+        float savedColorMin  = m_cloudViz->getColorZMin();
+        float savedColorMax  = m_cloudViz->getColorZMax();
+
         m_cloudViz->clear();
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
@@ -179,6 +214,13 @@ public:
             m_cloudViz->appendCloud(kf->cloud, v->estimate(), id);
         }
         m_cloudViz->finish();
+
+        // Restore user's z-clip and color range settings
+        m_cloudViz->setZClipping(savedZClip);
+        m_cloudViz->setZClipRange(savedClipMin, savedClipMax);
+        if (!savedAutoColor) {
+            m_cloudViz->setColorZRange(savedColorMin, savedColorMax);
+        }
 
         // Re-apply highlight if one was selected
         if (m_selectedVertexId >= 0) {

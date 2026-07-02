@@ -70,7 +70,7 @@ public:
         if (!graph) return;
 
         // Color palette by EdgeSource
-        static const osg::Vec4 kColorOriginal   (0.35f, 0.35f, 0.35f, 0.45f);  // dim grey
+        static const osg::Vec4 kColorOriginal   (0.70f, 0.75f, 0.80f, 0.55f);  // dim grey
         static const osg::Vec4 kColorManualLoop (0.00f, 0.90f, 0.20f, 0.85f);  // green
         static const osg::Vec4 kColorAutoLoop   (0.00f, 0.75f, 1.00f, 0.85f);  // cyan
         static const osg::Vec4 kColorAnchor     (1.00f, 0.85f, 0.00f, 0.85f);  // yellow

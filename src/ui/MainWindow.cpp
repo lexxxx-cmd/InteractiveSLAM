@@ -253,6 +253,10 @@ void MainWindow::setupMenus() {
     savePoseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
     connect(savePoseAction, &QAction::triggered, this, &MainWindow::onSavePoseGraph);
 
+    auto* saveMapAction = fileMenu->addAction(tr("Save Map..."));
+    saveMapAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMap);
+
     fileMenu->addSeparator();
 
     auto* quitAction = fileMenu->addAction(tr("&Quit"));
@@ -348,6 +352,29 @@ void MainWindow::onSavePoseGraph() {
     }
 }
 
+void MainWindow::onSaveMap() {
+    if (!m_manager->isLoaded()) {
+        statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+
+    QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Save Map Directory"), QString(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+
+    if (dir.isEmpty()) return;
+
+    try {
+        auto* graph = m_manager->graph();
+        graph->dump(dir.toStdString(), *m_manager->progress());
+        statusBar()->showMessage(
+            tr("Map saved: %1").arg(dir), 5000);
+    } catch (const std::exception& e) {
+        statusBar()->showMessage(
+            tr("Save failed: %1").arg(e.what()), 5000);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Slots — Graph operations
 // ---------------------------------------------------------------------------
@@ -362,7 +389,8 @@ void MainWindow::onOptimize() {
     auto* graph = m_manager->graph();
     if (graph) {
         graph->optimize();
-        m_viewport->rebuildPointClouds();
+        m_viewport->refreshScene();       // spheres + edges with new poses
+        m_viewport->rebuildPointClouds(); // point cloud with new poses
     }
     statusBar()->showMessage(tr("Optimization complete"), 3000);
 }

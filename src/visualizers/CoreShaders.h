@@ -57,17 +57,24 @@ inline osg::Program* createPointCloudProgram() {
         uniform mat4 osg_ModelViewProjectionMatrix;
         uniform float uPointSize;
         out vec4 vColor;
+        out vec3 vWorldPos;
         void main() {
             gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex;
             gl_PointSize = uPointSize;
             vColor = osg_Color;
+            vWorldPos = osg_Vertex.xyz;
         }
     )";
     const char* frag = R"(
         #version 330 core
         in vec4 vColor;
+        in vec3 vWorldPos;
+        uniform int z_clipping;
+        uniform vec2 z_range;
         out vec4 fragColor;
         void main() {
+            if (z_clipping != 0 && (vWorldPos.z < z_range[0] || vWorldPos.z > z_range[1]))
+                discard;
             fragColor = vColor;
         }
     )";
@@ -88,7 +95,13 @@ inline void applySimpleColorShader(osg::StateSet* ss) {
 inline osg::Uniform* applyPointCloudShader(osg::StateSet* ss, float pointSize = 3.0f) {
     ss->setAttributeAndModes(createPointCloudProgram(),
                              osg::StateAttribute::ON);
+    // Required in OpenGL core profile for gl_PointSize in the vertex shader
+    // to take effect; without it the shaderʼs point size is silently ignored.
+    ss->setMode(GL_PROGRAM_POINT_SIZE, osg::StateAttribute::ON);
     auto* u = new osg::Uniform("uPointSize", pointSize);
     ss->addUniform(u);
+    // Z-clip uniforms (disabled by default, range set on data load)
+    ss->addUniform(new osg::Uniform("z_clipping", 0));
+    ss->addUniform(new osg::Uniform("z_range", osg::Vec2(0.0f, 1.0f)));
     return u;
 }
