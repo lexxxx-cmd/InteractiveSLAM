@@ -68,4 +68,6 @@ private:
     OverlayPanelWidget* m_edgeListOverlay = nullptr;
 
     long m_loopBeginVertexId = -1;  // -1 = 未选择 Loop Begin
+    QAction* m_optimizeAction = nullptr;
+    bool m_optimizePending = false;
 };

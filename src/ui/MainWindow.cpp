@@ -150,7 +150,8 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                         tr("Edge %1 deleted").arg(edgeId), 3000);
                 } else {
                     statusBar()->showMessage(
-                        tr("Failed to delete edge %1").arg(edgeId), 3000);
+                        tr("Cannot delete edge %1 — optimization running, retry shortly")
+                            .arg(edgeId), 3000);
                 }
             });
         }
@@ -399,6 +400,7 @@ void MainWindow::setupMenus() {
 
     auto* optimizeAction = graphMenu->addAction(tr("&Optimize"));
     optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_O));
+    m_optimizeAction = optimizeAction;
     connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
 }
 
@@ -485,14 +487,34 @@ void MainWindow::onOptimize() {
         return;
     }
 
-    statusBar()->showMessage(tr("Optimizing..."));
-    auto* graph = m_manager->graph();
-    if (graph) {
-        graph->optimize();
-        m_viewport->refreshScene();       // spheres + edges with new poses
-        m_viewport->rebuildPointClouds(); // point cloud with new poses
+    if (m_optimizePending) {
+        statusBar()->showMessage(tr("Optimization already in progress"), 3000);
+        return;
     }
-    statusBar()->showMessage(tr("Optimization complete"), 3000);
+
+    m_optimizePending = true;
+    if (m_optimizeAction) m_optimizeAction->setEnabled(false);
+    statusBar()->showMessage(tr("Optimizing (background)..."));
+
+    auto* graph = m_manager->graph();
+    if (!graph) {
+        m_optimizePending = false;
+        if (m_optimizeAction) m_optimizeAction->setEnabled(true);
+        return;
+    }
+
+    // Run g2o optimization in a detached thread to keep UI responsive.
+    // Post scene refresh back to the main thread when done.
+    std::thread([this, graph]() {
+        graph->optimize();
+        QMetaObject::invokeMethod(this, [this]() {
+            m_optimizePending = false;
+            if (m_optimizeAction) m_optimizeAction->setEnabled(true);
+            m_viewport->refreshScene();
+            m_viewport->rebuildPointClouds();
+            statusBar()->showMessage(tr("Optimization complete"), 3000);
+        }, Qt::QueuedConnection);
+    }).detach();
 }
 
 void MainWindow::onResetCamera() {

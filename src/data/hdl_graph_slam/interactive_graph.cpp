@@ -159,7 +159,12 @@ bool InteractiveGraph::load_keyframes(const std::string& directory,
 }
 
 bool InteractiveGraph::removeEdge(long edgeId) {
-    std::lock_guard<std::mutex> lock(optimization_mutex);
+    // Use try_lock to avoid blocking the UI thread when a background
+    // optimization (e.g. auto loop closure) holds the mutex.
+    std::unique_lock<std::mutex> lock(optimization_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        return false;  // optimization in progress, caller should retry
+    }
     g2o::SparseOptimizer* g = dynamic_cast<g2o::SparseOptimizer*>(this->graph.get());
     if (!g) return false;
 
