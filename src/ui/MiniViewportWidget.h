@@ -41,6 +41,9 @@ public:
     /// Reset camera to home position.
     void resetCamera();
 
+    /// Replace the default perspective projection with orthographic.
+    void applyOrthographicProjection();
+
 private slots:
     void initOsg();
 

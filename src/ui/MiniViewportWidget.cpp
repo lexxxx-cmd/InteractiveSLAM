@@ -37,6 +37,34 @@ MiniViewportWidget::MiniViewportWidget(QWidget* parent)
 MiniViewportWidget::~MiniViewportWidget() = default;
 
 // ---------------------------------------------------------------------------
+// Orthographic projection helper
+// ---------------------------------------------------------------------------
+
+void MiniViewportWidget::applyOrthographicProjection() {
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+
+    osg::Camera* camera = viewer->getCamera();
+
+    // Fixed 512×512 viewport — aspect is always 1:1
+    double halfHeight = 10.0;  // default
+    osg::Node* scene = viewer->getSceneData();
+    if (scene) {
+        const osg::BoundingSphere& bs = scene->getBound();
+        if (bs.valid() && bs.radius() > 0.0) {
+            halfHeight = bs.radius() * 1.2;
+        }
+    }
+
+    double farDist = halfHeight * 20.0;
+
+    camera->setProjectionMatrixAsOrtho(
+        -halfHeight, halfHeight,
+        -halfHeight, halfHeight,
+        0.1, farDist);
+}
+
+// ---------------------------------------------------------------------------
 // Geometry setup — called from constructor, BEFORE GL context exists
 // ---------------------------------------------------------------------------
 
@@ -114,6 +142,9 @@ void MiniViewportWidget::initOsg() {
     // Trackball camera
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
 
+    // Orthographic projection (replaces OSG default perspective)
+    applyOrthographicProjection();
+
     // Attach the pre-built scene graph
     viewer->setSceneData(m_root);
     m_initialized = true;
@@ -138,6 +169,7 @@ void MiniViewportWidget::setClouds(CloudPtr beginCloud,
 
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
+        applyOrthographicProjection();
         viewer->home();
     }
     m_osgWidget->update();

@@ -40,6 +40,42 @@ ViewportWidget::ViewportWidget(QWidget* parent)
 ViewportWidget::~ViewportWidget() = default;
 
 // ---------------------------------------------------------------------------
+// Orthographic projection helper
+// ---------------------------------------------------------------------------
+
+void ViewportWidget::applyOrthographicProjection() {
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+
+    osg::Camera* camera = viewer->getCamera();
+    int vpW = m_osgWidget->width();
+    int vpH = m_osgWidget->height();
+    if (vpW < 1 || vpH < 1) return;
+
+    double aspect = static_cast<double>(vpW) / static_cast<double>(vpH);
+
+    // Compute half-height from scene bounding sphere (with 20 % margin)
+    double halfHeight = 10.0;  // default before scene is loaded
+    osg::Node* scene = viewer->getSceneData();
+    if (scene) {
+        const osg::BoundingSphere& bs = scene->getBound();
+        if (bs.valid() && bs.radius() > 0.0) {
+            halfHeight = bs.radius() * 1.2;
+        }
+    }
+
+    double halfWidth = halfHeight * aspect;
+    double farDist = halfHeight * 20.0;  // generous far plane
+
+    camera->setProjectionMatrixAsOrtho(
+        -halfWidth, halfWidth,
+        -halfHeight, halfHeight,
+        0.1, farDist);
+
+    m_orthoHalfHeight = halfHeight;
+}
+
+// ---------------------------------------------------------------------------
 // OSG Initialization (called once after the OpenGL context is ready)
 // ---------------------------------------------------------------------------
 
@@ -61,6 +97,9 @@ void ViewportWidget::initOsg() {
 
     // Trackball camera
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
+
+    // Orthographic projection (replaces OSG default perspective)
+    applyOrthographicProjection();
 
     // Register picking handler with lazy providers — data is queried
     // on each event, so graph load / pose updates are always reflected.
@@ -132,9 +171,11 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
     // Emit data range for UI initialization
     emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
 
-    // Home camera to see the whole scene
+    // Update orthographic projection for the newly loaded scene,
+    // then home camera to frame the whole scene.
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
+        applyOrthographicProjection();
         viewer->home();
     }
 }
@@ -358,5 +399,6 @@ void ViewportWidget::updateOverlayPositions() {
 
 void ViewportWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+    applyOrthographicProjection();
     updateOverlayPositions();
 }

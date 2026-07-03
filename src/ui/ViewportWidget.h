@@ -58,6 +58,9 @@ public slots:
     void setColorZMax(double maxZ);
     void setAutoColorRange(bool autoRange);
 
+    /// Replace the default perspective projection with orthographic.
+    void applyOrthographicProjection();
+
     // Overlay panel management (floating panels over viewport)
     void registerOverlay(OverlayPanelWidget* overlay);
     void updateOverlayPositions();
@@ -95,6 +98,9 @@ private:
     // Overlay panels (floating over viewport)
     QVector<OverlayPanelWidget*> m_overlays;
     int m_overlayMargin = 10;
+
+    // Orthographic projection tracking
+    double m_orthoHalfHeight = 10.0;
 
     // FPS tracking (rolling average)
     int m_frameCount = 0;
