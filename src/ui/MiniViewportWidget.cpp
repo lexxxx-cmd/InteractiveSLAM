@@ -65,6 +65,49 @@ void MiniViewportWidget::applyOrthographicProjection() {
 }
 
 // ---------------------------------------------------------------------------
+// Perspective projection helper
+// ---------------------------------------------------------------------------
+
+void MiniViewportWidget::applyPerspectiveProjection() {
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+
+    osg::Camera* camera = viewer->getCamera();
+    double aspect = 1.0;   // fixed 512×512
+    double fovY   = 30.0;  // degrees
+
+    double farDist = 1000.0;
+    osg::Node* scene = viewer->getSceneData();
+    if (scene) {
+        const osg::BoundingSphere& bs = scene->getBound();
+        if (bs.valid() && bs.radius() > 0.0) {
+            farDist = bs.radius() * 20.0;
+        }
+    }
+
+    camera->setProjectionMatrixAsPerspective(fovY, aspect, 0.1, farDist);
+}
+
+// ---------------------------------------------------------------------------
+// Unified projection dispatch
+// ---------------------------------------------------------------------------
+
+void MiniViewportWidget::applyProjection() {
+    if (m_useOrthographic) {
+        applyOrthographicProjection();
+    } else {
+        applyPerspectiveProjection();
+    }
+}
+
+void MiniViewportWidget::setUseOrthographic(bool enabled) {
+    if (m_useOrthographic == enabled) return;
+    m_useOrthographic = enabled;
+    applyProjection();
+    m_osgWidget->update();
+}
+
+// ---------------------------------------------------------------------------
 // Geometry setup — called from constructor, BEFORE GL context exists
 // ---------------------------------------------------------------------------
 
@@ -142,8 +185,8 @@ void MiniViewportWidget::initOsg() {
     // Trackball camera
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
 
-    // Orthographic projection (replaces OSG default perspective)
-    applyOrthographicProjection();
+    // Perspective/orthographic projection (toggled via UI)
+    applyProjection();
 
     // Attach the pre-built scene graph
     viewer->setSceneData(m_root);
@@ -169,7 +212,7 @@ void MiniViewportWidget::setClouds(CloudPtr beginCloud,
 
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
-        applyOrthographicProjection();
+        applyProjection();
         viewer->home();
     }
     m_osgWidget->update();

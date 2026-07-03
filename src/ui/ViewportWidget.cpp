@@ -76,6 +76,54 @@ void ViewportWidget::applyOrthographicProjection() {
 }
 
 // ---------------------------------------------------------------------------
+// Perspective projection helper
+// ---------------------------------------------------------------------------
+
+void ViewportWidget::applyPerspectiveProjection() {
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+
+    osg::Camera* camera = viewer->getCamera();
+    int vpW = m_osgWidget->width();
+    int vpH = m_osgWidget->height();
+    if (vpW < 1 || vpH < 1) return;
+
+    double aspect = static_cast<double>(vpW) / static_cast<double>(vpH);
+    double fovY  = 30.0;  // degrees
+
+    // Compute far plane from scene bounds
+    double farDist = 1000.0;
+    osg::Node* scene = viewer->getSceneData();
+    if (scene) {
+        const osg::BoundingSphere& bs = scene->getBound();
+        if (bs.valid() && bs.radius() > 0.0) {
+            farDist = bs.radius() * 20.0;
+        }
+    }
+
+    camera->setProjectionMatrixAsPerspective(fovY, aspect, 0.1, farDist);
+}
+
+// ---------------------------------------------------------------------------
+// Unified projection dispatch
+// ---------------------------------------------------------------------------
+
+void ViewportWidget::applyProjection() {
+    if (m_useOrthographic) {
+        applyOrthographicProjection();
+    } else {
+        applyPerspectiveProjection();
+    }
+}
+
+void ViewportWidget::setUseOrthographic(bool enabled) {
+    if (m_useOrthographic == enabled) return;
+    m_useOrthographic = enabled;
+    applyProjection();
+    m_osgWidget->update();
+}
+
+// ---------------------------------------------------------------------------
 // OSG Initialization (called once after the OpenGL context is ready)
 // ---------------------------------------------------------------------------
 
@@ -99,7 +147,7 @@ void ViewportWidget::initOsg() {
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
 
     // Orthographic projection (replaces OSG default perspective)
-    applyOrthographicProjection();
+    applyProjection();
 
     // Register picking handler with lazy providers — data is queried
     // on each event, so graph load / pose updates are always reflected.
@@ -175,7 +223,7 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
     // then home camera to frame the whole scene.
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
-        applyOrthographicProjection();
+        applyProjection();
         viewer->home();
     }
 }
@@ -399,6 +447,6 @@ void ViewportWidget::updateOverlayPositions() {
 
 void ViewportWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-    applyOrthographicProjection();
+    applyProjection();
     updateOverlayPositions();
 }

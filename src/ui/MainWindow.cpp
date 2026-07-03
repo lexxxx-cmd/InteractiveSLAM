@@ -330,6 +330,14 @@ void MainWindow::setupMenus() {
     resetCamAction->setShortcut(QKeySequence(Qt::Key_R));
     connect(resetCamAction, &QAction::triggered, this, &MainWindow::onResetCamera);
 
+    // Orthographic view toggle
+    m_orthoViewAction = viewMenu->addAction(tr("Orthographic View"));
+    m_orthoViewAction->setCheckable(true);
+    m_orthoViewAction->setChecked(false);  // default: perspective
+    connect(m_orthoViewAction, &QAction::toggled, this, [this](bool checked) {
+        m_viewport->setUseOrthographic(checked);
+    });
+
     viewMenu->addSeparator();
 
     // Graph Statistics toggle

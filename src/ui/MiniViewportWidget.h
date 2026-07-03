@@ -43,6 +43,14 @@ public:
 
     /// Replace the default perspective projection with orthographic.
     void applyOrthographicProjection();
+    /// Restore perspective projection.
+    void applyPerspectiveProjection();
+    /// Apply current projection based on m_useOrthographic flag.
+    void applyProjection();
+
+    /// Toggle between perspective and orthographic projection.
+    void setUseOrthographic(bool enabled);
+    bool isOrthographic() const { return m_useOrthographic; }
 
 private slots:
     void initOsg();
@@ -70,4 +78,5 @@ private:
     CloudPtr m_beginCloud;
     CloudPtr m_endCloud;
     bool     m_initialized = false;
+    bool     m_useOrthographic = false;  // default: perspective
 };

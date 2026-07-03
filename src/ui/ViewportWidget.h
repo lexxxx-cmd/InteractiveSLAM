@@ -60,6 +60,14 @@ public slots:
 
     /// Replace the default perspective projection with orthographic.
     void applyOrthographicProjection();
+    /// Restore perspective projection.
+    void applyPerspectiveProjection();
+    /// Apply current projection based on m_useOrthographic flag.
+    void applyProjection();
+
+    /// Toggle between perspective and orthographic projection.
+    void setUseOrthographic(bool enabled);
+    bool isOrthographic() const { return m_useOrthographic; }
 
     // Overlay panel management (floating panels over viewport)
     void registerOverlay(OverlayPanelWidget* overlay);
@@ -101,6 +109,7 @@ private:
 
     // Orthographic projection tracking
     double m_orthoHalfHeight = 10.0;
+    bool m_useOrthographic = false;   // default: perspective
 
     // FPS tracking (rolling average)
     int m_frameCount = 0;

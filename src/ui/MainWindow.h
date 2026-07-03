@@ -68,6 +68,7 @@ private:
     OverlayPanelWidget* m_edgeListOverlay = nullptr;
 
     long m_loopBeginVertexId = -1;  // -1 = 未选择 Loop Begin
+    QAction* m_orthoViewAction = nullptr;
     int m_submapWindowHalfSize = 1;  // ±N keyframes merged for loop closure matching
     QAction* m_optimizeAction = nullptr;
     bool m_optimizePending = false;
