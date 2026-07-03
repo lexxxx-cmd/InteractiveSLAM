@@ -58,6 +58,9 @@ public slots:
     void setColorZMax(double maxZ);
     void setAutoColorRange(bool autoRange);
 
+    /// Set half-window size for Ctrl+Click point cloud highlight.
+    void setHighlightWindowHalf(int n);
+
     /// Replace the default perspective projection with orthographic.
     void applyOrthographicProjection();
     /// Restore perspective projection.

@@ -116,6 +116,10 @@ void ViewportWidget::applyProjection() {
     }
 }
 
+void ViewportWidget::setHighlightWindowHalf(int n) {
+    m_sceneViz->setHighlightWindowHalf(n);
+}
+
 void ViewportWidget::setUseOrthographic(bool enabled) {
     if (m_useOrthographic == enabled) return;
     m_useOrthographic = enabled;

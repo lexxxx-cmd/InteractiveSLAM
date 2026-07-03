@@ -289,7 +289,7 @@ private:
     }
 
     /// Collect vertex IDs centred on `centerId` within
-    /// ±m_highlightWindowHalf temporal neighbours, sorted by stamp_nsec.
+    /// ±m_highlightWindowHalf by sequential ID range.
     /// Returns an empty set when centerId < 0 (deselection) or no graph.
     std::set<long> getTemporalNeighbors(long centerId) const {
         std::set<long> result;
@@ -301,28 +301,14 @@ private:
             return result;
         }
 
-        // Collect (stamp_nsec, vertexId) pairs and sort by timestamp
-        std::vector<std::pair<uint64_t, long>> sorted;
-        sorted.reserve(m_lastGraph->keyframes.size());
-        for (const auto& [id, kf] : m_lastGraph->keyframes) {
-            sorted.emplace_back(kf->stamp_nsec, id);
-        }
-        std::sort(sorted.begin(), sorted.end());
-
-        // Find position of centerId in the sorted sequence
-        auto it = std::find_if(sorted.begin(), sorted.end(),
-            [centerId](const auto& p) { return p.second == centerId; });
-        if (it == sorted.end()) {
-            result.insert(centerId);
-            return result;
-        }
-
-        size_t pos  = static_cast<size_t>(std::distance(sorted.begin(), it));
-        size_t half = static_cast<size_t>(m_highlightWindowHalf);
-        size_t start = (pos > half) ? pos - half : 0;
-        size_t end   = std::min(pos + half + 1, sorted.size());
-        for (size_t i = start; i < end; ++i) {
-            result.insert(sorted[i].second);
+        // Collect vertex IDs by sequential ID range
+        // (same algorithm as mergeAdjacentClouds)
+        long first = centerId - m_highlightWindowHalf;
+        long last  = centerId + m_highlightWindowHalf;
+        for (long id = first; id <= last; ++id) {
+            if (m_lastGraph->keyframes.find(id) != m_lastGraph->keyframes.end()) {
+                result.insert(id);
+            }
         }
         return result;
     }
@@ -357,7 +343,7 @@ private:
     long m_loopSourceId = -1;
     std::set<long> m_loopCandidateIds;
     long m_selectedVertexId = -1;
-    int  m_highlightWindowHalf = 3;  // temporal half-window (total = 2*half+1 frames)
+    int  m_highlightWindowHalf = 1;  // ID-range half-window (default matches m_submapWindowHalfSize)
 
     // State
     bool m_hasGraph    = false;

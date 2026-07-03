@@ -448,6 +448,7 @@ void MainWindow::setupMenus() {
 
         if (dlg.exec() == QDialog::Accepted) {
             m_submapWindowHalfSize = spinBox->value();
+            m_viewport->setHighlightWindowHalf(m_submapWindowHalfSize);
             statusBar()->showMessage(
                 tr("Submap window size set to ±%1 keyframe(s)")
                     .arg(m_submapWindowHalfSize), 3000);
@@ -590,6 +591,7 @@ void MainWindow::onLoadingSucceeded() {
         5000);
 
     m_viewport->onGraphLoaded(m_manager->sharedGraph());
+    m_viewport->setHighlightWindowHalf(m_submapWindowHalfSize);
     if (m_edgeListPanel) {
         m_edgeListPanel->refreshList();
     }
