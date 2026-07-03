@@ -33,7 +33,8 @@
 // ---------------------------------------------------------------------------
 
 pcl::PointCloud<pcl::PointXYZI>::Ptr mergeAdjacentClouds(
-    const hdl_graph_slam::InteractiveGraph* graph, long centerId) {
+    const hdl_graph_slam::InteractiveGraph* graph, long centerId,
+    int windowHalfSize) {
 
     using PointT = pcl::PointXYZI;
     auto merged = pcl::make_shared<pcl::PointCloud<PointT>>();
@@ -45,8 +46,8 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr mergeAdjacentClouds(
     if (!centerKf->cloud || centerKf->cloud->empty()) return merged;
     Eigen::Isometry3d centerPose = centerKf->estimate();
 
-    // Merge centerId-1, centerId, centerId+1
-    for (long id = centerId - 1; id <= centerId + 1; ++id) {
+    // Merge centerId-windowHalfSize ... centerId+windowHalfSize
+    for (long id = centerId - windowHalfSize; id <= centerId + windowHalfSize; ++id) {
         auto it = graph->keyframes.find(id);
         if (it == graph->keyframes.end()) continue;
         auto& kf = it->second;

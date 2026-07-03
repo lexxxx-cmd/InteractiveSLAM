@@ -13,6 +13,11 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QMenu>
+#include <QDialog>
+#include <QFormLayout>
+#include <QSpinBox>
+#include <QLabel>
+#include <QDialogButtonBox>
 #include <QApplication>
 #include <vector>
 
@@ -101,8 +106,8 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                     return;
                 }
 
-                auto mergedBegin = mergeAdjacentClouds(graph, m_loopBeginVertexId);
-                auto mergedEnd   = mergeAdjacentClouds(graph, vertexId);
+                auto mergedBegin = mergeAdjacentClouds(graph, m_loopBeginVertexId, m_submapWindowHalfSize);
+                auto mergedEnd   = mergeAdjacentClouds(graph, vertexId, m_submapWindowHalfSize);
                 if (!mergedBegin || !mergedEnd ||
                     mergedBegin->empty() || mergedEnd->empty()) {
                     statusBar()->showMessage(
@@ -402,6 +407,44 @@ void MainWindow::setupMenus() {
     optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_O));
     m_optimizeAction = optimizeAction;
     connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
+
+    // Submap window size configuration
+    graphMenu->addSeparator();
+    auto* submapWindowAction = graphMenu->addAction(tr("Submap Window Size..."));
+    connect(submapWindowAction, &QAction::triggered, this, [this]() {
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Submap Merge Window"));
+        dlg.setModal(true);
+
+        auto* layout = new QFormLayout(&dlg);
+
+        auto* label = new QLabel(
+            tr("Number of adjacent keyframes to merge on each side\n"
+               "of the selected vertex for loop closure matching.\n"
+               "N = 1 (default) merges 3 keyframes: center-1, center, center+1.\n"
+               "N = 0 merges only the selected keyframe itself."));
+        label->setWordWrap(true);
+        layout->addRow(label);
+
+        auto* spinBox = new QSpinBox;
+        spinBox->setRange(0, 10);
+        spinBox->setValue(m_submapWindowHalfSize);
+        spinBox->setSuffix(tr(" keyframe(s) each side"));
+        layout->addRow(tr("Window half-size:"), spinBox);
+
+        auto* buttons = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addRow(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+        if (dlg.exec() == QDialog::Accepted) {
+            m_submapWindowHalfSize = spinBox->value();
+            statusBar()->showMessage(
+                tr("Submap window size set to ±%1 keyframe(s)")
+                    .arg(m_submapWindowHalfSize), 3000);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

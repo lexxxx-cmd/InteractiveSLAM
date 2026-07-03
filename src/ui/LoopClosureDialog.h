@@ -21,12 +21,16 @@ class RegistrationMethods;
 class InteractiveGraph;
 }  // namespace hdl_graph_slam
 
-/// Merge point clouds of keyframes adjacent to @p centerId (±1) into
+/// Merge point clouds of keyframes adjacent to @p centerId into
 /// @p centerId's local coordinate frame.
+/// @param windowHalfSize  Number of keyframes to merge on each side of centerId.
+///                        N merges centerId-N through centerId+N (up to 2N+1 frames).
+///                        Default 1 (backward compatible: up to 3 keyframes).
 /// Clouds from keyframes that do not exist (or have empty clouds) are
-/// silently skipped — the result may contain 1–3 keyframes' points.
+/// silently skipped.
 pcl::PointCloud<pcl::PointXYZI>::Ptr mergeAdjacentClouds(
-    const hdl_graph_slam::InteractiveGraph* graph, long centerId);
+    const hdl_graph_slam::InteractiveGraph* graph, long centerId,
+    int windowHalfSize = 1);
 
 /// @brief Modal dialog for manually closing a loop between two keyframes.
 ///

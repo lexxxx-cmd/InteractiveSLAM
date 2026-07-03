@@ -143,9 +143,20 @@ bool KeyFrame::load(const std::string& directory, g2o::HyperGraph* graph) {
         return false;
     }
 
-    if (estimate) {
-        node->setEstimate(*estimate);
-    }
+    // The data file's "estimate" field is a stale cache from a previous
+    // optimization run.  When graph.g2o and data/estimate disagree (e.g.
+    // after LVBA exports a fresh graph.g2o without updating the keyframe
+    // data files), blindly overwriting the g2o vertex produces an
+    // inconsistent graph — wrong initial values paired with edges computed
+    // from the correct g2o poses.
+    //
+    // graph.g2o is now treated as the single source of truth for vertex
+    // estimates.  The data file's estimate is still parsed and stored for
+    // reference, but no longer overwrites the authoritative g2o value.
+    //
+    // if (estimate) {
+    //     node->setEstimate(*estimate);
+    // }
 
     pcl::PointCloud<PointT>::Ptr cloud_(new pcl::PointCloud<PointT>());
     pcl::io::loadPCDFile(directory + "/cloud.pcd", *cloud_);

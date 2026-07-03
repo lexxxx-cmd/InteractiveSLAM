@@ -87,21 +87,38 @@ bool InteractiveGraph::load_special_nodes(const std::string& directory,
                     continue;
                 }
 
-                anchor_node = dynamic_cast<g2o::VertexSE3*>(graph->vertex(anchor_node_id));
-                if (anchor_node == nullptr) {
-                    std::cerr << "failed to cast anchor node to VertexSE3!!" << std::endl;
-                    return false;
+                // The CSV anchor may refer to a node that does not exist in
+                // the current graph.g2o (e.g. after LVBA exports a fresh g2o
+                // without the anchor).  Degrade gracefully: warn and fall
+                // through to automatic anchor creation below.
+                g2o::VertexSE3* candidate =
+                    dynamic_cast<g2o::VertexSE3*>(graph->vertex(anchor_node_id));
+                if (candidate == nullptr) {
+                    std::cerr << "[load_special_nodes] CSV anchor node "
+                              << anchor_node_id
+                              << " not found in graph, will create new anchor"
+                              << std::endl;
+                    break;
                 }
-                if (anchor_node->edges().empty()) {
-                    std::cerr << "anchor node is not connected with any edges!!" << std::endl;
-                    return false;
+                if (candidate->edges().empty()) {
+                    std::cerr << "[load_special_nodes] CSV anchor node "
+                              << anchor_node_id
+                              << " has no edges, will create new anchor"
+                              << std::endl;
+                    break;
                 }
 
-                anchor_edge = dynamic_cast<g2o::EdgeSE3*>(*anchor_node->edges().begin());
-                if (anchor_edge == nullptr) {
-                    std::cerr << "failed to cast anchor edge to EdgeSE3!!" << std::endl;
-                    return false;
+                g2o::EdgeSE3* candidate_edge =
+                    dynamic_cast<g2o::EdgeSE3*>(*candidate->edges().begin());
+                if (candidate_edge == nullptr) {
+                    std::cerr << "[load_special_nodes] CSV anchor edge not "
+                                 "EdgeSE3, will create new anchor"
+                              << std::endl;
+                    break;
                 }
+
+                anchor_node = candidate;
+                anchor_edge = candidate_edge;
             }
         }
     }
