@@ -155,6 +155,11 @@ void osgQOpenGLWidget::keyPressEvent(QKeyEvent* event)
     {
         // forward event to renderer
         m_renderer->keyPressEvent(event);
+
+        // Let Qt propagate the event to parent widgets so that
+        // QAction shortcuts (Ctrl+O, Ctrl+S, R, etc.) can fire
+        // even when the OSG viewport has keyboard focus.
+        event->ignore();
     }
 }
 
