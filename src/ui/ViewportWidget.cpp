@@ -6,6 +6,7 @@
 #include <chrono>
 
 #include <osg/Notify>
+#include <osg/Math>
 
 #include "osgQOpenGL/osgQOpenGLWidget.h"
 #include "osgQOpenGL/OSGRenderer.h"
@@ -365,6 +366,33 @@ void ViewportWidget::rebuildPointClouds() {
 // ---------------------------------------------------------------------------
 
 void ViewportWidget::updateScene() {
+    // In orthographic mode, dynamically track the camera distance so that
+    // orbiting and zooming feel natural, just like perspective mode.
+    if (m_useOrthographic) {
+        osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+        if (viewer) {
+            auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+                viewer->getCameraManipulator());
+            if (manip) {
+                double dist = manip->getDistance();
+                osg::Camera* camera = viewer->getCamera();
+                int vpW = m_osgWidget->width();
+                int vpH = m_osgWidget->height();
+                if (vpW > 0 && vpH > 0) {
+                    double aspect = static_cast<double>(vpW) / static_cast<double>(vpH);
+                    // Match the perspective 30° FOV so switching feels seamless
+                    double halfHeight = dist * std::tan(osg::DegreesToRadians(30.0) * 0.5);
+                    double halfWidth = halfHeight * aspect;
+                    double farDist = halfHeight * 40.0;
+                    camera->setProjectionMatrixAsOrtho(
+                        -halfWidth, halfWidth,
+                        -halfHeight, halfHeight,
+                        0.1, farDist);
+                }
+            }
+        }
+    }
+
     if (!m_graph) return;
 
     // Geometry is static after loading / explicit refresh.  Rebuilding
