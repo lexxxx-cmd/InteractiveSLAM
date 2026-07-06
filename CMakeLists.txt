@@ -30,7 +30,7 @@ find_package(OpenSceneGraph REQUIRED
     COMPONENTS osg osgViewer osgGA osgUtil osgDB OpenThreads)
 
 # Qt6 — Widgets-based UI (replaces QML)
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets Concurrent LinguistTools)
 
 # --- Source files ---
 
@@ -84,6 +84,13 @@ qt_add_executable(appInteractiveSLAM
     ${DATA_SOURCES}
     ${BACKEND_SOURCES}
     ${UI_SOURCES}
+)
+
+# --- Qt Translations (zh_CN) ---
+qt_add_translations(appInteractiveSLAM
+    TS_FILES
+        translations/app_zh_CN.ts
+    RESOURCE_PREFIX /i18n
 )
 
 target_include_directories(appInteractiveSLAM PRIVATE
