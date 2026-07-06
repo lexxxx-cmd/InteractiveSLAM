@@ -412,7 +412,7 @@ void MainWindow::setupMenus() {
     auto* graphMenu = menuBar()->addMenu(tr("&Graph"));
 
     auto* optimizeAction = graphMenu->addAction(tr("&Optimize"));
-    optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_O));
+    optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
     m_optimizeAction = optimizeAction;
     connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
 
