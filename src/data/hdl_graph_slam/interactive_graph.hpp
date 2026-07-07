@@ -68,6 +68,7 @@ public:
 
     void dump(const std::string& directory, hdl_graph_slam::ProgressInterface& progress);
     bool save_pointcloud(const std::string& filename, hdl_graph_slam::ProgressInterface& progress);
+    bool saveLVBA(const std::string& directory, hdl_graph_slam::ProgressInterface& progress);
 
     using GraphSLAM::graph;
     using GraphSLAM::num_edges;

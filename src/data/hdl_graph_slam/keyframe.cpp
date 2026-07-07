@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include <pcl/io/pcd_io.h>
+#include <pcl/filters/voxel_grid.h>
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/types/slam3d/vertex_se3.h>
 
@@ -63,7 +64,16 @@ void KeyFrame::save(const std::string& directory) {
         ofs << "id " << node->id() << "\n";
     }
 
-    pcl::io::savePCDFileBinary(directory + "/cloud.pcd", *cloud);
+    // Save raw (unsampled) cloud first
+    pcl::io::savePCDFileBinary(directory + "/raw.pcd", *cloud);
+
+    // Downsample to 0.02m voxel grid for cloud.pcd
+    pcl::PointCloud<PointT>::Ptr sampled(new pcl::PointCloud<PointT>());
+    pcl::VoxelGrid<PointT> voxel;
+    voxel.setInputCloud(cloud);
+    voxel.setLeafSize(0.02f, 0.02f, 0.02f);
+    voxel.filter(*sampled);
+    pcl::io::savePCDFileBinary(directory + "/cloud.pcd", *sampled);
 }
 
 bool KeyFrame::load(const std::string& directory, g2o::HyperGraph* graph) {
@@ -158,8 +168,14 @@ bool KeyFrame::load(const std::string& directory, g2o::HyperGraph* graph) {
     //     node->setEstimate(*estimate);
     // }
 
+    // Prefer raw.pcd (unsampled original); fallback to cloud.pcd for
+    // backward compatibility with maps saved before the raw.pcd split.
     pcl::PointCloud<PointT>::Ptr cloud_(new pcl::PointCloud<PointT>());
-    pcl::io::loadPCDFile(directory + "/cloud.pcd", *cloud_);
+    if (boost::filesystem::exists(directory + "/raw.pcd")) {
+        pcl::io::loadPCDFile(directory + "/raw.pcd", *cloud_);
+    } else {
+        pcl::io::loadPCDFile(directory + "/cloud.pcd", *cloud_);
+    }
     cloud = cloud_;
 
     return true;

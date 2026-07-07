@@ -521,6 +521,16 @@ void MainWindow::onSaveMap() {
     try {
         auto* graph = m_manager->graph();
         graph->dump(dir.toStdString(), *m_manager->progress());
+
+        // Best-effort LVBA conversion — failure is logged but does not
+        // invalidate the main save operation.
+        try {
+            graph->saveLVBA(dir.toStdString(), *m_manager->progress());
+        } catch (const std::exception& e) {
+            std::cerr << "[MainWindow] LVBA conversion failed: "
+                      << e.what() << std::endl;
+        }
+
         statusBar()->showMessage(
             tr("Map saved: %1").arg(dir), 5000);
     } catch (const std::exception& e) {

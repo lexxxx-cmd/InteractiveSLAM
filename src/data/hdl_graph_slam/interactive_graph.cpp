@@ -1,5 +1,6 @@
 #include "data/hdl_graph_slam/interactive_graph.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <boost/filesystem.hpp>
@@ -367,6 +368,89 @@ bool InteractiveGraph::save_pointcloud(const std::string& filename,
     progress.increment();
 
     return pcl::io::savePCDFileBinary(filename, *accumulated);
+}
+
+bool InteractiveGraph::saveLVBA(const std::string& directory,
+                                hdl_graph_slam::ProgressInterface& progress) {
+    namespace fs = boost::filesystem;
+
+    // Output to parent directory: <dir>/../all_pcd_body/
+    fs::path lvba_dir = fs::path(directory).parent_path() / "all_pcd_body";
+    try {
+        if (!fs::is_directory(lvba_dir)) {
+            fs::create_directory(lvba_dir);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[saveLVBA] Failed to create " << lvba_dir
+                  << ": " << e.what() << std::endl;
+        return false;
+    }
+
+    // Collect keyframes with valid cloud and node
+    std::vector<InteractiveKeyFrame::Ptr> sorted;
+    sorted.reserve(keyframes.size());
+    for (const auto& kv : keyframes) {
+        const auto& kf = kv.second;
+        if (kf->cloud && !kf->cloud->empty() && kf->node) {
+            sorted.push_back(kf);
+        }
+    }
+
+    if (sorted.empty()) {
+        std::cerr << "[saveLVBA] No keyframes with cloud data" << std::endl;
+        return false;
+    }
+
+    // Sort by stamp_nsec (ascending), tiebreak by g2o node ID
+    std::sort(sorted.begin(), sorted.end(),
+        [](const InteractiveKeyFrame::Ptr& a, const InteractiveKeyFrame::Ptr& b) {
+            if (a->stamp_nsec != b->stamp_nsec)
+                return a->stamp_nsec < b->stamp_nsec;
+            return a->id() < b->id();
+        });
+
+    // Write lidar_poses.txt in TUM format
+    std::string poses_path = (lvba_dir / "lidar_poses.txt").string();
+    std::ofstream ofs(poses_path);
+    if (!ofs) {
+        std::cerr << "[saveLVBA] Failed to open " << poses_path << std::endl;
+        return false;
+    }
+
+    progress.set_maximum(sorted.size());
+    progress.set_text("saving LVBA format");
+    progress.increment();
+
+    bool all_ok = true;
+    for (size_t seq_idx = 0; seq_idx < sorted.size(); ++seq_idx) {
+        const auto& kf = sorted[seq_idx];
+        progress.increment();
+
+        // Pose from g2o vertex estimate (authoritative)
+        const Eigen::Isometry3d& pose = kf->node->estimate();
+        Eigen::Quaterniond q(pose.linear());
+        Eigen::Vector3d t = pose.translation();
+
+        // Timestamp: nanoseconds → seconds
+        double timestamp = static_cast<double>(kf->stamp_nsec) / 1e9;
+
+        // TUM: timestamp tx ty tz qx qy qz qw
+        ofs << boost::format("%.6f %.9f %.9f %.9f %.9f %.9f %.9f %.9f\n")
+                   % timestamp % t.x() % t.y() % t.z()
+                   % q.x() % q.y() % q.z() % q.w();
+
+        // Write PCD (IMU body-frame cloud, no transform)
+        std::string pcd_name = (boost::format("%.6f.pcd") %
+                                static_cast<double>(seq_idx)).str();
+        std::string pcd_path = (lvba_dir / pcd_name).string();
+        if (pcl::io::savePCDFileBinary(pcd_path, *kf->cloud) < 0) {
+            std::cerr << "[saveLVBA] Failed to write " << pcd_path << std::endl;
+            all_ok = false;
+        }
+    }
+
+    ofs.close();
+    return all_ok;
 }
 
 }  // namespace hdl_graph_slam
