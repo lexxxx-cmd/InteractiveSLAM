@@ -1,0 +1,3 @@
+[submodule "thirdparty/ndt_omp_MSVC"]
+	path = thirdparty/ndt_omp_MSVC
+	url = https://github.com/lexxxx-cmd/ndt_omp_MSVC.git
