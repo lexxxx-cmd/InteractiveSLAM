@@ -1,6 +1,6 @@
 # Interactive SLAM
 
-交互式位姿图（Pose Graph）编辑与回环闭合工具，基于 Qt6 Widgets + OpenSceneGraph 构建。支持加载 / 保存地图，交互式手动和自动回环检测与闭合，图优化，以及点云渲染控制。
+交互式位姿图（Pose Graph）编辑与回环闭合工具，基于 Qt6 Widgets + OpenSceneGraph 构建。支持加载 / 保存地图，交互式手动和自动回环检测与闭合，图优化，以及点云渲染控制。参考项目：https://github.com/koide3/interactive_slam
 
 ---
 
