@@ -9,7 +9,7 @@ QWidget {
     background-color: #121216;
     color: #e0e0e0;
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 QMainWindow {
@@ -26,13 +26,13 @@ QMainWindow::separator {
 QMenuBar {
     background-color: #1a1a1f;
     border-bottom: 1px solid #2a2a35;
-    padding: 2px 0px;
+    padding: 1px 0px;
     color: #e0e0e0;
-    font-size: 13px;
+    font-size: 12px;
 }
 
 QMenuBar::item {
-    padding: 6px 12px;
+    padding: 4px 10px;
     background: transparent;
     border-radius: 4px;
     margin: 2px 2px;
@@ -56,7 +56,7 @@ QMenu {
 }
 
 QMenu::item {
-    padding: 6px 32px 6px 16px;
+    padding: 5px 28px 5px 14px;
     margin: 0px 4px;
     border-radius: 4px;
 }
@@ -87,8 +87,8 @@ QStatusBar {
     background-color: #1a1a1f;
     border-top: 1px solid #2a2a35;
     color: #999999;
-    font-size: 12px;
-    padding: 2px 8px;
+    font-size: 11px;
+    padding: 1px 8px;
 }
 
 QStatusBar::item {
@@ -100,17 +100,17 @@ QGroupBox {
     background-color: transparent;
     border: 1px solid #2a2a35;
     border-radius: 6px;
-    margin-top: 14px;
-    padding: 10px 8px 8px 8px;
-    font-size: 12px;
+    margin-top: 12px;
+    padding: 6px 6px 6px 6px;
+    font-size: 11px;
     font-weight: bold;
     color: #e0e0e0;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 12px;
-    padding: 0px 6px;
+    left: 10px;
+    padding: 0px 5px;
     color: #999999;
     background-color: #1a1a1f;
     border-radius: 4px;
@@ -118,15 +118,15 @@ QGroupBox::title {
 
 /* ----- 6. CHECKBOX ----- */
 QCheckBox {
-    spacing: 8px;
+    spacing: 6px;
     color: #e0e0e0;
-    font-size: 13px;
-    padding: 2px 0px;
+    font-size: 11px;
+    padding: 1px 0px;
 }
 
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border: 2px solid #333340;
     border-radius: 3px;
     background-color: #1e1e24;
@@ -152,10 +152,10 @@ QPushButton {
     color: #e0e0e0;
     border: 1px solid #333340;
     border-radius: 4px;
-    padding: 6px 16px;
-    font-size: 13px;
+    padding: 4px 12px;
+    font-size: 11px;
     font-weight: normal;
-    min-height: 28px;
+    min-height: 22px;
 }
 
 QPushButton:hover {
@@ -198,9 +198,9 @@ QPushButton#tertiaryButton {
     background-color: transparent;
     border: 1px solid #2a2a35;
     color: #999999;
-    font-size: 12px;
-    padding: 4px 12px;
-    min-height: 24px;
+    font-size: 11px;
+    padding: 3px 10px;
+    min-height: 20px;
 }
 QPushButton#tertiaryButton:hover {
     background-color: #22222a;
@@ -257,9 +257,9 @@ QSpinBox, QDoubleSpinBox {
     color: #e0e0e0;
     border: 1px solid #333340;
     border-radius: 4px;
-    padding: 4px 8px;
-    min-height: 26px;
-    font-size: 13px;
+    padding: 3px 6px;
+    min-height: 22px;
+    font-size: 11px;
 }
 
 QSpinBox:focus, QDoubleSpinBox:focus {
@@ -277,9 +277,9 @@ QComboBox {
     color: #e0e0e0;
     border: 1px solid #333340;
     border-radius: 4px;
-    padding: 4px 8px;
-    min-height: 26px;
-    font-size: 13px;
+    padding: 3px 6px;
+    min-height: 22px;
+    font-size: 11px;
 }
 
 QComboBox:focus {
@@ -294,11 +294,18 @@ QComboBox:disabled {
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width: 24px;
+    width: 20px;
     border: none;
     border-left: 1px solid #2a2a35;
     border-top-right-radius: 3px;
     border-bottom-right-radius: 3px;
+}
+
+/* 下拉箭头 — 使用浅色 SVG 保证在深色背景上可见 */
+QComboBox::down-arrow {
+    image: url(:/ui/arrow_down.svg);
+    width: 10px;
+    height: 10px;
 }
 
 QComboBox QAbstractItemView {
@@ -315,7 +322,7 @@ QComboBox QAbstractItemView {
 QLabel {
     background: transparent;
     color: #e0e0e0;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 /* ----- 12. TREE WIDGET ----- */
@@ -329,8 +336,8 @@ QTreeWidget {
 }
 
 QTreeWidget::item {
-    padding: 4px 4px;
-    min-height: 26px;
+    padding: 3px 4px;
+    min-height: 22px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
@@ -350,8 +357,8 @@ QHeaderView::section {
     border: none;
     border-bottom: 1px solid #2a2a35;
     border-right: 1px solid #22222a;
-    padding: 6px 8px;
-    font-size: 12px;
+    padding: 4px 6px;
+    font-size: 11px;
     font-weight: bold;
 }
 
@@ -437,8 +444,8 @@ QToolTip {
     color: #e0e0e0;
     border: 1px solid #3a3a48;
     border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 12px;
+    padding: 3px 6px;
+    font-size: 11px;
 }
 
 /* ----- 18. OVERLAY PANEL — Object-Name Targeting ----- */
@@ -459,7 +466,7 @@ QLabel#OverlayTitleLabel {
     background: transparent;
     color: #999999;
     font-weight: bold;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 QPushButton#OverlayCloseButton {
@@ -467,9 +474,9 @@ QPushButton#OverlayCloseButton {
     color: #999999;
     border: none;
     padding: 0px;
-    font-size: 14px;
-    min-width: 20px;
-    min-height: 20px;
+    font-size: 13px;
+    min-width: 18px;
+    min-height: 18px;
     border-radius: 3px;
 }
 
@@ -492,12 +499,46 @@ QWidget#AutoLoopScrollContent {
     background: transparent;
 }
 
-/* ----- 20. SPLITTER (future-proofing) ----- */
+/* ----- 20. LOOP CLOSURE DIALOG — 增量按钮条 ----- */
+/* 轴标签：平移=白色，旋转=蓝色 */
+QLabel#transLabel {
+    color: #e0e0e0;
+    font-weight: bold;
+    font-size: 11px;
+}
+QLabel#rotLabel {
+    color: #3b82f6;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+/* +/- 增量按钮（◀ ▶） */
+QPushButton#stepBtn {
+    background-color: #24242d;
+    color: #e0e0e0;
+    border: 1px solid #333340;
+    border-radius: 4px;
+    padding: 0px;
+    font-size: 12px;
+    min-height: 0px;
+}
+QPushButton#stepBtn:hover {
+    background-color: #2a2a35;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+QPushButton#stepBtn:pressed {
+    background-color: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
+/* ----- 21. SPLITTER (future-proofing) ----- */
 QSplitter::handle {
     background-color: #2a2a35;
 }
 
-/* ----- 21. DIALOG BUTTON BOX ----- */
+/* ----- 22. DIALOG BUTTON BOX ----- */
 QDialogButtonBox QPushButton {
     min-width: 80px;
 }

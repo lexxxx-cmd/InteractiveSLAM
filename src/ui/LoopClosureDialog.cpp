@@ -111,7 +111,7 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
 
     setWindowTitle(tr("Loop Closure"));
     setModal(true);
-    setMinimumSize(560, 700);
+    setMinimumSize(600, 780);
 
     // 获取图谱
     m_graph = m_manager->graph();
@@ -142,9 +142,6 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
     m_endPose      = m_endPoseInit;
 
     m_regMethods = std::make_unique<hdl_graph_slam::RegistrationMethods>();
-
-    // 滑块前次值初始为 0
-    for (int i = 0; i < 6; ++i) m_sliderPrevValues[i] = 0.0;
 
     setupUi();
 
@@ -186,8 +183,9 @@ LoopClosureDialog::~LoopClosureDialog() {
 void LoopClosureDialog::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
 
-    // --- 迷你视口（512×512） ---
+    // --- 迷你视口（560×560） ---
     m_miniViewport = new MiniViewportWidget(this);
+    m_miniViewport->setFixedSize(560, 560);
     mainLayout->addWidget(m_miniViewport, 0, Qt::AlignHCenter);
 
     // --- 适应度分数 ---
@@ -212,70 +210,75 @@ void LoopClosureDialog::setupUi() {
     stepRow->addStretch();
     sliderLayout->addLayout(stepRow);
 
-    // 平移行：PX  PY  PZ
+    // 平移行：PX  PY  PZ（每轴 ◀ 减 / ▶ 加）
     auto* transRow = new QHBoxLayout;
     const char* transLabels[] = {"PX", "PY", "PZ"};
     for (int i = 0; i < 3; ++i) {
-        transRow->addWidget(new QLabel(tr(transLabels[i])));
-        m_sliders[i] = new QDoubleSpinBox;
-        m_sliders[i]->setRange(-100.0, 100.0);
-        m_sliders[i]->setDecimals(2);
-        m_sliders[i]->setSingleStep(0.10);   // 默认：Medium
-        m_sliders[i]->setValue(0.0);
-        m_sliders[i]->setKeyboardTracking(false);
-        m_sliders[i]->setFixedWidth(100);
-        transRow->addWidget(m_sliders[i]);
+        auto* label = new QLabel(tr(transLabels[i]));
+        label->setObjectName("transLabel");
+        transRow->addWidget(label);
+
+        m_stepBtns[i][0] = new QPushButton;
+        m_stepBtns[i][0]->setObjectName("stepBtn");
+        m_stepBtns[i][0]->setFixedSize(26, 26);
+        m_stepBtns[i][0]->setText("◀");
+        transRow->addWidget(m_stepBtns[i][0]);
+
+        m_stepBtns[i][1] = new QPushButton;
+        m_stepBtns[i][1]->setObjectName("stepBtn");
+        m_stepBtns[i][1]->setFixedSize(26, 26);
+        m_stepBtns[i][1]->setText("▶");
+        transRow->addWidget(m_stepBtns[i][1]);
+
+        transRow->addStretch();
     }
     sliderLayout->addLayout(transRow);
 
-    // 旋转行：RX  RY  RZ
+    // 旋转行：RX  RY  RZ（每轴 ◀ 减 / ▶ 加）
     auto* rotRow = new QHBoxLayout;
     const char* rotLabels[] = {"RX", "RY", "RZ"};
     for (int i = 0; i < 3; ++i) {
-        rotRow->addWidget(new QLabel(tr(rotLabels[i])));
-        m_sliders[3 + i] = new QDoubleSpinBox;
-        m_sliders[3 + i]->setRange(-100.0, 100.0);
-        m_sliders[3 + i]->setDecimals(2);
-        m_sliders[3 + i]->setSingleStep(0.05);  // 默认：Medium
-        m_sliders[3 + i]->setValue(0.0);
-        m_sliders[3 + i]->setKeyboardTracking(false);
-        m_sliders[3 + i]->setFixedWidth(100);
-        rotRow->addWidget(m_sliders[3 + i]);
+        auto* label = new QLabel(tr(rotLabels[i]));
+        label->setObjectName("rotLabel");
+        rotRow->addWidget(label);
+
+        m_stepBtns[3 + i][0] = new QPushButton;
+        m_stepBtns[3 + i][0]->setObjectName("stepBtn");
+        m_stepBtns[3 + i][0]->setFixedSize(26, 26);
+        m_stepBtns[3 + i][0]->setText("◀");
+        rotRow->addWidget(m_stepBtns[3 + i][0]);
+
+        m_stepBtns[3 + i][1] = new QPushButton;
+        m_stepBtns[3 + i][1]->setObjectName("stepBtn");
+        m_stepBtns[3 + i][1]->setFixedSize(26, 26);
+        m_stepBtns[3 + i][1]->setText("▶");
+        rotRow->addWidget(m_stepBtns[3 + i][1]);
+
+        rotRow->addStretch();
     }
     sliderLayout->addLayout(rotRow);
 
     mainLayout->addWidget(sliderGroup);
 
-    // 连接滑块信号
-    connect(m_sliders[0], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &LoopClosureDialog::onSliderPXChanged);
-    connect(m_sliders[1], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &LoopClosureDialog::onSliderPYChanged);
-    connect(m_sliders[2], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &LoopClosureDialog::onSliderPZChanged);
-    connect(m_sliders[3], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &LoopClosureDialog::onSliderRXChanged);
-    connect(m_sliders[4], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &LoopClosureDialog::onSliderRYChanged);
-    connect(m_sliders[5], QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &LoopClosureDialog::onSliderRZChanged);
-
-    // 步长档位选择器
-    connect(m_stepCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int index) {
-        // 档位预设：{平移步长, 旋转步长}
-        static const double presets[][2] = {
-            {0.01, 0.01},   // Fine
-            {0.10, 0.05},   // Medium
-            {0.50, 0.20},   // Coarse
-            {1.00, 0.785},  // Large（45° ≈ 0.785 rad）
-        };
-        int i = std::clamp(index, 0, 3);
-        for (int j = 0; j < 3; ++j) {
-            m_sliders[j]->setSingleStep(presets[i][0]);
-            m_sliders[3 + j]->setSingleStep(presets[i][1]);
-        }
-    });
+    // 连接步进按钮信号（6 轴 × 2 方向 = 12 个按钮）
+    // 平移轴（0,1,2）
+    for (int axis = 0; axis < 3; ++axis) {
+        connect(m_stepBtns[axis][0], &QPushButton::clicked, this, [this, axis]() {
+            onStepButton(axis, false, -1);  // 负方向
+        });
+        connect(m_stepBtns[axis][1], &QPushButton::clicked, this, [this, axis]() {
+            onStepButton(axis, false, +1);  // 正方向
+        });
+    }
+    // 旋转轴（3,4,5）
+    for (int axis = 0; axis < 3; ++axis) {
+        connect(m_stepBtns[3 + axis][0], &QPushButton::clicked, this, [this, axis]() {
+            onStepButton(axis, true, -1);
+        });
+        connect(m_stepBtns[3 + axis][1], &QPushButton::clicked, this, [this, axis]() {
+            onStepButton(axis, true, +1);
+        });
+    }
 
     // --- 操作按钮行 ---
     auto* btnRow = new QHBoxLayout;
@@ -352,75 +355,32 @@ void LoopClosureDialog::applySliderDelta(int axis, double delta, bool isRotation
     updatePreview();
 }
 
-// 以下六个滑块槽函数结构相同：
-// 1. 计算增量 = 新值 - 前次值
-// 2. 将滑块自动归零（blockSignals 防止递归）
-// 3. 调用 applySliderDelta
+// ---------------------------------------------------------------------------
+// 步进按钮槽函数 — 按当前步长档位应用增量
+// ---------------------------------------------------------------------------
 
-void LoopClosureDialog::onSliderPXChanged(double value) {
-    double delta = value - m_sliderPrevValues[0];
-    m_sliderPrevValues[0] = value;
-    if (std::abs(delta) < 1e-9) return;
-    m_sliders[0]->blockSignals(true);
-    m_sliders[0]->setValue(0.0);
-    m_sliderPrevValues[0] = 0.0;
-    m_sliders[0]->blockSignals(false);
-    applySliderDelta(0, delta, false);
-}
+/**
+ * @brief 步进按钮（◀/▶）点击处理
+ *
+ * 根据步长档位选择器的当前档位读取步长，按方向应用增量到终点位姿。
+ *
+ * @param axis       轴索引（0=X, 1=Y, 2=Z）
+ * @param isRotation true=旋转, false=平移
+ * @param direction  方向（-1=减, +1=加）
+ */
+void LoopClosureDialog::onStepButton(int axis, bool isRotation, int direction) {
+    // 档位预设：{平移步长, 旋转步长}
+    static const double presets[][2] = {
+        {0.01, 0.01},   // Fine
+        {0.10, 0.05},   // Medium
+        {0.50, 0.20},   // Coarse
+        {1.00, 0.785},  // Large（45° ≈ 0.785 rad）
+    };
+    int idx = std::clamp(m_stepCombo->currentIndex(), 0, 3);
+    double step = presets[idx][isRotation ? 1 : 0];
+    double delta = direction * step;
 
-void LoopClosureDialog::onSliderPYChanged(double value) {
-    double delta = value - m_sliderPrevValues[1];
-    m_sliderPrevValues[1] = value;
-    if (std::abs(delta) < 1e-9) return;
-    m_sliders[1]->blockSignals(true);
-    m_sliders[1]->setValue(0.0);
-    m_sliderPrevValues[1] = 0.0;
-    m_sliders[1]->blockSignals(false);
-    applySliderDelta(1, delta, false);
-}
-
-void LoopClosureDialog::onSliderPZChanged(double value) {
-    double delta = value - m_sliderPrevValues[2];
-    m_sliderPrevValues[2] = value;
-    if (std::abs(delta) < 1e-9) return;
-    m_sliders[2]->blockSignals(true);
-    m_sliders[2]->setValue(0.0);
-    m_sliderPrevValues[2] = 0.0;
-    m_sliders[2]->blockSignals(false);
-    applySliderDelta(2, delta, false);
-}
-
-void LoopClosureDialog::onSliderRXChanged(double value) {
-    double delta = value - m_sliderPrevValues[3];
-    m_sliderPrevValues[3] = value;
-    if (std::abs(delta) < 1e-9) return;
-    m_sliders[3]->blockSignals(true);
-    m_sliders[3]->setValue(0.0);
-    m_sliderPrevValues[3] = 0.0;
-    m_sliders[3]->blockSignals(false);
-    applySliderDelta(0, delta, true);
-}
-
-void LoopClosureDialog::onSliderRYChanged(double value) {
-    double delta = value - m_sliderPrevValues[4];
-    m_sliderPrevValues[4] = value;
-    if (std::abs(delta) < 1e-9) return;
-    m_sliders[4]->blockSignals(true);
-    m_sliders[4]->setValue(0.0);
-    m_sliderPrevValues[4] = 0.0;
-    m_sliders[4]->blockSignals(false);
-    applySliderDelta(1, delta, true);
-}
-
-void LoopClosureDialog::onSliderRZChanged(double value) {
-    double delta = value - m_sliderPrevValues[5];
-    m_sliderPrevValues[5] = value;
-    if (std::abs(delta) < 1e-9) return;
-    m_sliders[5]->blockSignals(true);
-    m_sliders[5]->setValue(0.0);
-    m_sliderPrevValues[5] = 0.0;
-    m_sliders[5]->blockSignals(false);
-    applySliderDelta(2, delta, true);
+    applySliderDelta(axis, delta, isRotation);
 }
 
 // ---------------------------------------------------------------------------

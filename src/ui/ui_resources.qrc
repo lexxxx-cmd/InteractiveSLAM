@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/ui">
         <file alias="dark_theme.qss">dark_theme.qss</file>
+        <file alias="arrow_down.svg">arrow_down.svg</file>
     </qresource>
 </RCC>
