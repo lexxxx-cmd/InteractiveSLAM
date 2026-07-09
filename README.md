@@ -4,8 +4,89 @@
 
 ---
 
+## 构建环境
+
+### 系统要求
+
+| 项目 | 要求 |
+|------|------|
+| 操作系统 | Windows 10/11 (x64) |
+| 编译器 | MSVC 2022 (Visual Studio 17 2022) |
+| C++ 标准 | C++17 |
+| CMake | ≥ 3.16 |
+| 包管理器 | vcpkg (triplet: `x64-windows`) |
+
+### vcpkg 依赖库
+
+以下库通过 vcpkg 安装（`x64-windows` triplet）：
+
+| 库 | 版本 | 说明 |
+|------|------|------|
+| `eigen3` | 5.0.1 | 线性代数（矩阵、向量、几何变换） |
+| `pcl` | 1.15.1#1 | 点云库（io, common, search, features, registration） |
+| `g2o` | 2024-12-28 | 图优化框架（自动安装 SuiteSparse 依赖） |
+| `boost-filesystem` | 1.90.0#1 | 文件系统操作 |
+| `osg` | 3.6.5#27 | OpenSceneGraph 3D 渲染引擎 |
+
+安装命令：
+
+```sh
+vcpkg install eigen3 pcl g2o boost-filesystem osg --triplet x64-windows
+```
+
+### Qt6（官方安装）
+
+Qt6 通过官方在线安装器安装，**非 vcpkg**（vcpkg 中 Qt6 编译耗时长且版本滞后）。
+
+| 组件 | 版本 | 说明 |
+|------|------|------|
+| Qt 6.9+ (MSVC 2022 x64) | 6.9.1 / 6.10.2 | 基础框架 |
+| Qt Widgets | — | GUI 控件库 |
+| Qt OpenGL | — | OpenGL 支持模块 |
+| Qt OpenGL Widgets | — | OpenGL 控件集成 |
+| Qt Concurrent | — | 多线程并行（后台加载/优化） |
+| Qt Linguist Tools | — | 国际化翻译工具 |
+
+安装路径示例：`E:\ToolsApp\Qt\6.9.1\msvc2022_64`
+
+> **注意**：CMake 通过 `CMAKE_PREFIX_PATH` 查找 Qt6，构建时需指定 Qt 安装路径。
+
+### CMake 配置与构建
+
+```sh
+# 1. 进入项目目录
+cd InteractiveSLAM
+
+# 2. 创建构建目录
+mkdir build && cd build
+
+# 3. 配置（指定 Qt6 路径和 vcpkg toolchain）
+cmake .. -G "Visual Studio 17 2022" -A x64 \
+    -DCMAKE_PREFIX_PATH="E:/ToolsApp/Qt/6.9.1/msvc2022_64" \
+    -DCMAKE_TOOLCHAIN_FILE="E:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+# 4. 构建（Release 模式）
+cmake --build . --config Release
+
+# 5. 运行
+.\Release\appInteractiveSLAM.exe
+```
+
+> **建议**：将 `CMAKE_PREFIX_PATH` 和 `CMAKE_TOOLCHAIN_FILE` 配置到 CMakePresets.json 或系统环境变量中，避免每次手动输入。
+
+### 可选依赖
+
+| 库 | 说明 |
+|------|------|
+| OpenMP | 多线程并行（MSVC 自带，无需额外安装），启用 `ndt_omp` GICP/NDT 加速 |
+| SuiteSparse | g2o 的稀疏矩阵求解器依赖，vcpkg 安装 g2o 时自动安装 |
+
+---
+
+
 ## 目录
 
+- [构建环境](#构建环境)
 - [界面概览](#界面概览)
 - [文件菜单](#文件菜单)
 - [视图菜单](#视图菜单)
