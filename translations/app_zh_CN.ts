@@ -624,6 +624,10 @@
         <translation>Z 轴裁剪</translation>
     </message>
     <message>
+        <source>Point Cloud Filters</source>
+        <translation>点云过滤</translation>
+    </message>
+    <message>
         <location line="-181"/>
         <location line="+192"/>
         <source>Color Range</source>
@@ -880,6 +884,10 @@ N = 0 仅合并选中的关键帧本身。</translation>
         <location filename="../src/ui/ZClippingPanel.cpp" line="+30"/>
         <source>Z-Clipping</source>
         <translation>Z 轴裁剪</translation>
+    </message>
+    <message>
+        <source>Point Cloud Filters</source>
+        <translation>点云过滤</translation>
     </message>
     <message>
         <location line="+3"/>

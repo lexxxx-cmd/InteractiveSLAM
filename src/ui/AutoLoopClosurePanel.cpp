@@ -1,3 +1,17 @@
+/**
+ * @file AutoLoopClosurePanel.cpp
+ * @brief 自动闭环检测控制面板实现
+ *
+ * 实现自动闭环检测的 UI 控制面板，包括：
+ * - 搜索参数（方法、距离阈值）的 UI 控件
+ * - 点云配准参数（方法、迭代次数、精度、NDT分辨率）
+ * - 鲁棒核函数选择
+ * - 适应度分数阈值设置
+ * - 启动/停止控制
+ * - 定时轮询状态快照（10Hz）
+ * - 信号发射：闭环边插入通知、顶点高亮通知
+ */
+
 #include "ui/AutoLoopClosurePanel.h"
 #include "backend/graph_manager.hpp"
 #include "data/hdl_graph_slam/automatic_loop_closure.hpp"
@@ -7,27 +21,28 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 #include <QFormLayout>
+#include <QScrollArea>
 #include <QMessageBox>
 
-// ── Kernel name table (must match g2o RobustKernelFactory order) ─────────────
+// ---- 核函数名称表（必须与 g2o RobustKernelFactory 顺序一致） ----
 static const char* kKernelUiNames[] = {
     "NONE", "Huber", "Cauchy", "DCS", "Fair",
     "GemanMcClure", "PseudoHuber", "Saturated", "Tukey", "Welsch"
 };
 static constexpr int kNumUiKernels = sizeof(kKernelUiNames) / sizeof(kKernelUiNames[0]);
 
-// ── Construction / Destruction ───────────────────────────────────────────────
+// ---- 构造 / 析构 ----
 
 AutoLoopClosurePanel::AutoLoopClosurePanel(GraphManager* manager, QWidget* parent)
     : QWidget(parent), m_manager(manager) {
     setupUi();
 
-    // Poll timer at 10 Hz
+    // 轮询定时器 10 Hz
     m_pollTimer = new QTimer(this);
     m_pollTimer->setInterval(100);
     connect(m_pollTimer, &QTimer::timeout, this, &AutoLoopClosurePanel::onPollStatus);
 
-    // Start / Stop button
+    // 开始/停止按钮
     connect(m_startStopBtn, &QPushButton::clicked, this, &AutoLoopClosurePanel::onStartStop);
 }
 
@@ -35,8 +50,14 @@ AutoLoopClosurePanel::~AutoLoopClosurePanel() {
     stopDetection();
 }
 
-// ── Public ───────────────────────────────────────────────────────────────────
+// ---- 公开接口 ----
 
+/**
+ * @brief 停止自动检测
+ *
+ * 如果检测正在运行，停止 AutomaticLoopClosure 线程和轮询定时器，
+ * 并将 UI 恢复为"已停止"状态。
+ */
 void AutoLoopClosurePanel::stopDetection() {
     if (m_autoLoop && m_autoLoop->is_running()) {
         m_autoLoop->stop();
@@ -49,20 +70,44 @@ void AutoLoopClosurePanel::stopDetection() {
     }
 }
 
-// ── UI Setup ─────────────────────────────────────────────────────────────────
+// ---- UI 设置 ----
 
+/**
+ * @brief 创建 UI 控件
+ *
+ * 按功能分组创建控件：
+ * - 搜索参数组（方法、距离阈值）
+ * - 配准参数组（方法、迭代次数、精度、分辨率）
+ * - 鲁棒核函数组（类型、delta）
+ * - 适应度分数组（阈值、最大范围）
+ * - 选项（插入后优化）
+ * - 开始/停止按钮
+ * - 状态显示组
+ */
 void AutoLoopClosurePanel::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(8, 8, 8, 8);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    // ── Search group ─────────────────────────────────────────────
+    // 可滚动区域 — 面板内容过长时自动出现滚动条
+    auto* scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollArea->setObjectName("AutoLoopScrollArea");
+
+    auto* scrollContent = new QWidget;
+    scrollContent->setObjectName("AutoLoopScrollContent");
+    auto* contentLayout = new QVBoxLayout(scrollContent);
+    contentLayout->setContentsMargins(8, 8, 8, 8);
+
+    // ---- 搜索参数组 ----
     auto* searchGroup = new QGroupBox(tr("Search"));
     auto* searchForm  = new QFormLayout(searchGroup);
 
     m_searchMethodCombo = new QComboBox;
     m_searchMethodCombo->addItem(tr("SEQUENTIAL"), 0);
     m_searchMethodCombo->addItem(tr("RANDOM"), 1);
-    m_searchMethodCombo->setCurrentIndex(1);  // default: RANDOM
+    m_searchMethodCombo->setCurrentIndex(1);  // 默认：RANDOM
     searchForm->addRow(tr("Method:"), m_searchMethodCombo);
 
     m_distanceThreshSpin = new QDoubleSpinBox;
@@ -79,21 +124,21 @@ void AutoLoopClosurePanel::setupUi() {
     m_accumDistThreshSpin->setSingleStep(0.5);
     searchForm->addRow(tr("Accum. dist thresh:"), m_accumDistThreshSpin);
 
-    mainLayout->addWidget(searchGroup);
+    contentLayout->addWidget(searchGroup);
 
-    // ── Registration group ───────────────────────────────────────
+    // ---- 配准参数组 ----
     auto* regGroup = new QGroupBox(tr("Registration"));
     auto* regForm  = new QFormLayout(regGroup);
 
     m_methodCombo = new QComboBox;
-    // Populate from a temporary RegistrationMethods instance
+    // 从临时 RegistrationMethods 实例填充配准方法列表
     {
         hdl_graph_slam::RegistrationMethods tmp;
         for (const char* name : tmp.method_names()) {
             m_methodCombo->addItem(QString::fromUtf8(name));
         }
     }
-    m_methodCombo->setCurrentIndex(1);  // default: GICP
+    m_methodCombo->setCurrentIndex(1);  // 默认：GICP
     regForm->addRow(tr("Method:"), m_methodCombo);
 
     m_maxIterSpin = new QSpinBox;
@@ -115,9 +160,9 @@ void AutoLoopClosurePanel::setupUi() {
     m_resolutionSpin->setSingleStep(0.5);
     regForm->addRow(tr("Resolution (NDT):"), m_resolutionSpin);
 
-    mainLayout->addWidget(regGroup);
+    contentLayout->addWidget(regGroup);
 
-    // ── Robust kernel group ──────────────────────────────────────
+    // ---- 鲁棒核函数组 ----
     auto* kernelGroup = new QGroupBox(tr("Robust Kernel"));
     auto* kernelForm  = new QFormLayout(kernelGroup);
 
@@ -125,7 +170,7 @@ void AutoLoopClosurePanel::setupUi() {
     for (int i = 0; i < kNumUiKernels; ++i) {
         m_kernelCombo->addItem(QString::fromUtf8(kKernelUiNames[i]), i);
     }
-    m_kernelCombo->setCurrentIndex(0);  // default: NONE
+    m_kernelCombo->setCurrentIndex(0);  // 默认：NONE
     kernelForm->addRow(tr("Type:"), m_kernelCombo);
 
     m_kernelDeltaSpin = new QDoubleSpinBox;
@@ -135,9 +180,9 @@ void AutoLoopClosurePanel::setupUi() {
     m_kernelDeltaSpin->setSingleStep(0.001);
     kernelForm->addRow(tr("Delta:"), m_kernelDeltaSpin);
 
-    mainLayout->addWidget(kernelGroup);
+    contentLayout->addWidget(kernelGroup);
 
-    // ── Fitness group ────────────────────────────────────────────
+    // ---- 适应度分数组 ----
     auto* fitGroup = new QGroupBox(tr("Fitness Score"));
     auto* fitForm  = new QFormLayout(fitGroup);
 
@@ -155,24 +200,25 @@ void AutoLoopClosurePanel::setupUi() {
     m_fitnessMaxRangeSpin->setSingleStep(0.10);
     fitForm->addRow(tr("Max range:"), m_fitnessMaxRangeSpin);
 
-    mainLayout->addWidget(fitGroup);
+    contentLayout->addWidget(fitGroup);
 
-    // ── Options ──────────────────────────────────────────────────
+    // ---- 选项 ----
     m_optimizeCb = new QCheckBox(tr("Optimize after edge insert"));
     m_optimizeCb->setChecked(true);
-    mainLayout->addWidget(m_optimizeCb);
+    contentLayout->addWidget(m_optimizeCb);
 
-    // ── Start / Stop button ──────────────────────────────────────
+    // ---- 开始/停止按钮 ----
     m_startStopBtn = new QPushButton(tr("Start"));
     m_startStopBtn->setMinimumHeight(32);
-    mainLayout->addWidget(m_startStopBtn);
+    m_startStopBtn->setObjectName("primaryButton");
+    contentLayout->addWidget(m_startStopBtn);
 
-    // ── Status display ───────────────────────────────────────────
+    // ---- 状态显示组 ----
     auto* statusGroup = new QGroupBox(tr("Status"));
     auto* statusLayout = new QVBoxLayout(statusGroup);
 
     m_statusLabel = new QLabel(tr("Status: Stopped"));
-    m_statusLabel->setStyleSheet("font-weight: bold; color: #888;");
+    m_statusLabel->setObjectName("LoopStatusLabel");
     statusLayout->addWidget(m_statusLabel);
 
     m_sourceLabel = new QLabel(tr("Current source: —"));
@@ -188,13 +234,20 @@ void AutoLoopClosurePanel::setupUi() {
     m_lastMatchLabel->setWordWrap(true);
     statusLayout->addWidget(m_lastMatchLabel);
 
-    mainLayout->addWidget(statusGroup);
+    contentLayout->addWidget(statusGroup);
 
-    mainLayout->addStretch();
+    contentLayout->addStretch();
+
+    // 将可滚动内容放入 ScrollArea，ScrollArea 放入主布局
+    scrollArea->setWidget(scrollContent);
+    mainLayout->addWidget(scrollArea);
 }
 
-// ── Parameter Sync ───────────────────────────────────────────────────────────
+// ---- 参数同步 ----
 
+/**
+ * @brief 将 UI 控件的值推送到数据层 AutomaticLoopClosure
+ */
 void AutoLoopClosurePanel::syncParamsToLoop() {
     if (!m_autoLoop) return;
 
@@ -212,8 +265,24 @@ void AutoLoopClosurePanel::syncParamsToLoop() {
     m_autoLoop->set_optimize_after_insert(m_optimizeCb->isChecked());
 }
 
-// ── Slots ────────────────────────────────────────────────────────────────────
+// ---- 私有辅助 ----
 
+void AutoLoopClosurePanel::updateStatusStyle(bool running) {
+    if (running) {
+        m_statusLabel->setStyleSheet("color: #22c55e; font-weight: bold;");
+    } else {
+        m_statusLabel->setStyleSheet("color: #999999; font-weight: bold;");
+    }
+}
+
+// ---- 槽函数 ----
+
+/**
+ * @brief 开始/停止按钮处理
+ *
+ * - 未运行时：延迟创建数据层，同步参数，检查配准方法可用性，启动检测
+ * - 运行时：停止检测，停止轮询，恢复 UI 可编辑状态
+ */
 void AutoLoopClosurePanel::onStartStop() {
     auto* graph = m_manager->graph();
     if (!graph) {
@@ -222,30 +291,30 @@ void AutoLoopClosurePanel::onStartStop() {
         return;
     }
 
-    // Lazy-create the data layer
+    // 延迟创建数据层
     if (!m_autoLoop) {
         m_autoLoop = std::make_unique<hdl_graph_slam::AutomaticLoopClosure>(graph);
     }
 
     if (m_autoLoop->is_running()) {
-        // ── Stop ─────────────────────────────────────────────────
+        // ---- 停止检测 ----
         m_autoLoop->stop();
         m_pollTimer->stop();
         m_statusLabel->setText(tr("Status: Stopped"));
-        m_statusLabel->setStyleSheet("font-weight: bold; color: #888;");
+        updateStatusStyle(false);
         m_startStopBtn->setText(tr("Start"));
-        // Re-enable param editing
+        // 恢复参数编辑
         m_searchMethodCombo->setEnabled(true);
     } else {
-        // ── Start ────────────────────────────────────────────────
-        // Re-create if the graph was closed and re-opened (pointer changed)
+        // ---- 启动检测 ----
+        // 如果图谱已关闭并重新打开（指针改变），重新创建数据层
         if (m_autoLoop) {
             m_autoLoop = std::make_unique<hdl_graph_slam::AutomaticLoopClosure>(graph);
         }
 
         syncParamsToLoop();
 
-        // Check for unavailable methods early
+        // 提前检查配准方法是否可用
         try {
             m_autoLoop->reg_methods().method();
         } catch (const std::runtime_error& e) {
@@ -257,38 +326,44 @@ void AutoLoopClosurePanel::onStartStop() {
         m_autoLoop->start();
         m_pollTimer->start();
         m_statusLabel->setText(tr("Status: Running"));
-        m_statusLabel->setStyleSheet("font-weight: bold; color: #0a0;");
+        updateStatusStyle(true);
         m_startStopBtn->setText(tr("Stop"));
         m_lastKnownEdgesInserted = 0;
 
-        // Disable param editing while running
+        // 运行时禁用参数编辑
         m_searchMethodCombo->setEnabled(false);
     }
 }
 
+/**
+ * @brief 定时轮询状态快照（10Hz）
+ *
+ * 从数据层获取线程安全的状态快照，更新 UI 标签，
+ * 发射 loopDetectionStatus 信号和 loopEdgeInserted 信号。
+ */
 void AutoLoopClosurePanel::onPollStatus() {
     if (!m_autoLoop) return;
 
     auto status = m_autoLoop->snapshot();
 
+    // 检测线程刚启动，状态尚未更新时跳过
     if (!status.running && m_autoLoop->is_running()) {
-        // Detection thread just started, status not yet updated
         return;
     }
 
+    // 线程已退出 — 确保 UI 反映停止状态
     if (!status.running && !m_autoLoop->is_running()) {
-        // Thread exited — ensure UI reflects stopped state
         m_pollTimer->stop();
         m_statusLabel->setText(tr("Status: Stopped"));
-        m_statusLabel->setStyleSheet("font-weight: bold; color: #888;");
+        updateStatusStyle(false);
         m_startStopBtn->setText(tr("Start"));
         m_searchMethodCombo->setEnabled(true);
         return;
     }
 
-    // ── Update status labels ────────────────────────────────────
+    // ---- 更新状态标签 ----
     m_statusLabel->setText(tr("Status: Running"));
-    m_statusLabel->setStyleSheet("font-weight: bold; color: #0a0;");
+    updateStatusStyle(true);
 
     if (status.current_source_id >= 0) {
         m_sourceLabel->setText(
@@ -303,6 +378,7 @@ void AutoLoopClosurePanel::onPollStatus() {
     m_edgesInsertedLabel->setText(
         tr("Edges inserted: %1").arg(status.edges_inserted));
 
+    // 最后匹配信息（含适应度分数）
     if (status.last_begin_id >= 0) {
         QString fitnessStr;
         if (status.last_fitness_score >= 1e100) {
@@ -319,13 +395,13 @@ void AutoLoopClosurePanel::onPollStatus() {
         m_lastMatchLabel->setText(tr("Last: —"));
     }
 
-    // ── Sphere colour highlights (blue=source, green=candidates) ──
+    // ---- 球体颜色高亮（蓝色=源顶点，绿色=候选顶点） ----
     QVector<long> qCandidates;
     qCandidates.reserve(static_cast<int>(status.candidate_ids.size()));
     for (long id : status.candidate_ids) qCandidates.append(id);
     emit loopDetectionStatus(status.current_source_id, qCandidates);
 
-    // ── Detect new edge insertions ──────────────────────────────
+    // ---- 检测新边插入 ----
     if (status.edges_inserted > m_lastKnownEdgesInserted) {
         m_lastKnownEdgesInserted = status.edges_inserted;
         emit loopEdgeInserted();

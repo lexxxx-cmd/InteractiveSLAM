@@ -1,3 +1,15 @@
+/**
+ * @file OverlayPanelWidget.cpp
+ * @brief 叠加面板容器实现
+ *
+ * 实现可拖动的浮动叠加面板，包括：
+ * - 深色半透明圆角框架样式
+ * - 标题栏 + 内容区的布局
+ * - 鼠标拖动定位（限制在父部件边界内）
+ * - 关闭按钮的信号发射
+ * -  CSS 样式表（Qt StyleSheet）美化
+ */
+
 #include "ui/OverlayPanelWidget.h"
 
 #include <QLabel>
@@ -5,12 +17,21 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGraphicsDropShadowEffect>
 
 // ---------------------------------------------------------------------------
-// Construction
+// 构造
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 构造函数
+ *
+ * 创建面板框架、标题栏（含标题标签和关闭按钮）、内容区布局，
+ * 应用暗色风格样式表，并安装阴影效果。
+ *
+ * @param title   面板标题文字
+ * @param content 要嵌入面板的内容部件
+ * @param parent  父级部件
+ */
 OverlayPanelWidget::OverlayPanelWidget(const QString& title, QWidget* content,
                                        QWidget* parent)
     : QFrame(parent) {
@@ -20,27 +41,29 @@ OverlayPanelWidget::OverlayPanelWidget(const QString& title, QWidget* content,
     setMaximumWidth(380);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 
-    // Frame appearance
+    // 框架外观
     setFrameShape(QFrame::StyledPanel);
     setFrameShadow(QFrame::Raised);
 
-    // ── Main layout ──────────────────────────────────────────────────
+    // ---- 主布局 ----
     m_mainLayout = new QVBoxLayout(this);
     m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->setSpacing(0);
 
-    // ── Title bar ────────────────────────────────────────────────────
+    // ---- 标题栏 ----
     m_titleBar = new QWidget(this);
     m_titleBar->setObjectName("OverlayTitleBar");
     auto* titleLayout = new QHBoxLayout(m_titleBar);
     titleLayout->setContentsMargins(8, 5, 4, 5);
     titleLayout->setSpacing(4);
 
+    // 标题标签
     m_titleLabel = new QLabel(title, m_titleBar);
     m_titleLabel->setObjectName("OverlayTitleLabel");
     titleLayout->addWidget(m_titleLabel, 1);
 
-    m_closeBtn = new QPushButton(QStringLiteral("✕"), m_titleBar);  // ✕
+    // 关闭按钮（✕）
+    m_closeBtn = new QPushButton(QStringLiteral("✕"), m_titleBar);
     m_closeBtn->setObjectName("OverlayCloseButton");
     m_closeBtn->setFixedSize(20, 20);
     m_closeBtn->setCursor(Qt::ArrowCursor);
@@ -48,7 +71,7 @@ OverlayPanelWidget::OverlayPanelWidget(const QString& title, QWidget* content,
 
     m_mainLayout->addWidget(m_titleBar);
 
-    // ── Content area ─────────────────────────────────────────────────
+    // ---- 内容区域 ----
     m_contentArea = new QWidget(this);
     m_contentArea->setObjectName("OverlayContentArea");
     auto* contentLayout = new QVBoxLayout(m_contentArea);
@@ -56,87 +79,55 @@ OverlayPanelWidget::OverlayPanelWidget(const QString& title, QWidget* content,
     contentLayout->setSpacing(0);
     m_mainLayout->addWidget(m_contentArea, 1);
 
-    // ── Apply styles (after all children exist) ──────────────────────
+    // ---- 应用样式（在所有子部件创建后） ----
     applyStyle();
 
-    // ── Connect close button ─────────────────────────────────────────
+    // ---- 连接关闭按钮信号 ----
     connect(m_closeBtn, &QPushButton::clicked,
             this, &OverlayPanelWidget::closeRequested);
 
-    // ── Install content if provided ──────────────────────────────────
+    // ---- 安装内容部件（如果提供） ----
     if (content) {
         setContentWidget(content);
     }
 
-    // ── Drop shadow for depth ────────────────────────────────────────
-    auto* shadow = new QGraphicsDropShadowEffect(this);
-    shadow->setBlurRadius(16);
-    shadow->setOffset(0, 4);
-    shadow->setColor(QColor(0, 0, 0, 120));
-    setGraphicsEffect(shadow);
 }
 
 // ---------------------------------------------------------------------------
-// Style
+// 样式
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 应用 CSS 风格样式
+ *
+ * 所有子控件样式（标题栏、标题标签、关闭按钮、内容区域）
+ * 由全局 QSS 通过 objectName 选择器统一处理。
+ * 此处仅设置框架级别样式作为兜底。
+ */
 void OverlayPanelWidget::applyStyle() {
-    // Frame — dark semi-transparent, rounded corners
     setStyleSheet(QStringLiteral(R"(
         #OverlayPanelWidget {
-            background: rgba(28, 28, 34, 235);
-            border: 1px solid rgba(72, 72, 82, 200);
+            background: rgba(26, 26, 31, 0.95);
+            border: 1px solid #2a2a35;
             border-radius: 6px;
         }
     )"));
-
-    m_titleLabel->setStyleSheet(QStringLiteral(R"(
-        #OverlayTitleLabel {
-            background: transparent;
-            color: #cccccc;
-            font-weight: bold;
-            font-size: 12px;
-        }
-    )"));
-
-    m_titleBar->setStyleSheet(QStringLiteral(R"(
-        #OverlayTitleBar {
-            background: rgba(20, 20, 26, 220);
-            border-top-left-radius: 5px;
-            border-top-right-radius: 5px;
-        }
-    )"));
-
-    m_closeBtn->setStyleSheet(QStringLiteral(R"(
-        #OverlayCloseButton {
-            background: transparent;
-            color: #888888;
-            border: none;
-            padding: 0px;
-            font-size: 12px;
-        }
-        #OverlayCloseButton:hover {
-            color: #ffffff;
-            background: rgba(200, 60, 60, 200);
-            border-radius: 3px;
-        }
-    )"));
-
-    m_contentArea->setStyleSheet(QStringLiteral(R"(
-        #OverlayContentArea {
-            background: transparent;
-        }
-    )"));
 }
 
 // ---------------------------------------------------------------------------
-// Content management
+// 内容管理
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 设置内容部件
+ *
+ * 移除之前的内容部件，将新部件嵌入内容区域。
+ * @param content 新的内容部件
+ */
 void OverlayPanelWidget::setContentWidget(QWidget* content) {
     if (!content) return;
 
-    // Remove any previously-set content
+    // 移除之前的内容部件
     QLayout* cl = m_contentArea->layout();
     if (cl) {
         QLayoutItem* item;
@@ -148,7 +139,7 @@ void OverlayPanelWidget::setContentWidget(QWidget* content) {
         }
     }
 
-    // Reparent into content area
+    // 将新部件重新设置父级到内容区域
     content->setParent(m_contentArea);
     cl->addWidget(content);
 }
@@ -158,15 +149,20 @@ QString OverlayPanelWidget::title() const {
 }
 
 // ---------------------------------------------------------------------------
-// Drag — mouse events on title bar
+// 拖动 — 标题栏鼠标事件
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 鼠标按下事件
+ *
+ * 当在标题栏区域按下左键时开始拖动模式。
+ */
 void OverlayPanelWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
-        // Only start drag from title bar area
+        // 仅在标题栏区域开始拖动
         if (m_titleBar && event->position().y() <= m_titleBar->height()) {
             m_dragging = true;
-            // Store offset from widget position to global mouse position
+            // 存储部件位置到鼠标全局位置的偏移量
             m_dragStartPos = event->globalPosition().toPoint() -
                              mapToParent(QPoint(0, 0));
             setCursor(Qt::ClosedHandCursor);
@@ -177,11 +173,16 @@ void OverlayPanelWidget::mousePressEvent(QMouseEvent* event) {
     QFrame::mousePressEvent(event);
 }
 
+/**
+ * @brief 鼠标移动事件
+ *
+ * 拖动模式下，根据鼠标移动更新面板位置，并限制在父部件边界内。
+ */
 void OverlayPanelWidget::mouseMoveEvent(QMouseEvent* event) {
     if (m_dragging) {
         QPoint newParentPos = event->globalPosition().toPoint() - m_dragStartPos;
 
-        // Clamp to parent bounds
+        // 限制在父部件边界内
         if (parentWidget()) {
             int pw = parentWidget()->width();
             int ph = parentWidget()->height();
@@ -196,6 +197,11 @@ void OverlayPanelWidget::mouseMoveEvent(QMouseEvent* event) {
     QFrame::mouseMoveEvent(event);
 }
 
+/**
+ * @brief 鼠标释放事件
+ *
+ * 结束拖动模式，恢复光标样式。
+ */
 void OverlayPanelWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (m_dragging && event->button() == Qt::LeftButton) {
         m_dragging = false;

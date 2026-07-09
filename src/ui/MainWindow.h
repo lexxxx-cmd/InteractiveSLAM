@@ -1,3 +1,13 @@
+/**
+ * @file MainWindow.h
+ * @brief 主窗口头文件 — 应用程序的主界面容器
+ *
+ * MainWindow 继承自 QMainWindow，是整个 InterSLAM 应用程序的根窗口。
+ * 它持有中央 3D 视口（ViewportWidget）以及多个浮动叠加面板（OverlayPanelWidget），
+ * 涵盖渲染控制、图统计、自动闭环检测、边列表管理等功能。
+ * 同时负责创建菜单栏、连接 GraphManager 信号、处理右键上下文菜单等。
+ */
+
 #pragma once
 
 #include <QMainWindow>
@@ -9,67 +19,79 @@ class GraphManager;
 class ViewportWidget;
 class GraphStatsPanel;
 class RenderingPanel;
-class ZClippingPanel;
-class ColorRangePanel;
+class PointCloudFiltersPanel;
 class AutoLoopClosurePanel;
 class EdgeListPanel;
 class OverlayPanelWidget;
 
-/// @brief Main application window — replaces Main.qml.
-///        Layout: central ViewportWidget + floating overlay panels.
+/**
+ * @brief 主应用程序窗口
+ *
+ * 替换原有的 Main.qml。布局结构为：中央 ViewportWidget（3D 场景渲染）
+ * + 浮动叠加面板（悬浮于视口之上的控制面板）。
+ *
+ * 核心职责：
+ * - 创建和管理菜单栏（文件、视图、图操作）
+ * - 初始化各类叠加面板并注册到视口
+ * - 连接 GraphManager 的信号（加载状态、日志消息等）
+ * - 处理右键上下文菜单（顶点选择、手动闭环操作）
+ * - 响应菜单动作（打开/关闭地图、保存、优化等）
+ */
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
+    /**
+     * @brief 构造函数
+     * @param manager GraphManager 实例，用于管理图谱数据
+     * @param parent  父级 Qt 组件
+     */
     explicit MainWindow(GraphManager* manager, QWidget* parent = nullptr);
 
 private slots:
-    void onOpenMap();
-    void onCloseMap();
-    void onSavePoseGraph();
-    void onSaveMap();
-    void onOptimize();
-    void onResetCamera();
-    void onLoadingStarted();
-    void onLoadingSucceeded();
-    void onLoadingFailed(const QString& error);
-    void onLogMessage(const QString& message);
+    void onOpenMap();              ///< 打开地图目录（文件菜单）
+    void onCloseMap();             ///< 关闭当前地图（文件菜单）
+    void onSavePoseGraph();        ///< 保存位姿图为 .g2o 文件（文件菜单）
+    void onSaveMap();              ///< 保存地图（含 LVBA 格式输出）（文件菜单）
+    void onOptimize();             ///< 执行图优化（图菜单）
+    void onResetCamera();          ///< 重置摄像机视角（视图菜单）
+    void onLoadingStarted();       ///< 加载开始时的回调
+    void onLoadingSucceeded();     ///< 加载成功时的回调
+    void onLoadingFailed(const QString& error);  ///< 加载失败时的回调
+    void onLogMessage(const QString& message);   ///< 日志消息回调
 
 private:
-    void setupMenus();
-    void setupUi();
+    void setupMenus();  ///< 初始化菜单栏（文件、视图、图菜单）
+    void setupUi();     ///< 初始化界面组件（视口、叠加面板）
 
-    GraphManager* m_manager;
-    ViewportWidget* m_viewport;
+    GraphManager* m_manager;    ///< 图数据管理器，非拥有指针
+    ViewportWidget* m_viewport; ///< 中央 3D 视口部件
 
-    // New overlay panels (content + wrapper)
-    GraphStatsPanel*    m_statsPanel    = nullptr;
-    RenderingPanel*     m_renderPanel   = nullptr;
-    ZClippingPanel*     m_zClipPanel    = nullptr;
-    ColorRangePanel*    m_colorPanel    = nullptr;
+    // === 叠加面板（内容部件 + 包装器） ===
+    GraphStatsPanel*    m_statsPanel    = nullptr;  ///< 图统计信息面板
+    RenderingPanel*     m_renderPanel   = nullptr;  ///< 渲染控制面板
+    PointCloudFiltersPanel* m_filtersPanel = nullptr;  ///< 点云过滤面板（Z裁剪 + 颜色范围）
 
-    AutoLoopClosurePanel* m_autoLoopPanel = nullptr;
-    EdgeListPanel* m_edgeListPanel = nullptr;
+    AutoLoopClosurePanel* m_autoLoopPanel = nullptr;  ///< 自动闭环检测面板
+    EdgeListPanel* m_edgeListPanel = nullptr;         ///< 闭环边列表面板
 
-    // View menu actions (stored for check-state sync with overlays)
-    QAction* m_statsViewAction  = nullptr;
-    QAction* m_renderViewAction = nullptr;
-    QAction* m_zClipViewAction  = nullptr;
-    QAction* m_colorViewAction  = nullptr;
-    QAction* m_autoLoopViewAction = nullptr;
-    QAction* m_edgeListViewAction = nullptr;
+    // === 视图菜单动作（用于与叠加面板的显示状态同步） ===
+    QAction* m_statsViewAction  = nullptr;  ///< "图统计信息"视图切换动作
+    QAction* m_renderViewAction = nullptr;  ///< "渲染"视图切换动作
+    QAction* m_filtersViewAction  = nullptr;  ///< "点云过滤"视图切换动作
+    QAction* m_autoLoopViewAction = nullptr;  ///< "自动闭环"视图切换动作
+    QAction* m_edgeListViewAction = nullptr;  ///< "闭环边"视图切换动作
 
-    // Overlay wrappers (floating over viewport)
-    OverlayPanelWidget* m_statsOverlay  = nullptr;
-    OverlayPanelWidget* m_renderOverlay = nullptr;
-    OverlayPanelWidget* m_zClipOverlay  = nullptr;
-    OverlayPanelWidget* m_colorOverlay  = nullptr;
-    OverlayPanelWidget* m_autoLoopOverlay = nullptr;
-    OverlayPanelWidget* m_edgeListOverlay = nullptr;
+    // === 叠加面板包装器（浮动于视口之上） ===
+    OverlayPanelWidget* m_statsOverlay  = nullptr;  ///< 图统计悬浮面板
+    OverlayPanelWidget* m_renderOverlay = nullptr;  ///< 渲染悬浮面板
+    OverlayPanelWidget* m_filtersOverlay  = nullptr;  ///< 点云过滤悬浮面板
+    OverlayPanelWidget* m_autoLoopOverlay = nullptr;  ///< 自动闭环悬浮面板
+    OverlayPanelWidget* m_edgeListOverlay = nullptr;  ///< 闭环边悬浮面板
 
-    long m_loopBeginVertexId = -1;  // -1 = 未选择 Loop Begin
-    QAction* m_orthoViewAction = nullptr;
-    int m_submapWindowHalfSize = 1;  // ±N keyframes merged for loop closure matching
-    QAction* m_optimizeAction = nullptr;
-    bool m_optimizePending = false;
+    long m_loopBeginVertexId = -1;   ///< 手动闭环起点顶点 ID，-1 表示未选择
+    QAction* m_orthoViewAction = nullptr;  ///< 正交视图切换动作
+    int m_submapWindowHalfSize = 1;  ///< 闭环匹配时合并的相邻关键帧数（±N 帧）
+    QAction* m_optimizeAction = nullptr;  ///< 图优化动作（用于启用/禁用状态同步）
+    bool m_optimizePending = false;  ///< 优化是否正在进行中（防止重复触发）
 };

@@ -1,3 +1,17 @@
+/**
+ * @file ViewportWidget.cpp
+ * @brief 3D 视口部件实现
+ *
+ * 实现 ViewportWidget 的所有功能，包括：
+ * - OSG 初始化：摄像机设置、场景图挂载、拾取处理器注册
+ * - 透视/正交投影切换：支持动态跟踪正交投影半高（基于摄像机距离）
+ * - 图谱加载与重置：onGraphLoaded/onGraphClosed
+ * - 渲染控制接口：顶点/边/点云可见性、球体大小、线宽等
+ * - 定时更新：约 60Hz 的 updateScene 用于 FPS 统计和正交投影动态更新
+ * - 顶点拾取：Ctrl+Click 选中高亮，右键弹出上下文菜单
+ * - 浮动面板管理：注册/定位叠加面板
+ */
+
 #include "ui/ViewportWidget.h"
 
 #include <QVBoxLayout>
@@ -15,24 +29,34 @@
 #include "ui/OverlayPanelWidget.h"
 
 // ---------------------------------------------------------------------------
-// Construction
+// 构造 / 析构
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 构造函数
+ *
+ * 创建 OSG OpenGL 嵌入部件，初始化场景可视化器，
+ * 连接 OSG 初始化信号，启动 16ms 定时器（~60Hz）用于场景更新。
+ */
 ViewportWidget::ViewportWidget(QWidget* parent)
     : QWidget(parent) {
 
+    // 无边距布局填充整个可用区域
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
+    // 创建 OSG 嵌入部件
     m_osgWidget = new osgQOpenGLWidget(this);
     layout->addWidget(m_osgWidget);
 
+    // 初始化场景可视化器
     m_sceneViz = std::make_unique<GraphSceneVisualizer>();
 
+    // OSG 初始化就绪信号（OpenGL 上下文创建后触发）
     connect(m_osgWidget, &osgQOpenGLWidget::initialized,
             this, &ViewportWidget::initOsg);
 
-    // Pose update timer (~60 Hz)
+    // 姿态更新定时器（~60 Hz）
     m_updateTimer = new QTimer(this);
     connect(m_updateTimer, &QTimer::timeout, this, &ViewportWidget::updateScene);
     m_updateTimer->start(16);
@@ -41,9 +65,15 @@ ViewportWidget::ViewportWidget(QWidget* parent)
 ViewportWidget::~ViewportWidget() = default;
 
 // ---------------------------------------------------------------------------
-// Orthographic projection helper
+// 正交投影辅助
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 应用正交投影
+ *
+ * 根据场景包围球半径计算正交投影矩阵的半高（带 20% 边距）。
+ * 如果场景未加载，使用默认值 10.0。
+ */
 void ViewportWidget::applyOrthographicProjection() {
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (!viewer) return;
@@ -55,8 +85,8 @@ void ViewportWidget::applyOrthographicProjection() {
 
     double aspect = static_cast<double>(vpW) / static_cast<double>(vpH);
 
-    // Compute half-height from scene bounding sphere (with 20 % margin)
-    double halfHeight = 10.0;  // default before scene is loaded
+    // 从场景包围球计算半高（带 20% 边距）
+    double halfHeight = 10.0;  // 场景加载前的默认值
     osg::Node* scene = viewer->getSceneData();
     if (scene) {
         const osg::BoundingSphere& bs = scene->getBound();
@@ -66,7 +96,7 @@ void ViewportWidget::applyOrthographicProjection() {
     }
 
     double halfWidth = halfHeight * aspect;
-    double farDist = halfHeight * 20.0;  // generous far plane
+    double farDist = halfHeight * 20.0;  // 慷慨的远平面
 
     camera->setProjectionMatrixAsOrtho(
         -halfWidth, halfWidth,
@@ -77,9 +107,14 @@ void ViewportWidget::applyOrthographicProjection() {
 }
 
 // ---------------------------------------------------------------------------
-// Perspective projection helper
+// 透视投影辅助
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 应用透视投影
+ *
+ * 设置 30° FOV，远平面根据场景包围球半径动态计算。
+ */
 void ViewportWidget::applyPerspectiveProjection() {
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (!viewer) return;
@@ -90,9 +125,9 @@ void ViewportWidget::applyPerspectiveProjection() {
     if (vpW < 1 || vpH < 1) return;
 
     double aspect = static_cast<double>(vpW) / static_cast<double>(vpH);
-    double fovY  = 30.0;  // degrees
+    double fovY  = 30.0;  // 度
 
-    // Compute far plane from scene bounds
+    // 根据场景边界计算远平面
     double farDist = 1000.0;
     osg::Node* scene = viewer->getSceneData();
     if (scene) {
@@ -106,9 +141,12 @@ void ViewportWidget::applyPerspectiveProjection() {
 }
 
 // ---------------------------------------------------------------------------
-// Unified projection dispatch
+// 统一投影分发
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 根据 m_useOrthographic 标志应用对应的投影方式
+ */
 void ViewportWidget::applyProjection() {
     if (m_useOrthographic) {
         applyOrthographicProjection();
@@ -129,53 +167,61 @@ void ViewportWidget::setUseOrthographic(bool enabled) {
 }
 
 // ---------------------------------------------------------------------------
-// OSG Initialization (called once after the OpenGL context is ready)
+// OSG 初始化（OpenGL 上下文准备就绪后调用一次）
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief OSG 初始化
+ *
+ * 在 osgQOpenGLWidget 的 OpenGL 上下文创建后调用。
+ * 设置摄像机、清除色、场景根节点、轨迹球操作器、
+ * 正交投影以及球体拾取事件处理器。
+ */
 void ViewportWidget::initOsg() {
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (!viewer) return;
 
+    // 启用模型视图和投影统一变量（用于着色器）
     osg::State* state = viewer->getCamera()->getGraphicsContext()->getState();
     if (state) {
         state->setUseModelViewAndProjectionUniforms(true);
         state->setUseVertexAttributeAliasing(true);
     }
 
-    // Dark background (matching interactive_slam)
-    viewer->getCamera()->setClearColor(osg::Vec4(0.1f, 0.1f, 0.12f, 1.0f));
+    // 深色背景（与 interactive_slam 保持一致）
+    viewer->getCamera()->setClearColor(osg::Vec4(0.0706f, 0.0706f, 0.0863f, 1.0f));
 
-    // Set up scene root
+    // 设置场景根节点
     viewer->setSceneData(m_sceneViz->getRootNode());
 
-    // Trackball camera
+    // 轨迹球摄像机操作器
     viewer->setCameraManipulator(new osgGA::TrackballManipulator);
 
-    // Orthographic projection (replaces OSG default perspective)
+    // 正交投影（替换 OSG 默认的透视投影）
     applyProjection();
 
-    // Register picking handler with lazy providers — data is queried
-    // on each event, so graph load / pose updates are always reflected.
+    // 注册拾取处理器（使用惰性数据提供器）
+    // 球心坐标和边段数据在每次事件触发时实时查询，确保图谱加载/位姿更新后自动反映
     m_pickingHandler = new SpherePickingHandler(
-        // sphere centers provider
+        // 球心坐标提供器
         [this]() -> const std::vector<std::pair<osg::Vec3d, long>>* {
             return &m_sceneViz->sphereCenters();
         },
-        // edge segments provider
+        // 边段提供器
         [this]() -> const std::vector<EdgeSegment>* {
             return &m_sceneViz->edgeSegments();
         },
         m_sceneViz->sphereRadius(),
-        // --- selection callback (Ctrl+Click) ---
+        // --- 选择回调（Ctrl+Click） ---
         [this](long vertexId) {
             QMetaObject::invokeMethod(this, [this, vertexId]() {
                 onVertexPicked(vertexId);
             }, Qt::QueuedConnection);
         },
-        // --- context menu callback (RightClick) ---
+        // --- 上下文菜单回调（右键） ---
         [this](const PickingHit& hit) {
             QMetaObject::invokeMethod(this, [this, hit]() {
-                // Enrich vertex fields from graph data
+                // 从图谱数据中丰富顶点信息字段
                 PickingHit enriched = hit;
                 if (hit.vertexId >= 0 && m_graph) {
                     auto it = m_graph->keyframes.find(hit.vertexId);
@@ -210,22 +256,27 @@ void ViewportWidget::initOsg() {
 }
 
 // ---------------------------------------------------------------------------
-// Graph loading
+// 图谱加载
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 图谱加载完成
+ *
+ * 将图谱数据传递给场景可视化器构建场景，应用当前设置，
+ * 发射 cloudDataReady 信号供 UI 面板初始化，更新投影并重置摄像机。
+ */
 void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
     m_graph = graph;
     m_sceneViz->buildFromGraph(graph, m_flags);
 
-    // Apply current settings
+    // 应用当前设置
     m_sceneViz->setPointOpacity(m_flags.draw_keyframe_vertices ? 1.0f : 0.0f);
     m_osgWidget->update();
 
-    // Emit data range for UI initialization
+    // 发射数据范围信号供 UI 面板初始化
     emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
 
-    // Update orthographic projection for the newly loaded scene,
-    // then home camera to frame the whole scene.
+    // 为新加载的场景更新正交投影，然后让摄像机定格到整个场景
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
         applyProjection();
@@ -233,6 +284,11 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
     }
 }
 
+/**
+ * @brief 图谱关闭
+ *
+ * 重置共享指针，清空场景可视化器。
+ */
 void ViewportWidget::onGraphClosed() {
     m_graph.reset();
     m_sceneViz->clear();
@@ -240,7 +296,7 @@ void ViewportWidget::onGraphClosed() {
 }
 
 // ---------------------------------------------------------------------------
-// Rendering controls
+// 渲染控制
 // ---------------------------------------------------------------------------
 
 void ViewportWidget::setDrawVertices(bool v) {
@@ -264,7 +320,7 @@ void ViewportWidget::setDrawKeyframeClouds(bool v) {
 
 void ViewportWidget::setDrawSE3Edges(bool v) {
     m_flags.draw_se3_edges = v;
-    // SE3 edges are part of the regular edge set
+    // SE3 边是常规边集合的一部分
     m_sceneViz->setDrawEdges(v);
     m_osgWidget->update();
 }
@@ -345,7 +401,7 @@ void ViewportWidget::resetCamera() {
 }
 
 // ---------------------------------------------------------------------------
-// Manual scene refresh (called after data changes like edge deletion)
+// 手动场景刷新（边删除等数据变化后调用）
 // ---------------------------------------------------------------------------
 
 void ViewportWidget::refreshScene() {
@@ -362,12 +418,22 @@ void ViewportWidget::rebuildPointClouds() {
 }
 
 // ---------------------------------------------------------------------------
-// Frame update (timer-driven)
+// 帧更新（定时器驱动）
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 定时场景更新（~60Hz）
+ *
+ * 在正交投影模式下，动态跟踪摄像机距离，使旋转/缩放操作手感自然，
+ * 与透视投影下的体验一致。
+ *
+ * 注意：几何体在加载或显式刷新后保持不变。对于大型图谱，
+ * 每 16ms 重建 20000+ 个球体和边的操作会严重降低帧率。
+ * OSGRenderer 有自己的 10ms 定时器驱动渲染循环，
+ * 因此这里只跟踪 FPS，不执行逐帧几何体重建。
+ */
 void ViewportWidget::updateScene() {
-    // In orthographic mode, dynamically track the camera distance so that
-    // orbiting and zooming feel natural, just like perspective mode.
+    // 正交投影模式下，动态跟踪摄像机距离
     if (m_useOrthographic) {
         osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
         if (viewer) {
@@ -380,7 +446,7 @@ void ViewportWidget::updateScene() {
                 int vpH = m_osgWidget->height();
                 if (vpW > 0 && vpH > 0) {
                     double aspect = static_cast<double>(vpW) / static_cast<double>(vpH);
-                    // Match the perspective 30° FOV so switching feels seamless
+                    // 匹配透视图 30° FOV，使切换时感觉无缝
                     double halfHeight = dist * std::tan(osg::DegreesToRadians(30.0) * 0.5);
                     double halfWidth = halfHeight * aspect;
                     double farDist = halfHeight * 40.0;
@@ -395,12 +461,7 @@ void ViewportWidget::updateScene() {
 
     if (!m_graph) return;
 
-    // Geometry is static after loading / explicit refresh.  Rebuilding
-    // 20 000+ spheres and edges every 16 ms destroys FPS on large graphs.
-    // OSGRenderer has its own 10 ms timer to drive the render loop, so we
-    // only track FPS here — no per-frame geometry work.
-
-    // FPS tracking (rolling 1-second average)
+    // FPS 跟踪（滚动 1 秒平均）
     m_frameCount++;
     static auto lastTime = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
@@ -414,13 +475,18 @@ void ViewportWidget::updateScene() {
 }
 
 // ---------------------------------------------------------------------------
-// Picking
+// 拾取
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 顶点拾取回调（Ctrl+Click）
+ *
+ * 设置选中顶点 ID，刷新场景以显示高亮颜色，发射 vertexSelected 信号。
+ */
 void ViewportWidget::onVertexPicked(long vertexId) {
     m_sceneViz->setSelectedVertex(vertexId);
 
-    // Rebuild spheres to apply/dismiss highlight colour
+    // 重建球体以应用/取消高亮颜色
     if (m_graph) {
         m_sceneViz->updatePoses(m_graph);
         m_osgWidget->update();
@@ -430,27 +496,37 @@ void ViewportWidget::onVertexPicked(long vertexId) {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay panel management
+// 叠加面板管理
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief 注册浮动叠加面板
+ *
+ * 将面板重新设置父级为视口，调整大小，定位并显示。
+ */
 void ViewportWidget::registerOverlay(OverlayPanelWidget* overlay) {
     if (!overlay) return;
 
-    // Reparent to this viewport
+    // 重新设置父级到当前视口
     overlay->setParent(this);
 
-    // Add to tracking list
+    // 添加到跟踪列表
     m_overlays.append(overlay);
 
-    // Set initial size hint
+    // 设置初始大小
     overlay->adjustSize();
 
-    // Position and show
+    // 定位并显示
     updateOverlayPositions();
     overlay->raise();
     overlay->show();
 }
 
+/**
+ * @brief 更新所有叠加面板的位置
+ *
+ * 将可见面板按"右上角对齐 + 纵向堆叠"方式排列。
+ */
 void ViewportWidget::updateOverlayPositions() {
     int yOffset = m_overlayMargin;
 
@@ -460,11 +536,11 @@ void ViewportWidget::updateOverlayPositions() {
         int panelW = overlay->width();
         int panelH = overlay->height();
 
-        // Anchor to top-right corner
+        // 锚定到右上角
         int newX = width() - panelW - m_overlayMargin;
         int newY = yOffset;
 
-        // Clamp within viewport bounds
+        // 钳制在视口边界内
         newX = std::max(m_overlayMargin,
                         std::min(newX, width() - panelW - m_overlayMargin));
         newY = std::max(m_overlayMargin,
@@ -472,11 +548,16 @@ void ViewportWidget::updateOverlayPositions() {
 
         overlay->move(newX, newY);
 
-        // Next overlay stacks below
+        // 下一个面板在下方堆叠
         yOffset = newY + panelH + 6;
     }
 }
 
+/**
+ * @brief 窗口尺寸改变事件
+ *
+ * 重新应用投影矩阵并更新面板位置。
+ */
 void ViewportWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     applyProjection();
