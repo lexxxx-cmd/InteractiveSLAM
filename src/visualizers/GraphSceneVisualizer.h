@@ -171,6 +171,42 @@ public:
     }
 
     /**
+     * @brief 设置渲染采样步长
+     *
+     * 步长 N > 1 时，仅渲染每第 N 个关键帧的球体，并自动隐藏除新添加边外的所有边线。
+     * 点云不受采样影响。步长恢复为 1 时恢复全部渲染。
+     *
+     * @param stride 采样步长（1 = 全部渲染）
+     */
+    void setSampleStride(int stride) {
+        if (m_sampleStride == stride) return;
+        m_sampleStride = stride;
+
+        if (stride > 1 && m_lastGraph) {
+            // 采样激活：收集所有当前边 ID 加入采样隐藏集合
+            m_sampleHiddenEdgeIds.clear();
+            auto& edges = m_lastGraph->graph->edges();
+            for (auto it = edges.begin(); it != edges.end(); ++it) {
+                if (*it) m_sampleHiddenEdgeIds.insert((*it)->id());
+            }
+        } else {
+            // 采样关闭：清空采样隐藏集合
+            m_sampleHiddenEdgeIds.clear();
+        }
+
+        // 重建球体（按步长过滤）
+        if (m_lastGraph) rebuildSpheres(m_lastGraph);
+
+        // 重建边线（合并用户隐藏 + 采样隐藏）
+        if (m_edgeLineViz && m_lastGraph) {
+            m_edgeLineViz->rebuild(m_lastGraph.get(), getEffectiveHiddenEdges());
+        }
+    }
+
+    /** @brief 获取当前采样步长 */
+    int sampleStride() const { return m_sampleStride; }
+
+    /**
      * @brief 获取球体中心位置缓存（用于鼠标拾取检测）
      * @return (球心位置, 顶点ID) 对列表
      */
@@ -257,7 +293,7 @@ public:
 
         // 3. 边线 —— 世界坐标系线段，按 EdgeSource 着色
         m_edgeLineViz = std::make_unique<EdgeLineVisualizer>();
-        m_edgeLineViz->rebuild(graph.get(), m_hiddenEdgeIds);
+        m_edgeLineViz->rebuild(graph.get(), getEffectiveHiddenEdges());
         m_edgeGroup->addChild(m_edgeLineViz->getNode());
 
         m_hasGraph = true;
@@ -278,7 +314,7 @@ public:
         rebuildSpheres(graph);
 
         if (m_edgeLineViz) {
-            m_edgeLineViz->rebuild(graph.get(), m_hiddenEdgeIds);
+            m_edgeLineViz->rebuild(graph.get(), getEffectiveHiddenEdges());
         }
     }
 
@@ -364,6 +400,24 @@ public:
 
 private:
     /**
+     * @brief 合并用户手动隐藏边 + 采样自动隐藏边，返回有效的隐藏边集
+     *
+     * 采样未激活时直接返回用户隐藏集合，避免不必要的拷贝。
+     * 采样激活时合并两个集合，确保：
+     *   - 用户通过 EdgeListPanel 隐藏的边持续隐藏
+     *   - 采样前已存在的边全部隐藏
+     *   - 新添加的回环边（不在任一集合中）可见
+     *
+     * @return 合并后的隐藏边 ID 集合
+     */
+    std::set<long> getEffectiveHiddenEdges() const {
+        if (m_sampleStride <= 1) return m_hiddenEdgeIds;
+        std::set<long> combined = m_hiddenEdgeIds;
+        combined.insert(m_sampleHiddenEdgeIds.begin(), m_sampleHiddenEdgeIds.end());
+        return combined;
+    }
+
+    /**
      * @brief 重建顶点球体
      *
      * 为每个关键帧创建一个球体，位置在顶点的平移估计值处。
@@ -372,6 +426,9 @@ private:
      *   - 选中：橙色
      *   - 回环搜索源：蓝色
      *   - 回环候选：绿色
+     *
+     * 当采样步长 > 1 时，仅渲染 id % stride == 0 的球体，
+     * 但特殊球体（选中、回环）始终渲染。
      *
      * @param graph 交互式图数据
      */
@@ -396,10 +453,18 @@ private:
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v) continue;
+
+            // 采样过滤：仅渲染 id % stride == 0 的关键帧
+            // 但特殊球体（选中、回环源、回环候选）始终渲染，绕过采样
+            bool isSpecial = (id == m_selectedVertexId ||
+                              id == m_loopSourceId ||
+                              m_loopCandidateIds.count(id));
+            if (m_sampleStride > 1 && !isSpecial && (id % m_sampleStride != 0)) continue;
+
             Eigen::Vector3d pos = v->estimate().translation();
             osg::Vec3d center(pos.x(), pos.y(), pos.z());
 
-            // 缓存球心位置（用于鼠标拾取）
+            // 缓存球心位置（用于鼠标拾取）—— 仅采样后的球体
             m_sphereCenters.emplace_back(center, id);
 
             // 根据状态选择颜色
@@ -492,6 +557,10 @@ private:
     std::set<long> m_loopCandidateIds;     ///< 回环检测候选顶点 ID 集合
     long m_selectedVertexId = -1;          ///< 当前选中的顶点 ID（-1 表示无选中）
     int  m_highlightWindowHalf = 1;        ///< 高亮窗口半宽（与 m_submapWindowHalfSize 一致）
+
+    // —— 渲染采样 ——
+    int  m_sampleStride = 1;               ///< 渲染采样步长（1=全部, N=每N帧渲染1个球体）
+    std::set<long> m_sampleHiddenEdgeIds;  ///< 采样激活时自动隐藏的边 ID（采样前已存在的边）
 
     // —— 状态配置 ——
     bool m_hasGraph    = false;   ///< 是否有已加载的图数据

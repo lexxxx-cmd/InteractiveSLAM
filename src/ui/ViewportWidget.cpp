@@ -335,6 +335,12 @@ void ViewportWidget::setSphereRadius(float radius) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setSampleStride(int stride) {
+    m_flags.sample_stride = stride;
+    m_sceneViz->setSampleStride(stride);
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setPointSize(int size) {
     m_sceneViz->setPointSize(static_cast<float>(size));
     m_osgWidget->update();

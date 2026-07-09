@@ -61,6 +61,13 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_pointOpacityLabel->setText(QString::number(val) + "%");
         m_viewport->setPointOpacity(val);
     });
+
+    // 采样步长 SpinBox
+    connect(m_sampleStrideSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int val) {
+        m_sampleStrideLabel->setText(QString::number(val));
+        m_viewport->setSampleStride(val);
+    });
 }
 
 /**
@@ -133,6 +140,18 @@ void RenderingPanel::setupUi() {
     opacityRow->addWidget(m_pointOpacitySlider);
     opacityRow->addWidget(m_pointOpacityLabel);
     renderLayout->addLayout(opacityRow);
+
+    // 采样步长 SpinBox（1-100，默认 1）
+    renderLayout->addWidget(new QLabel(tr("Sample Stride:")));
+    m_sampleStrideSpin = new QSpinBox;
+    m_sampleStrideSpin->setRange(1, 100);
+    m_sampleStrideSpin->setValue(1);
+    m_sampleStrideSpin->setToolTip(tr("Render every Nth keyframe (1 = all)"));
+    m_sampleStrideLabel = new QLabel("1");
+    auto* strideRow = new QHBoxLayout;
+    strideRow->addWidget(m_sampleStrideSpin);
+    strideRow->addWidget(m_sampleStrideLabel);
+    renderLayout->addLayout(strideRow);
 
     mainLayout->addWidget(renderGroup);
     mainLayout->addStretch();

@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QCheckBox>
 #include <QSlider>
+#include <QSpinBox>
 
 class ViewportWidget;
 
@@ -57,4 +58,7 @@ private:
 
     QSlider* m_pointOpacitySlider;  ///< 点不透明度滑块
     QLabel*  m_pointOpacityLabel;   ///< 点不透明度数值标签
+
+    QSpinBox* m_sampleStrideSpin;   ///< 采样步长输入框
+    QLabel*   m_sampleStrideLabel;  ///< 采样步长标签
 };
