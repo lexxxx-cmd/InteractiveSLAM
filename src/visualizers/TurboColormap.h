@@ -1,12 +1,41 @@
+// ============================================================================
+// TurboColormap.h
+// Turbo 颜色映射表
+//
+// 功能：提供 Google Turbo 颜色映射函数的实现，广泛用于 SLAM 可视化中
+//       根据高程（Z 值）或其它标量值为点云着色。
+//
+// Turbo 颜色映射的特点：
+//   - 从深紫色（低值）到红色/橙色（中值）再到深蓝色（高值）
+//   - 色彩变化均匀，色带之间过渡平滑
+//   - 比传统的 Jet 映射具有更好的感知均匀性
+//   - 对色盲用户更友好
+//
+// 此 256 色查找表来源于：
+//   catkin_interactiva_ws/src/interactive_slam/src/glk/colormap.cpp
+// ============================================================================
+
 #pragma once
 
 #include <osg/Vec4>
 #include <algorithm>
 
-/// @brief Turbo colormap — 256-entry lookup table copied from
-///        catkin_interactiva_ws/src/interactive_slam/src/glk/colormap.cpp
-///        (Google's turbo color map, widely used in SLAM visualization).
+/**
+ * @brief Turbo 颜色映射函数
+ *
+ * 将输入的标量值 z 在 [zMin, zMax] 范围内映射到 Turbo 颜色空间。
+ * 返回 RGBA 颜色向量。
+ *
+ * @param z     待映射的标量值（通常为点云的高程/深度）
+ * @param zMin  映射范围下限（对应颜色映射的起始颜色）
+ * @param zMax  映射范围上限（对应颜色映射的结束颜色）
+ * @return osg::Vec4 颜色向量 (R, G, B, A)，Alpha 始终为 1.0
+ *
+ * 当范围过小（zMax <= zMin）时，返回灰色 (0.5, 0.5, 0.5, 1.0)
+ */
 inline osg::Vec4 turboColor(float z, float zMin, float zMax) {
+    // —— Turbo 颜色查找表（256 个 RGB 条目） ——
+    // 数据按从低值到高值排列，涵盖整个可见光谱
     static const float turbo[256][3] = {
         {0.18995f,0.07176f,0.23217f},{0.19483f,0.08339f,0.26149f},{0.19956f,0.09498f,0.29024f},{0.20415f,0.10652f,0.31844f},
         {0.20860f,0.11802f,0.34607f},{0.21291f,0.12947f,0.37314f},{0.21708f,0.14087f,0.39964f},{0.22111f,0.15223f,0.42558f},
@@ -74,9 +103,13 @@ inline osg::Vec4 turboColor(float z, float zMin, float zMax) {
         {0.51989f,0.02756f,0.00780f},{0.50664f,0.02354f,0.00863f},{0.49321f,0.01963f,0.00955f},{0.47960f,0.01583f,0.01055f}
     };
 
+    // 范围检查：如果范围为零或负值，返回灰色
     float range = zMax - zMin;
     if (range <= 0.0f) return osg::Vec4(0.5f, 0.5f, 0.5f, 1.0f);
+
+    // 将 z 值归一化到 [0, 1] 并映射到 256 色索引
     float t = (z - zMin) / range;
     int idx = std::max(0, std::min(255, static_cast<int>(t * 255.0f)));
+
     return osg::Vec4(turbo[idx][0], turbo[idx][1], turbo[idx][2], 1.0f);
 }

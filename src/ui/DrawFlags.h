@@ -1,15 +1,29 @@
+/**
+ * @file DrawFlags.h
+ * @brief 绘制标志枚举定义
+ *
+ * 定义在 3D 视口中控制各类元素渲染开关的结构体。
+ * 该文件最初对应已删除的 drawable_object.hpp 中的标志位定义。
+ * 用于 ViewportWidget 和 GraphSceneVisualizer 之间传递渲染状态。
+ */
+
 #pragma once
 
 namespace hdl_graph_slam {
 
-/// @brief Draw flags controlling what is rendered in the 3D viewport.
-///        Mirrors the flags originally in the deleted drawable_object.hpp.
+/**
+ * @brief 绘制标志结构体
+ *
+ * 控制 3D 视口中哪些元素被渲染。
+ * ViewportWidget 持有此结构体实例，通过 setter 方法修改标志位，
+ * 并将标志传递给 GraphSceneVisualizer 以控制实际渲染内容。
+ */
 struct DrawFlags {
-    bool draw_verticies        = true;
-    bool draw_edges            = true;
-    bool draw_keyframe_vertices = true;
-    bool draw_se3_edges        = true;
-    bool z_clipping            = false;
+    bool draw_verticies        = true;   ///< 是否绘制所有顶点（球体）
+    bool draw_edges            = true;   ///< 是否绘制所有边（连线）
+    bool draw_keyframe_vertices = true;  ///< 是否绘制关键帧点云
+    bool draw_se3_edges        = true;   ///< 是否绘制 SE3 约束边
+    bool z_clipping            = false;  ///< 是否启用 Z 轴裁剪
 };
 
 }  // namespace hdl_graph_slam

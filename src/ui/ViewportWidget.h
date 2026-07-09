@@ -1,3 +1,19 @@
+/**
+ * @file ViewportWidget.h
+ * @brief 3D 视口部件头文件
+ *
+ * ViewportWidget 是应用程序中央的 3D 渲染视口，基于 osgQOpenGLWidget 和
+ * OpenSceneGraph (OSG) 构建。它是整个 SLAM 数据可视化最核心的 UI 组件。
+ *
+ * 主要功能：
+ * - 管理 OSG 场景图（通过 GraphSceneVisualizer）
+ * - 支持透视/正交投影切换
+ * - 顶点拾取（Ctrl+Click）和右键上下文菜单
+ * - 管理浮动叠加面板（OverlayPanelWidget）的位置
+ * - 提供渲染控制接口（显示/隐藏顶点、边、点云等）
+ * - FPS 统计
+ */
+
 #pragma once
 
 #include <QWidget>
@@ -21,8 +37,18 @@ namespace hdl_graph_slam {
 class InteractiveGraph;
 }
 
-/// @brief Central 3D viewport widget hosting the osgQOpenGLWidget.
-///        Modeled after 3DPCViewer's VisualAreaWidget.
+/**
+ * @brief 中央 3D 视口部件
+ *
+ * 基于 osgQOpenGLWidget 实现，在 Qt 界面中嵌入 OSG 3D 渲染。
+ * 设计参考 3DPCViewer 的 VisualAreaWidget。
+ *
+ * 使用方式：
+ * - 构造后自动创建 OSG 渲染环境和场景可视化器
+ * - 通过 onGraphLoaded() 加载图谱数据到场景
+ * - 通过各类 setter 方法控制渲染效果
+ * - 信号 vertexSelected / contextMenuRequested 供 MainWindow 使用
+ */
 class ViewportWidget : public QWidget {
     Q_OBJECT
 
@@ -31,56 +57,88 @@ public:
     ~ViewportWidget() override;
 
 public slots:
+    /**
+     * @brief 图谱加载完成后的回调
+     * @param graph 加载的图谱对象（共享指针）
+     */
     void onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph);
+
+    /// 图谱关闭后的回调（清空场景）
     void onGraphClosed();
+
+    /// 刷新场景（更新顶点/边位姿）
     void refreshScene();
-    void rebuildPointClouds();  // heavy — call only after optimization
 
-    // Rendering controls
-    void setDrawVertices(bool v);
-    void setDrawEdges(bool v);
-    void setDrawKeyframeClouds(bool v);
-    void setDrawSE3Edges(bool v);
-    void setEdgeWidth(int width);
-    void setSphereRadius(float radius);
-    void setPointSize(int size);
-    void setPointOpacity(int opacity);
-    void setBackgroundColor(const QColor& color);
-    void setHiddenEdges(const std::set<long>& ids);
-    void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);
-    void resetCamera();
+    /**
+     * @brief 重建点云
+     * @note 这是重量级操作，仅在优化完成后调用
+     */
+    void rebuildPointClouds();
 
-    // Z-clip + elevation color range
-    void setZClipping(bool enabled);
-    void setZClipMin(double minZ);
-    void setZClipMax(double maxZ);
-    void setColorZMin(double minZ);
-    void setColorZMax(double maxZ);
-    void setAutoColorRange(bool autoRange);
+    // === 渲染控制 ===
+    void setDrawVertices(bool v);            ///< 是否绘制顶点
+    void setDrawEdges(bool v);               ///< 是否绘制边
+    void setDrawKeyframeClouds(bool v);      ///< 是否绘制关键帧点云
+    void setDrawSE3Edges(bool v);            ///< 是否绘制 SE3 约束边
+    void setEdgeWidth(int width);            ///< 设置边线宽度
+    void setSphereRadius(float radius);      ///< 设置顶点球体半径
+    void setPointSize(int size);             ///< 设置点云点大小
+    void setPointOpacity(int opacity);       ///< 设置点云不透明度（0-100）
+    void setBackgroundColor(const QColor& color);  ///< 设置背景色
+    void setHiddenEdges(const std::set<long>& ids);     ///< 设置隐藏边集合
+    void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);  ///< 闭环高亮
+    void resetCamera();                      ///< 重置摄像机
 
-    /// Set half-window size for Ctrl+Click point cloud highlight.
+    // === Z 裁剪 + 高程颜色范围 ===
+    void setZClipping(bool enabled);          ///< 启用/禁用 Z 裁剪
+    void setZClipMin(double minZ);            ///< 设置 Z 裁剪最小值
+    void setZClipMax(double maxZ);            ///< 设置 Z 裁剪最大值
+    void setColorZMin(double minZ);           ///< 设置颜色范围 Z 最小值
+    void setColorZMax(double maxZ);           ///< 设置颜色范围 Z 最大值
+    void setAutoColorRange(bool autoRange);   ///< 启用/禁用自动颜色范围
+
+    /**
+     * @brief 设置 Ctrl+Click 点云高亮的窗口半宽
+     * @param n 邻域窗口半宽
+     */
     void setHighlightWindowHalf(int n);
 
-    /// Replace the default perspective projection with orthographic.
-    void applyOrthographicProjection();
-    /// Restore perspective projection.
-    void applyPerspectiveProjection();
-    /// Apply current projection based on m_useOrthographic flag.
-    void applyProjection();
+    // === 投影方式 ===
+    void applyOrthographicProjection();   ///< 切换为正交投影
+    void applyPerspectiveProjection();    ///< 切换为透视投影
+    void applyProjection();               ///< 根据 m_useOrthographic 标志应用投影
 
-    /// Toggle between perspective and orthographic projection.
+    /**
+     * @brief 设置是否使用正交投影
+     * @param enabled true=正交, false=透视
+     */
     void setUseOrthographic(bool enabled);
     bool isOrthographic() const { return m_useOrthographic; }
 
-    // Overlay panel management (floating panels over viewport)
-    void registerOverlay(OverlayPanelWidget* overlay);
-    void updateOverlayPositions();
+    // === 叠加面板管理 ===
+    void registerOverlay(OverlayPanelWidget* overlay);  ///< 注册浮动面板
+    void updateOverlayPositions();                       ///< 更新所有面板位置
 
 signals:
-    void fpsUpdated(float fps);
-    void initialized();
-    void cloudDataReady(float dataZMin, float dataZMax);
-    void vertexSelected(long vertexId);
+    void fpsUpdated(float fps);                           ///< FPS 更新信号（~1Hz）
+    void initialized();                                   ///< OSG 初始化完成信号
+    void cloudDataReady(float dataZMin, float dataZMax);  ///< 点云数据范围就绪信号
+    void vertexSelected(long vertexId);                   ///< 顶点选中信号
+
+    /**
+     * @brief 右键上下文菜单请求信号
+     * @param vertexId 选中顶点 ID（-1 表示未选中顶点）
+     * @param edgeId   选中边 ID（-1 表示未选中边）
+     * @param edgeV1   边起点顶点 ID
+     * @param edgeV2   边终点顶点 ID
+     * @param edgeDist 边长度
+     * @param edgeKernel 边使用的鲁棒核函数
+     * @param screenPos 右键点击的屏幕位置
+     * @param vtxCloudSize 顶点点云规模
+     * @param vtxPosX/Y/Z 顶点位置
+     * @param vtxAccumDist 顶点累积距离
+     * @param vtxDegree    顶点度数（关联边数）
+     */
     void contextMenuRequested(long vertexId, long edgeId,
                               long edgeV1, long edgeV2,
                               double edgeDist, const QString& edgeKernel,
@@ -93,29 +151,29 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private slots:
-    void initOsg();        // called on osgQOpenGLWidget::initialized
-    void updateScene();    // timer-driven pose/edge refresh
-    void onVertexPicked(long vertexId);  // picking callback
+    void initOsg();          ///< OSG 初始化（osgQOpenGLWidget 准备就绪后调用）
+    void updateScene();      ///< 定时场景更新（姿态/边刷新 + FPS 统计）
+    void onVertexPicked(long vertexId);  ///< 顶点选中回调（Ctrl+Click）
 
 private:
-    osgQOpenGLWidget* m_osgWidget = nullptr;
-    std::unique_ptr<GraphSceneVisualizer> m_sceneViz;
-    std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;
-    hdl_graph_slam::DrawFlags m_flags;
+    osgQOpenGLWidget* m_osgWidget = nullptr;                      ///< OSG 嵌入 Qt 的 OpenGL 部件
+    std::unique_ptr<GraphSceneVisualizer> m_sceneViz;             ///< 场景可视化器
+    std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;    ///< 当前加载的图谱
+    hdl_graph_slam::DrawFlags m_flags;                             ///< 绘制标志
 
-    QTimer* m_updateTimer = nullptr;
-    osg::ref_ptr<SpherePickingHandler> m_pickingHandler;
+    QTimer* m_updateTimer = nullptr;                              ///< 场景更新定时器（~60Hz）
+    osg::ref_ptr<SpherePickingHandler> m_pickingHandler;           ///< 球体拾取事件处理器
 
-    // Overlay panels (floating over viewport)
-    QVector<OverlayPanelWidget*> m_overlays;
-    int m_overlayMargin = 10;
+    // 叠加面板（浮动于视口之上）
+    QVector<OverlayPanelWidget*> m_overlays;  ///< 注册的叠加面板列表
+    int m_overlayMargin = 10;                 ///< 面板边缘间距
 
-    // Orthographic projection tracking
-    double m_orthoHalfHeight = 10.0;
-    bool m_useOrthographic = false;   // default: perspective
+    // 正交投影跟踪
+    double m_orthoHalfHeight = 10.0;   ///< 正交投影半高
+    bool m_useOrthographic = false;    ///< 是否使用正交投影（默认：透视）
 
-    // FPS tracking (rolling average)
-    int m_frameCount = 0;
-    float m_fpsAccum = 0.0f;
-    float m_fps = 0.0f;
+    // FPS 跟踪（滚动平均）
+    int m_frameCount = 0;    ///< 帧计数器
+    float m_fpsAccum = 0.0f;  ///< FPS 累加器
+    float m_fps = 0.0f;       ///< 当前 FPS 值
 };

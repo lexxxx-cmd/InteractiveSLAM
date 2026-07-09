@@ -1,3 +1,22 @@
+// ============================================================================
+// GraphSceneVisualizer.h
+// 图场景可视化器 —— 中央协调器
+//
+// 功能：构建和管理从 InteractiveGraph 生成的 OSG 场景图，拥有所有子可视化器。
+//       是整个可视化系统的核心调度中心。
+//
+// 场景结构：
+//   root (osg::Group)
+//   ├── GroundGridVisualizer     (地面网格，静态)
+//   ├── CoordinateAxesVisualizer (坐标轴，静态)
+//   ├── m_sphereGroup            (顶点球体组，动态，可切换可见性)
+//   ├── m_edgeGroup              (边线段组，动态，可切换可见性)
+//   └── m_cloudGroup             (点云组，动态，可切换可见性)
+//
+// 所有球体和边都在世界坐标系中构建（不使用 MatrixTransform），
+// 与 EdgeLineVisualizer 使用相同的经过验证的模式。
+// ============================================================================
+
 #pragma once
 
 #include <osg/Group>
@@ -21,18 +40,30 @@
 #include "visualizers/KeyframePointCloudVisualizer.h"
 #include "visualizers/EdgeLineVisualizer.h"
 
-/// @brief Central orchestrator that builds and manages the OSG scene graph
-///        from an InteractiveGraph. Owns all sub-visualizers.
-///
-///        Spheres and edges are built in WORLD SPACE (no MatrixTransform) —
-///        same proven pattern as EdgeLineVisualizer.
+/**
+ * @brief 图场景可视化器 —— 场景图构建和管理的中央协调器
+ *
+ * 核心职责：
+ *   1. 从 InteractiveGraph 构建完整的 OSG 场景图
+ *   2. 管理所有子可视化器（球体、边线、点云、坐标轴、地面网格）
+ *   3. 提供可见性开关（顶点、边、点云各自独立控制）
+ *   4. 支持点云 Z 轴裁剪和颜色范围控制
+ *   5. 支持顶点选择高亮（高亮选中顶点附近的时序邻居帧）
+ *   6. 支持回环检测可视化（搜索源为蓝色、候选为绿色）
+ *   7. 支持隐藏指定边（通过 EdgeListPanel 交互）
+ *
+ * 性能考虑：
+ *   - updatePoses() 每帧调用，仅更新球体和边位置
+ *   - rebuildPointClouds() 计算密集，仅在优化完成后调用
+ */
 class GraphSceneVisualizer {
 public:
+    /** @brief 构造函数：创建场景根节点、子分组和静态元素 */
     GraphSceneVisualizer() {
         m_root = new osg::Group;
         m_root->setName("GraphScene");
 
-        // Sub-groups for visibility toggling
+        // 创建子分组，用于各元素的可见性独立开关
         m_sphereGroup = new osg::Group;
         m_sphereGroup->setName("Spheres");
         m_edgeGroup = new osg::Group;
@@ -40,10 +71,11 @@ public:
         m_cloudGroup = new osg::Group;
         m_cloudGroup->setName("PointClouds");
 
-        // Static scene elements
+        // 创建静态场景元素（坐标轴和地面网格）
         m_axes = std::make_unique<CoordinateAxesVisualizer>();
         m_grid  = std::make_unique<GroundGridVisualizer>(100.0f);
 
+        // 组装场景树
         m_root->addChild(m_grid->getNode());
         m_root->addChild(m_axes->getNode());
         m_root->addChild(m_sphereGroup);
@@ -51,51 +83,66 @@ public:
         m_root->addChild(m_cloudGroup);
     }
 
+    /** @brief 获取场景根节点 */
     osg::ref_ptr<osg::Group> getRootNode() const { return m_root; }
 
-    // ---- Visibility toggles ----
+    // ========================================================================
+    // 可见性开关
+    // ========================================================================
 
+    /** @brief 设置是否绘制顶点球体 */
     void setDrawVertices(bool v) {
         m_sphereGroup->setNodeMask(v ? ~0u : 0u);
     }
 
+    /** @brief 设置是否绘制边线段 */
     void setDrawEdges(bool v) {
         m_edgeGroup->setNodeMask(v ? ~0u : 0u);
     }
 
+    /** @brief 设置是否绘制关键帧点云 */
     void setDrawKeyframeClouds(bool v) {
         m_drawClouds = v;
         m_cloudGroup->setNodeMask(v ? ~0u : 0u);
     }
 
+    /** @brief 设置点云中点的大小 */
     void setPointSize(float size) {
         m_pointSize = size;
         if (m_cloudViz) m_cloudViz->setPointSize(size);
     }
 
+    /** @brief 设置点云透明度 */
     void setPointOpacity(float opacity) {
         m_pointOpacity = opacity;
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
     }
 
-    // ---- Z-clip controls ----
+    // ========================================================================
+    // Z 轴裁剪控制
+    // ========================================================================
 
+    /** @brief 启用/禁用 Z 轴范围裁剪 */
     void setZClipping(bool enabled) {
         if (m_cloudViz) m_cloudViz->setZClipping(enabled);
     }
 
+    /** @brief 设置 Z 轴裁剪范围 */
     void setZClipRange(float minZ, float maxZ) {
         if (m_cloudViz) m_cloudViz->setZClipRange(minZ, maxZ);
     }
 
+    /** @brief 设置按 Z 轴着色的颜色范围 */
     void setColorZRange(float minZ, float maxZ) {
         if (m_cloudViz) m_cloudViz->setColorZRange(minZ, maxZ);
     }
 
+    /** @brief 设置是否自动计算颜色范围（根据数据范围） */
     void setAutoColorRange(bool autoRange) {
         if (m_cloudViz) m_cloudViz->setAutoColorRange(autoRange);
     }
 
+    // —— 查询当前状态 ——
     float getDataZMin() const { return m_cloudViz ? m_cloudViz->getDataZMin() : 0.0f; }
     float getDataZMax() const { return m_cloudViz ? m_cloudViz->getDataZMax() : 0.0f; }
     float getColorZMin() const { return m_cloudViz ? m_cloudViz->getColorZMin() : 0.0f; }
@@ -105,11 +152,17 @@ public:
     bool  isZClipping()  const { return m_cloudViz ? m_cloudViz->isZClipping()  : false; }
     bool  isAutoColorRange() const { return m_cloudViz ? m_cloudViz->isAutoColorRange() : true; }
 
+    // ========================================================================
+    // 外观参数
+    // ========================================================================
+
+    /** @brief 设置边线宽度 */
     void setEdgeWidth(float width) {
         m_edgeWidth = width;
         if (m_edgeLineViz) m_edgeLineViz->setLineWidth(width);
     }
 
+    /** @brief 设置球体半径（触发球体重建） */
     void setSphereRadius(float radius) {
         m_sphereRadius = radius;
         if (m_sphereViz && m_lastGraph) {
@@ -117,34 +170,76 @@ public:
         }
     }
 
-    /// Sphere-centers cache for picking.
+    /**
+     * @brief 获取球体中心位置缓存（用于鼠标拾取检测）
+     * @return (球心位置, 顶点ID) 对列表
+     */
     const std::vector<std::pair<osg::Vec3d, long>>& sphereCenters() const {
         return m_sphereCenters;
     }
 
-    /// Edge segments for right-click picking (point-to-segment distance).
+    /**
+     * @brief 获取边线段列表（用于右键点击拾取检测）
+     * @return 边线段数据向量
+     */
     const std::vector<EdgeSegment>& edgeSegments() const {
         return m_edgeLineViz ? m_edgeLineViz->edgeSegments() : m_emptySegments;
     }
 
+    /** @brief 获取当前球体半径 */
     float sphereRadius() const { return m_sphereRadius; }
 
+    // ========================================================================
+    // 选择与高亮
+    // ========================================================================
+
+    /**
+     * @brief 设置选中的顶点 ID
+     *
+     * 选中顶点后，该顶点的球体变为橙色，同时其时序邻居帧的
+     * 点云会高亮为白色。
+     *
+     * @param id 顶点 ID（设为 -1 取消选择）
+     */
     void setSelectedVertex(long id) {
         m_selectedVertexId = id;
         if (m_cloudViz) {
             m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
         }
     }
+
+    /** @brief 获取当前选中的顶点 ID */
     long selectedVertex() const { return m_selectedVertexId; }
 
-    /// Number of temporal neighbours on each side of the selected vertex
-    /// whose point clouds are highlighted white (total = 2*half+1 frames).
+    /**
+     * @brief 设置高亮窗口半宽
+     *
+     * 选中顶点时，其前后各 highlightWindowHalf 个时序邻居帧的
+     * 点云会被高亮为白色，总共 (2*half+1) 帧。
+     *
+     * @param half 半宽大小
+     */
     void setHighlightWindowHalf(int half) { m_highlightWindowHalf = half; }
+
+    /** @brief 获取当前高亮窗口半宽 */
     int  highlightWindowHalf() const { return m_highlightWindowHalf; }
 
-    // ---- Scene construction ----
+    // ========================================================================
+    // 场景构建
+    // ========================================================================
 
-    /// Build the entire scene graph from an InteractiveGraph.
+    /**
+     * @brief 从 InteractiveGraph 构建完整场景图
+     *
+     * 构建顺序：
+     *   1. 清除旧的场景数据
+     *   2. 重建顶点球体（世界坐标系）
+     *   3. 重建合并点云（世界坐标系）
+     *   4. 重建边线段（世界坐标系，按来源着色）
+     *
+     * @param graph 交互式图数据共享指针
+     * @param flags 绘制标志（当前未使用，兼容接口）
+     */
     void buildFromGraph(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph,
                         const hdl_graph_slam::DrawFlags& /*flags*/) {
         clearGraph();
@@ -153,14 +248,14 @@ public:
 
         m_lastGraph = graph;
 
-        // 1. Spheres — world-space, same vertex positions as edges
+        // 1. 球体 —— 世界坐标系，与边使用相同顶点位置
         rebuildSpheres(graph);
         m_sphereGroup->addChild(m_sphereViz->getNode());
 
-        // 2. Point cloud — world-space, merged across all keyframes
+        // 2. 点云 —— 世界坐标系，所有关键帧点云合并
         rebuildPointClouds(graph);
 
-        // 3. Edges — world-space lines, colored by EdgeSource
+        // 3. 边线 —— 世界坐标系线段，按 EdgeSource 着色
         m_edgeLineViz = std::make_unique<EdgeLineVisualizer>();
         m_edgeLineViz->rebuild(graph.get(), m_hiddenEdgeIds);
         m_edgeGroup->addChild(m_edgeLineViz->getNode());
@@ -168,8 +263,14 @@ public:
         m_hasGraph = true;
     }
 
-    /// Update spheres and edges every frame.  Point clouds are NOT updated
-    /// here (too expensive) — call rebuildPointClouds() after optimization.
+    /**
+     * @brief 每帧更新球体和边线位置（不更新点云）
+     *
+     * 点云重建计算密集，需要在 CPU 上进行点变换和 GPU 上传，
+     * 因此仅在优化完成后通过 rebuildPointClouds() 显式触发。
+     *
+     * @param graph 最新的图数据共享指针
+     */
     void updatePoses(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
         if (!graph) return;
         m_lastGraph = graph;
@@ -181,26 +282,44 @@ public:
         }
     }
 
-    /// Replace the set of hidden edge IDs (called from MainWindow).
+    /**
+     * @brief 替换隐藏边的 ID 集合（由 MainWindow 调用）
+     * @param ids 需隐藏的边 ID 集合
+     */
     void setHiddenEdges(const std::set<long>& ids) {
         m_hiddenEdgeIds = ids;
     }
 
-    /// Highlight spheres for auto loop detection visualization.
-    /// @param sourceId      Vertex ID of the current search source (colored blue).
-    /// @param candidateIds  Vertex IDs of loop candidates (colored green).
+    /**
+     * @brief 设置回环检测高亮
+     *
+     * 在自动回环检测过程中，将搜索源顶点标记为蓝色，
+     * 候选顶点标记为绿色，方便用户观察。
+     *
+     * @param sourceId      搜索源顶点 ID（蓝色）
+     * @param candidateIds  候选顶点 ID 列表（绿色）
+     */
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds) {
         m_loopSourceId = sourceId;
         m_loopCandidateIds.clear();
         m_loopCandidateIds.insert(candidateIds.begin(), candidateIds.end());
     }
 
-    /// Rebuild the merged world-space point cloud from current g2o poses.
-    /// Expensive (CPU transform + GPU upload of all points) — call only
-    /// after optimization, NOT every frame.
+    /**
+     * @brief 重建合并后的世界坐标系点云
+     *
+     * 这是一个计算密集型操作（CPU 点变换 + GPU 上传所有点），
+     * 仅在图优化完成后调用，不应每帧执行。
+     *
+     * 此方法会在清除前保存用户的 Z 轴裁剪和颜色范围设置，
+     * 在重建完成后恢复。
+     *
+     * @param graph 交互式图数据共享指针
+     */
     void rebuildPointClouds(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
         if (!graph) return;
 
+        // 首次调用时创建点云可视化器
         if (!m_cloudViz) {
             m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
             m_cloudViz->setPointSize(m_pointSize);
@@ -208,7 +327,7 @@ public:
             m_cloudGroup->addChild(m_cloudViz->getNode());
         }
 
-        // Save user's z-clip and color range settings before clear
+        // 保存用户当前的 Z 轴裁剪和颜色范围设置
         bool  savedZClip   = m_cloudViz->isZClipping();
         float savedClipMin = m_cloudViz->getZClipMin();
         float savedClipMax = m_cloudViz->getZClipMax();
@@ -216,6 +335,7 @@ public:
         float savedColorMin  = m_cloudViz->getColorZMin();
         float savedColorMax  = m_cloudViz->getColorZMax();
 
+        // 清除旧点云并重新添加所有关键帧的点云
         m_cloudViz->clear();
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
@@ -224,24 +344,37 @@ public:
         }
         m_cloudViz->finish();
 
-        // Restore user's z-clip and color range settings
+        // 恢复用户的 Z 轴裁剪和颜色范围设置
         m_cloudViz->setZClipping(savedZClip);
         m_cloudViz->setZClipRange(savedClipMin, savedClipMax);
         if (!savedAutoColor) {
             m_cloudViz->setColorZRange(savedColorMin, savedColorMax);
         }
 
-        // Re-apply highlight if one was selected
+        // 如果之前有选中的顶点，重新应用高亮
         if (m_selectedVertexId >= 0) {
             m_cloudViz->recolorHighlight(getTemporalNeighbors(m_selectedVertexId));
         }
     }
 
+    /** @brief 清除整个场景 */
     void clear() {
         clearGraph();
     }
 
 private:
+    /**
+     * @brief 重建顶点球体
+     *
+     * 为每个关键帧创建一个球体，位置在顶点的平移估计值处。
+     * 球体颜色取决于状态：
+     *   - 默认：红色
+     *   - 选中：橙色
+     *   - 回环搜索源：蓝色
+     *   - 回环候选：绿色
+     *
+     * @param graph 交互式图数据
+     */
     void rebuildSpheres(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
         if (!m_sphereViz) {
             m_sphereViz = std::make_unique<VertexSphereVisualizer>(m_sphereRadius);
@@ -249,22 +382,27 @@ private:
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
 
+        // 清空并预分配球心缓存
         m_sphereCenters.clear();
         m_sphereCenters.reserve(graph->keyframes.size());
 
-        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // red
-        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // orange
-        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // blue
-        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // green
+        // 定义不同状态的球体颜色
+        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // 红色 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // 橙色 —— 选中
+        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色 —— 回环搜索源
+        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // 绿色 —— 回环候选
 
+        // 遍历所有关键帧，创建顶点球体
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v) continue;
             Eigen::Vector3d pos = v->estimate().translation();
             osg::Vec3d center(pos.x(), pos.y(), pos.z());
 
+            // 缓存球心位置（用于鼠标拾取）
             m_sphereCenters.emplace_back(center, id);
 
+            // 根据状态选择颜色
             osg::Vec4 color = defaultColor;
             if (id == m_selectedVertexId) {
                 color = selectedColor;
@@ -278,6 +416,12 @@ private:
         m_sphereViz->finish();
     }
 
+    /**
+     * @brief 清除所有动态场景元素
+     *
+     * 移除球体组、边组、点云组中的所有子节点，
+     * 重置所有子可视化器智能指针。
+     */
     void clearGraph() {
         m_sphereGroup->removeChildren(0, m_sphereGroup->getNumChildren());
         m_edgeGroup->removeChildren(0, m_edgeGroup->getNumChildren());
@@ -288,9 +432,17 @@ private:
         m_hasGraph = false;
     }
 
-    /// Collect vertex IDs centred on `centerId` within
-    /// ±m_highlightWindowHalf by sequential ID range.
-    /// Returns an empty set when centerId < 0 (deselection) or no graph.
+    /**
+     * @brief 获取指定顶点的时序邻居顶点 ID 集合
+     *
+     * 以 centerId 为中心，在 ±m_highlightWindowHalf 范围内
+     * 收集所有存在的顶点 ID。用于点云高亮显示。
+     *
+     * 当 centerId < 0（取消选择）或无图数据时返回空集合。
+     *
+     * @param centerId 中心顶点 ID
+     * @return 邻居顶点 ID 集合
+     */
     std::set<long> getTemporalNeighbors(long centerId) const {
         std::set<long> result;
         if (!m_lastGraph || centerId < 0) return result;
@@ -301,8 +453,7 @@ private:
             return result;
         }
 
-        // Collect vertex IDs by sequential ID range
-        // (same algorithm as mergeAdjacentClouds)
+        // 通过 ID 范围收集顶点（与 mergeAdjacentClouds 算法相同）
         long first = centerId - m_highlightWindowHalf;
         long last  = centerId + m_highlightWindowHalf;
         for (long id = first; id <= last; ++id) {
@@ -313,43 +464,40 @@ private:
         return result;
     }
 
-    // Root
-    osg::ref_ptr<osg::Group> m_root;
+    // —— 场景根节点 ——
+    osg::ref_ptr<osg::Group> m_root;  ///< 场景根节点
 
-    // Static elements
-    std::unique_ptr<CoordinateAxesVisualizer> m_axes;
-    std::unique_ptr<GroundGridVisualizer>  m_grid;
+    // —— 静态元素 ——
+    std::unique_ptr<CoordinateAxesVisualizer> m_axes;  ///< 坐标轴可视化器
+    std::unique_ptr<GroundGridVisualizer>  m_grid;     ///< 地面网格可视化器
 
-    // Dynamic sub-groups (for visibility toggle)
-    osg::ref_ptr<osg::Group> m_sphereGroup;
-    osg::ref_ptr<osg::Group> m_edgeGroup;
-    osg::ref_ptr<osg::Group> m_cloudGroup;
+    // —— 动态子分组（用于可见性独立开关） ——
+    osg::ref_ptr<osg::Group> m_sphereGroup;  ///< 球体子分组
+    osg::ref_ptr<osg::Group> m_edgeGroup;    ///< 边线子分组
+    osg::ref_ptr<osg::Group> m_cloudGroup;   ///< 点云子分组
 
-    // Dynamic visualizers (world-space geometry)
-    std::unique_ptr<VertexSphereVisualizer>       m_sphereViz;
-    std::unique_ptr<KeyframePointCloudVisualizer> m_cloudViz;
-    std::unique_ptr<EdgeLineVisualizer>           m_edgeLineViz;
+    // —— 动态可视化器（世界坐标系几何体） ——
+    std::unique_ptr<VertexSphereVisualizer>       m_sphereViz;  ///< 顶点球体可视化器
+    std::unique_ptr<KeyframePointCloudVisualizer> m_cloudViz;   ///< 关键帧点云可视化器
+    std::unique_ptr<EdgeLineVisualizer>           m_edgeLineViz; ///< 边线可视化器
 
-    // Cached graph reference for live parameter changes
-    std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_lastGraph;
+    // —— 缓存数据 ——
+    std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_lastGraph;  ///< 缓存的图引用（用于实时参数更改）
+    std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;  ///< 球心缓存（与 VBO 并行，重建时刷新）
+    mutable std::vector<EdgeSegment> m_emptySegments;  ///< 无边时的空向量返回（备用）
 
-    // Sphere centers cache for picking (parallel to VBO, refreshed on rebuild)
-    std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;
-    // Fallback for edgeSegments() when no edges loaded
-    mutable std::vector<EdgeSegment> m_emptySegments;
-    // Edge IDs hidden by user via EdgeListPanel
-    std::set<long> m_hiddenEdgeIds;
-    // Auto loop detection highlights
-    long m_loopSourceId = -1;
-    std::set<long> m_loopCandidateIds;
-    long m_selectedVertexId = -1;
-    int  m_highlightWindowHalf = 1;  // ID-range half-window (default matches m_submapWindowHalfSize)
+    // —— 交互状态 ——
+    std::set<long> m_hiddenEdgeIds;        ///< 用户通过 EdgeListPanel 隐藏的边 ID 集合
+    long m_loopSourceId = -1;              ///< 回环检测搜索源顶点 ID
+    std::set<long> m_loopCandidateIds;     ///< 回环检测候选顶点 ID 集合
+    long m_selectedVertexId = -1;          ///< 当前选中的顶点 ID（-1 表示无选中）
+    int  m_highlightWindowHalf = 1;        ///< 高亮窗口半宽（与 m_submapWindowHalfSize 一致）
 
-    // State
-    bool m_hasGraph    = false;
-    bool m_drawClouds  = true;
-    float m_sphereRadius  = 1.0f;
-    float m_edgeWidth     = 2.0f;
-    float m_pointSize     = 3.0f;
-    float m_pointOpacity  = 1.0f;
+    // —— 状态配置 ——
+    bool m_hasGraph    = false;   ///< 是否有已加载的图数据
+    bool m_drawClouds  = true;    ///< 是否绘制点云
+    float m_sphereRadius  = 1.0f; ///< 球体半径
+    float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
+    float m_pointSize     = 3.0f; ///< 点云点大小（像素）
+    float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
 };

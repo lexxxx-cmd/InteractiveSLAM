@@ -1,3 +1,11 @@
+/**
+ * @file RenderingPanel.cpp
+ * @brief 渲染设置面板实现
+ *
+ * 实现渲染控制面板的 UI 搭建和信号连接。
+ * 所有控件变化实时通过信号槽传递到 ViewportWidget 的对应接口。
+ */
+
 #include "ui/RenderingPanel.h"
 #include "ui/ViewportWidget.h"
 
@@ -5,11 +13,21 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 
+/**
+ * @brief 构造函数
+ *
+ * 创建 UI 控件并连接所有信号槽：
+ * - 复选框 → ViewportWidget::setDrawXxx
+ * - 滑块值改变 → 对应的数值标签更新 + ViewportWidget::setXxx
+ *
+ * @param viewport 关联的视口部件（接收设置命令）
+ * @param parent   父级部件
+ */
 RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
     : QWidget(parent), m_viewport(viewport) {
     setupUi();
 
-    // Rendering toggles → ViewportWidget
+    // 渲染开关 → ViewportWidget
     connect(m_drawVerticesCb, &QCheckBox::toggled,
             m_viewport, &ViewportWidget::setDrawVertices);
     connect(m_drawEdgesCb, &QCheckBox::toggled,
@@ -19,32 +37,37 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
     connect(m_drawSE3EdgesCb, &QCheckBox::toggled,
             m_viewport, &ViewportWidget::setDrawSE3Edges);
 
-    // Sphere radius slider
+    // 球体半径滑块（值范围 1-100，对应实际半径 0.01-1.00）
     connect(m_sphereRadiusSlider, &QSlider::valueChanged, this, [this](int val) {
         float r = val / 100.0f;
         m_sphereRadiusLabel->setText(QString::number(r, 'f', 2));
         m_viewport->setSphereRadius(r);
     });
 
-    // Edge width slider
+    // 边线宽度滑块
     connect(m_edgeWidthSlider, &QSlider::valueChanged, this, [this](int val) {
         m_edgeWidthLabel->setText(QString::number(val));
         m_viewport->setEdgeWidth(val);
     });
 
-    // Point size slider
+    // 点大小滑块
     connect(m_pointSizeSlider, &QSlider::valueChanged, this, [this](int val) {
         m_pointSizeLabel->setText(QString::number(val));
         m_viewport->setPointSize(val);
     });
 
-    // Point opacity slider
+    // 点不透明度滑块
     connect(m_pointOpacitySlider, &QSlider::valueChanged, this, [this](int val) {
         m_pointOpacityLabel->setText(QString::number(val) + "%");
         m_viewport->setPointOpacity(val);
     });
 }
 
+/**
+ * @brief 初始化 UI 布局
+ *
+ * 在 QGroupBox 中放置 4 个复选框和 4 个带标签的滑块。
+ */
 void RenderingPanel::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(8, 8, 8, 8);
@@ -52,6 +75,7 @@ void RenderingPanel::setupUi() {
     auto* renderGroup = new QGroupBox(tr("Rendering"));
     auto* renderLayout = new QVBoxLayout(renderGroup);
 
+    // 显示开关复选框（默认全部启用）
     m_drawVerticesCb = new QCheckBox(tr("Show Vertices"));
     m_drawVerticesCb->setChecked(true);
     m_drawEdgesCb = new QCheckBox(tr("Show Edges"));
@@ -66,7 +90,7 @@ void RenderingPanel::setupUi() {
     renderLayout->addWidget(m_drawCloudsCb);
     renderLayout->addWidget(m_drawSE3EdgesCb);
 
-    // Sphere radius
+    // 球体半径滑块（1-100，默认 50 → 0.50）
     renderLayout->addWidget(new QLabel(tr("Sphere Radius:")));
     m_sphereRadiusSlider = new QSlider(Qt::Horizontal);
     m_sphereRadiusSlider->setRange(1, 100);
@@ -77,7 +101,7 @@ void RenderingPanel::setupUi() {
     sphereRow->addWidget(m_sphereRadiusLabel);
     renderLayout->addLayout(sphereRow);
 
-    // Edge width
+    // 边线宽度滑块（1-10，默认 2）
     renderLayout->addWidget(new QLabel(tr("Edge Width:")));
     m_edgeWidthSlider = new QSlider(Qt::Horizontal);
     m_edgeWidthSlider->setRange(1, 10);
@@ -88,7 +112,7 @@ void RenderingPanel::setupUi() {
     edgeRow->addWidget(m_edgeWidthLabel);
     renderLayout->addLayout(edgeRow);
 
-    // Point size
+    // 点大小滑块（1-10，默认 3）
     renderLayout->addWidget(new QLabel(tr("Point Size:")));
     m_pointSizeSlider = new QSlider(Qt::Horizontal);
     m_pointSizeSlider->setRange(1, 10);
@@ -99,7 +123,7 @@ void RenderingPanel::setupUi() {
     sizeRow->addWidget(m_pointSizeLabel);
     renderLayout->addLayout(sizeRow);
 
-    // Point opacity
+    // 点不透明度滑块（10-100%，默认 100%）
     renderLayout->addWidget(new QLabel(tr("Point Opacity:")));
     m_pointOpacitySlider = new QSlider(Qt::Horizontal);
     m_pointOpacitySlider->setRange(10, 100);

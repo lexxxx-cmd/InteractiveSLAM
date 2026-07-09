@@ -1,3 +1,18 @@
+// ============================================================================
+// KeyframePointCloudVisualizer.h
+// 关键帧点云可视化器
+//
+// 功能：在世界坐标系中构建合并的点云几何体。每个关键帧的局部激光雷达
+//       点通过 g2o 位姿在 CPU 上变换到世界坐标系，然后追加到单个 VBO 中。
+//       与 EdgeLineVisualizer 和 VertexSphereVisualizer 使用相同的模式。
+//
+//       记录每个关键帧的顶点范围，使得选中关键帧时可以仅重新着色
+//       该帧的点云，而无需重建整个 VBO。
+//
+// 着色方案：默认使用 Turbo 颜色映射根据高程（Z 值）着色。
+//           选中关键帧的点云高亮为白色。
+// ============================================================================
+
 #pragma once
 
 #include <osg/Geode>
@@ -17,15 +32,22 @@
 #include "visualizers/TurboColormap.h"
 #include "visualizers/CoreShaders.h"
 
-/// @brief Builds a merged point-cloud geometry in WORLD SPACE.
-///        Each keyframe's local LiDAR points are transformed by the g2o pose
-///        on the CPU, then appended to a single VBO — same pattern as
-///        EdgeLineVisualizer and VertexSphereVisualizer.
-///
-///        Tracks per-keyframe vertex ranges so the selected keyframe's cloud
-///        can be highlighted without rebuilding the entire VBO.
+/**
+ * @brief 关键帧点云可视化器
+ *
+ * 将所有关键帧的点云合并到单个几何体中，通过 CPU 变换将每个点
+ * 从关键帧局部坐标系变换到世界坐标系。
+ *
+ * 核心功能：
+ *   1. appendCloud() —— 添加一个关键帧的点云（按位姿变换到世界坐标）
+ *   2. finish() —— 完成点云构建，应用 Turbo 颜色映射并上传到 GPU
+ *   3. recolorHighlight() —— 高亮选中的关键帧点云（白色）
+ *   4. Z 轴裁剪（着色器级别，无需重建 VBO）
+ *   5. 高程颜色范围动态调整（CPU 重新着色，无需重建顶点）
+ */
 class KeyframePointCloudVisualizer {
 public:
+    /** @brief 构造函数：初始化点云几何体和着色器 */
     KeyframePointCloudVisualizer() {
         m_geom = new osg::Geometry;
         m_geom->setUseDisplayList(false);
@@ -33,6 +55,7 @@ public:
         m_geom->setUseVertexArrayObject(true);
         m_geom->setDataVariance(osg::Object::DYNAMIC);
 
+        // 顶点和颜色数组
         m_vertices = new osg::Vec3Array;
         m_colors   = new osg::Vec4Array;
 
@@ -40,13 +63,15 @@ public:
         m_geom->setColorArray(m_colors, osg::Array::BIND_PER_VERTEX);
         m_geom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, 0));
 
+        // 设置点云着色器
         auto* ss = m_geom->getOrCreateStateSet();
         m_pointSizeUniform = applyPointCloudShader(ss, m_pointSize);
 
-        // Look up z-clip uniforms (added by applyPointCloudShader)
+        // 查找 Z 轴裁剪 uniform（由 applyPointCloudShader 添加）
         m_zClipUniform  = ss->getUniform("z_clipping");
         m_zRangeUniform = ss->getUniform("z_range");
 
+        // 透明度控制（使用常量 alpha 混合）
         m_blendColor = new osg::BlendColor(osg::Vec4(1, 1, 1, m_opacity));
         ss->setAttributeAndModes(m_blendColor, osg::StateAttribute::ON);
         ss->setAttributeAndModes(
@@ -57,7 +82,15 @@ public:
         m_geode->addDrawable(m_geom);
     }
 
-    /// Append one keyframe's point cloud, transformed to world space.
+    /**
+     * @brief 添加一个关键帧的点云（变换到世界坐标系）
+     *
+     * 将每个点通过给定的位姿变换到世界坐标系，并更新 Z 值范围。
+     *
+     * @param cloud    局部坐标系下的点云（const 引用）
+     * @param pose     关键帧的 SE3 位姿（世界坐标系）
+     * @param vertexId 关键帧对应的顶点 ID
+     */
     void appendCloud(pcl::PointCloud<pcl::PointXYZI>::ConstPtr cloud,
                      const Eigen::Isometry3d& pose,
                      long vertexId) {
@@ -65,9 +98,11 @@ public:
 
         size_t start = m_allWorldPoints.size();
 
+        // 将每个点通过位姿变换到世界坐标系
         for (const auto& pt : cloud->points) {
             Eigen::Vector3d wp = pose * Eigen::Vector3d(pt.x, pt.y, pt.z);
             float wz = static_cast<float>(wp.z());
+            // 更新 Z 值范围（用于 Turbo 颜色映射和裁剪）
             if (wz < m_zMin) m_zMin = wz;
             if (wz > m_zMax) m_zMax = wz;
             m_allWorldPoints.push_back(wp);
@@ -77,35 +112,46 @@ public:
         m_cloudRanges.push_back({start, count, vertexId});
     }
 
-    /// Upload vertex data and apply initial turbo colouring.
+    /**
+     * @brief 完成点云构建，上传数据并应用初始 Turbo 颜色映射
+     *
+     * 在添加完所有关键帧的点云后调用，执行以下操作：
+     *   1. 初始化颜色范围（自动模式）
+     *   2. 初始化 Z 轴裁剪范围（首次加载）
+     *   3. 将顶点和颜色数据上传到 GPU
+     *   4. 应用 Turbo 颜色映射（根据 Z 值着色）
+     */
     void finish() {
         if (m_allWorldPoints.empty()) return;
 
+        // 防止 Z 值范围过小导致的颜色映射异常
         if (m_zMax - m_zMin < 0.001f) {
             m_zMin -= 0.5f;
             m_zMax += 0.5f;
         }
 
-        // Initialize color range from data (only if auto mode)
+        // 仅在自动模式下从数据初始化颜色范围
         if (m_useAutoColorRange) {
             m_colorZMin = m_zMin;
             m_colorZMax = m_zMax;
         }
 
-        // Initialize clip range from data on first load
+        // 首次加载时从数据初始化裁剪范围
         if (!m_clipRangeInitialized) {
             m_zClipMin = m_zMin;
             m_zClipMax = m_zMax;
             m_clipRangeInitialized = true;
         }
 
-        // Push z-clip range to GPU (always, so shader has valid values)
+        // 将 Z 轴裁剪范围推送到 GPU
         if (m_zRangeUniform)
             m_zRangeUniform->set(osg::Vec2(m_zClipMin, m_zClipMax));
 
+        // 预分配顶点和颜色数组
         m_vertices->reserve(m_allWorldPoints.size());
         m_colors->reserve(m_allWorldPoints.size());
 
+        // 构建顶点并应用 Turbo 颜色映射
         for (const auto& wp : m_allWorldPoints) {
             m_vertices->push_back(osg::Vec3(
                 static_cast<float>(wp.x()),
@@ -115,32 +161,39 @@ public:
                 turboColor(static_cast<float>(wp.z()), m_colorZMin, m_colorZMax));
         }
 
+        // 标记数据为脏，使 OSG 重新上传到 GPU
         m_vertices->dirty();
         m_colors->dirty();
 
+        // 更新图元计数
         auto* prim = static_cast<osg::DrawArrays*>(m_geom->getPrimitiveSet(0));
         if (prim) prim->setCount(m_vertices->size());
         m_geom->dirtyBound();
     }
 
-    /// Re-colour point clouds for a set of highlighted keyframes (white)
-    /// and restore all others to turbo elevation colouring.
-    /// Call after finish().
-    /// @param highlightIds  Set of vertex IDs whose clouds should be
-    ///                      highlighted white.  Pass an empty set to
-    ///                      restore all clouds to turbo colouring.
+    /**
+     * @brief 对指定关键帧集合的点云重新着色（高亮为白色）
+     *
+     * 在 finish() 之后调用。将指定顶点 ID 对应的点云设置为白色，
+     * 其他点云恢复为 Turbo 高程颜色映射。
+     *
+     * @param highlightIds 需要高亮为白色的顶点 ID 集合。
+     *                     传入空集合可恢复所有点云为 Turbo 着色。
+     */
     void recolorHighlight(const std::set<long>& highlightIds) {
         if (!m_colors || m_cloudRanges.empty()) return;
 
         const osg::Vec4 white(1.0f, 1.0f, 1.0f, 1.0f);
 
+        // 遍历每个关键帧的顶点范围
         for (const auto& range : m_cloudRanges) {
             if (highlightIds.count(range.vertexId)) {
+                // 高亮帧：将对应范围的点设置为白色
                 for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
                     (*m_colors)[i] = white;
                 }
             } else {
-                // Restore turbo colour from world-space Z
+                // 非高亮帧：恢复为 Turbo 高程颜色
                 for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
                     float wz = static_cast<float>(m_allWorldPoints[i].z());
                     (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
@@ -150,7 +203,9 @@ public:
         m_colors->dirty();
     }
 
-    /// Clear all data for a full rebuild.
+    /**
+     * @brief 清除所有数据（用于完全重建）
+     */
     void clear() {
         m_allWorldPoints.clear();
         m_cloudRanges.clear();
@@ -162,26 +217,32 @@ public:
         m_clipRangeInitialized = false;
     }
 
+    /** @brief 设置点的大小（像素单位） */
     void setPointSize(float size) {
         m_pointSize = size;
         if (m_pointSizeUniform)
             m_pointSizeUniform->set(size);
     }
 
+    /** @brief 设置点云透明度 */
     void setOpacity(float opacity) {
         m_opacity = opacity;
         if (m_blendColor)
             m_blendColor->setConstantColor(osg::Vec4(1, 1, 1, opacity));
     }
 
-    // ---- Z-clip controls (shader-based, no VBO rebuild) ----
+    // ========================================================================
+    // Z 轴裁剪控制（着色器级别，无需重建 VBO）
+    // ========================================================================
 
+    /** @brief 启用/禁用 Z 轴裁剪 */
     void setZClipping(bool enabled) {
         m_zClipping = enabled;
         if (m_zClipUniform)
             m_zClipUniform->set(enabled ? 1 : 0);
     }
 
+    /** @brief 设置 Z 轴裁剪范围 */
     void setZClipRange(float minZ, float maxZ) {
         m_zClipMin = minZ;
         m_zClipMax = maxZ;
@@ -189,12 +250,16 @@ public:
             m_zRangeUniform->set(osg::Vec2(minZ, maxZ));
     }
 
+    /** @brief 查询 Z 裁剪状态 */
     bool isZClipping() const { return m_zClipping; }
     float getZClipMin() const { return m_zClipMin; }
     float getZClipMax() const { return m_zClipMax; }
 
-    // ---- Elevation color range controls (CPU recolor, no vertex rebuild) ----
+    // ========================================================================
+    // 高程颜色范围控制（CPU 重新着色，无需重建顶点）
+    // ========================================================================
 
+    /** @brief 手动设置颜色 Z 值范围（将关闭自动范围） */
     void setColorZRange(float minZ, float maxZ) {
         m_colorZMin = minZ;
         m_colorZMax = maxZ;
@@ -202,6 +267,7 @@ public:
         recolorAll();
     }
 
+    /** @brief 设置是否自动计算颜色范围 */
     void setAutoColorRange(bool autoRange) {
         m_useAutoColorRange = autoRange;
         if (autoRange) {
@@ -211,31 +277,44 @@ public:
         recolorAll();
     }
 
+    /** @brief 查询是否使用自动颜色范围 */
     bool isAutoColorRange() const { return m_useAutoColorRange; }
 
-    // ---- Data range accessors (for UI initialization) ----
+    // ========================================================================
+    // 数据范围访问（用于 UI 初始化）
+    // ========================================================================
 
-    float getDataZMin() const { return m_zMin; }
-    float getDataZMax() const { return m_zMax; }
-    float getColorZMin() const { return m_colorZMin; }
-    float getColorZMax() const { return m_colorZMax; }
+    float getDataZMin() const { return m_zMin; }     ///< 数据 Z 最小值
+    float getDataZMax() const { return m_zMax; }     ///< 数据 Z 最大值
+    float getColorZMin() const { return m_colorZMin; } ///< 颜色映射 Z 最小值
+    float getColorZMax() const { return m_colorZMax; } ///< 颜色映射 Z 最大值
 
+    /** @brief 获取 OSG 节点 */
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
 
+    /** @brief 返回点云中的点数量 */
     int pointCount() const {
         auto* prim = static_cast<osg::DrawArrays*>(m_geom->getPrimitiveSet(0));
         return prim ? prim->getCount() : 0;
     }
 
 private:
+    /**
+     * @brief 每个关键帧点云的范围结构
+     *
+     * 用于快速定位每个关键帧对应的顶点范围，避免在重新着色时遍历所有顶点。
+     */
     struct CloudRange {
-        size_t startVertex;
-        size_t vertexCount;
-        long   vertexId;
+        size_t startVertex;   ///< 该关键帧在全局顶点数组中的起始索引
+        size_t vertexCount;   ///< 该关键帧的顶点数量
+        long   vertexId;      ///< 关键帧对应的顶点 ID
     };
 
-    /// Recompute all vertex colors from current color Z range.
-    /// Does NOT rebuild vertices — only updates the color array.
+    /**
+     * @brief 根据当前颜色 Z 值范围重新计算所有顶点颜色
+     *
+     * 不重建顶点数据，仅更新颜色数组。
+     */
     void recolorAll() {
         if (!m_colors || m_allWorldPoints.empty()) return;
         if (m_colorZMax - m_colorZMin < 0.001f) return;
@@ -247,35 +326,37 @@ private:
         m_colors->dirty();
     }
 
-    osg::ref_ptr<osg::Geode>     m_geode;
-    osg::ref_ptr<osg::Geometry>  m_geom;
-    osg::ref_ptr<osg::Vec3Array> m_vertices;
-    osg::ref_ptr<osg::Vec4Array> m_colors;
-    osg::ref_ptr<osg::BlendColor> m_blendColor;
-    osg::ref_ptr<osg::Uniform>    m_pointSizeUniform;
-    osg::ref_ptr<osg::Uniform>    m_zClipUniform;
-    osg::ref_ptr<osg::Uniform>    m_zRangeUniform;
+    // —— OSG 对象 ——
+    osg::ref_ptr<osg::Geode>     m_geode;         ///< 叶节点
+    osg::ref_ptr<osg::Geometry>  m_geom;          ///< 点云几何体
+    osg::ref_ptr<osg::Vec3Array> m_vertices;      ///< 顶点数组
+    osg::ref_ptr<osg::Vec4Array> m_colors;        ///< 颜色数组
+    osg::ref_ptr<osg::BlendColor> m_blendColor;   ///< 混合颜色（控制透明度）
+    osg::ref_ptr<osg::Uniform>    m_pointSizeUniform; ///< 点大小 uniform
+    osg::ref_ptr<osg::Uniform>    m_zClipUniform;     ///< Z 轴裁剪开关 uniform
+    osg::ref_ptr<osg::Uniform>    m_zRangeUniform;    ///< Z 轴裁剪范围 uniform
 
-    // World-space points (kept for recolouring on selection change)
+    // —— 世界坐标系点数据（保留以备选择变化时重新着色） ——
     std::vector<Eigen::Vector3d,
-                Eigen::aligned_allocator<Eigen::Vector3d>> m_allWorldPoints;
+                Eigen::aligned_allocator<Eigen::Vector3d>> m_allWorldPoints; ///< 所有世界坐标点
 
-    // Per-keyframe cloud metadata for selective recolouring
+    // —— 每个关键帧的云范围（用于选择性重新着色） ——
     std::vector<CloudRange> m_cloudRanges;
 
-    float m_zMin   =  std::numeric_limits<float>::max();
-    float m_zMax   = -std::numeric_limits<float>::max();
-    float m_pointSize = 3.0f;
-    float m_opacity   = 1.0f;
+    // —— 数据范围 ——
+    float m_zMin   =  std::numeric_limits<float>::max(); ///< 数据 Z 最小值
+    float m_zMax   = -std::numeric_limits<float>::max(); ///< 数据 Z 最大值
+    float m_pointSize = 3.0f;  ///< 点大小（像素）
+    float m_opacity   = 1.0f;  ///< 透明度（1.0 不透明）
 
-    // Z-clip state (shader-based, no rebuild needed on change)
-    bool  m_zClipping = false;
-    float m_zClipMin  = -10.0f;
-    float m_zClipMax  = 10.0f;
-    bool  m_clipRangeInitialized = false;
+    // —— Z 轴裁剪状态（着色器级别，变化时无需重建 VBO） ——
+    bool  m_zClipping = false;           ///< Z 裁剪开关
+    float m_zClipMin  = -10.0f;          ///< Z 裁剪最小值
+    float m_zClipMax  = 10.0f;           ///< Z 裁剪最大值
+    bool  m_clipRangeInitialized = false; ///< 是否已初始化裁剪范围
 
-    // Elevation color range (CPU recolor on change)
-    float m_colorZMin = 0.0f;
-    float m_colorZMax = 1.0f;
-    bool  m_useAutoColorRange = true;
+    // —— 高程颜色范围（CPU 重新着色） ——
+    float m_colorZMin = 0.0f;   ///< 颜色映射 Z 最小值
+    float m_colorZMax = 1.0f;   ///< 颜色映射 Z 最大值
+    bool  m_useAutoColorRange = true; ///< 是否使用自动颜色范围
 };
