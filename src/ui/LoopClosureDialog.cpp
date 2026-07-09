@@ -785,7 +785,8 @@ void LoopClosureDialog::onReset() {
     m_endPose = m_endPoseInit;
     updateFitnessScore();
     updatePreview();
-    m_statusLabel->setText(tr("Pose reset to initial"));
+    m_miniViewport->resetCamera();
+    m_statusLabel->setText(tr("Pose and camera reset to initial"));
 }
 
 // ---------------------------------------------------------------------------
