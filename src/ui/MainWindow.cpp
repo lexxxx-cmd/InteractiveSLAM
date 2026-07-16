@@ -19,6 +19,7 @@
 #include "ui/AutoLoopClosurePanel.h"
 #include "ui/EdgeListPanel.h"
 #include "ui/OverlayPanelWidget.h"
+#include "ui/PlaybackPanel.h"
 #include "ui/LoopClosureDialog.h"
 #include "backend/graph_manager.hpp"
 
@@ -294,6 +295,28 @@ void MainWindow::setupUi() {
         }
     });
 
+    // ---- 播放轴面板 ----
+    m_playbackPanel = new PlaybackPanel(m_viewport, nullptr);
+    m_playbackOverlay = new OverlayPanelWidget(tr("Playback"), m_playbackPanel);
+    m_playbackOverlay->setMaximumHeight(200);
+    m_viewport->registerOverlay(m_playbackOverlay);
+    m_playbackOverlay->hide();
+    m_viewport->updateOverlayPositions();
+
+    // 面板关闭按钮 → 同步菜单状态
+    connect(m_playbackOverlay, &OverlayPanelWidget::closeRequested,
+            this, [this]() {
+        if (m_playbackOverlay) {
+            m_playbackOverlay->hide();
+            m_viewport->updateOverlayPositions();
+            if (m_playbackViewAction) m_playbackViewAction->setChecked(false);
+        }
+    });
+
+    // 采样步长变化 → 通知 PlaybackPanel 重建帧列表
+    connect(m_viewport, &ViewportWidget::sampleStrideChanged,
+            m_playbackPanel, &PlaybackPanel::onSampleStrideChanged);
+
     // 自动检测到闭环边时刷新视口
     connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopEdgeInserted,
             this, [this]() {
@@ -431,6 +454,17 @@ void MainWindow::setupMenus() {
         }
     });
 
+    // 播放轴面板显示切换
+    m_playbackViewAction = viewMenu->addAction(tr("Playback"));
+    m_playbackViewAction->setCheckable(true);
+    m_playbackViewAction->setChecked(false);
+    connect(m_playbackViewAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_playbackOverlay) {
+            m_playbackOverlay->setVisible(checked);
+            m_viewport->updateOverlayPositions();
+        }
+    });
+
     // 闭环边列表面板显示切换
     m_edgeListViewAction = viewMenu->addAction(tr("Loop Edges Panel"));
     m_edgeListViewAction->setCheckable(true);
@@ -523,6 +557,9 @@ void MainWindow::onCloseMap() {
 
     m_manager->closeMap();
     m_viewport->onGraphClosed();
+    if (m_playbackPanel) {
+        m_playbackPanel->onGraphClosed();
+    }
     m_viewport->setLoopHighlight(-1, {});  // 清除闭环高亮
     if (m_edgeListPanel) {
         m_edgeListPanel->clearList();
@@ -695,6 +732,18 @@ void MainWindow::onLoadingSucceeded() {
     m_viewport->setHighlightWindowHalf(m_submapWindowHalfSize);
     if (m_edgeListPanel) {
         m_edgeListPanel->refreshList();
+    }
+
+    // 向播放轴面板传递排序后的关键帧 ID 列表
+    auto graph = m_manager->sharedGraph();
+    if (graph && m_playbackPanel) {
+        std::vector<long> ids;
+        ids.reserve(graph->keyframes.size());
+        for (auto& [id, _] : graph->keyframes) {
+            ids.push_back(id);
+        }
+        std::sort(ids.begin(), ids.end());
+        m_playbackPanel->setKeyframeIds(ids);
     }
 }
 

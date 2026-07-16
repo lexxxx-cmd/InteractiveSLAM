@@ -58,6 +58,26 @@ public:
 
 public slots:
     /**
+     * @brief 程序化选中指定顶点（等价于 Ctrl+Click）
+     *
+     * 用于播放轴功能，效果与 Ctrl+Click 选中关键帧完全相同：
+     * 选中球体变橙色 + 邻域点云高亮 + 发射 vertexSelected 信号。
+     *
+     * @param vertexId 要选中的顶点 ID（-1 取消选择）
+     */
+    void selectVertex(long vertexId);
+
+    /**
+     * @brief 轻量级播放高亮（不重建球体几何体）
+     *
+     * 用于播放轴滑块拖动/自动播放时实时更新球体颜色和点云高亮。
+     * 只更新颜色数组，不触发完整的球体几何体重建。
+     *
+     * @param vertexId 顶点 ID（-1 取消高亮）
+     */
+    void highlightPlaybackVertex(long vertexId);
+
+    /**
      * @brief 图谱加载完成后的回调
      * @param graph 加载的图谱对象（共享指针）
      */
@@ -125,6 +145,14 @@ signals:
     void initialized();                                   ///< OSG 初始化完成信号
     void cloudDataReady(float dataZMin, float dataZMax);  ///< 点云数据范围就绪信号
     void vertexSelected(long vertexId);                   ///< 顶点选中信号
+
+    /**
+     * @brief 采样步长变化信号
+     *
+     * 当用户通过 RenderingPanel 调整 sampleStride 时发射，
+     * PlaybackPanel 监听此信号以重建采样后的播放帧列表。
+     */
+    void sampleStrideChanged(int stride);
 
     /**
      * @brief 右键上下文菜单请求信号

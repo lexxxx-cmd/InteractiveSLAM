@@ -19,6 +19,8 @@
 #include <osg/Vec3>
 #include <osg/Vec4>
 #include <cmath>
+#include <unordered_map>
+#include <cstdint>
 
 #include "visualizers/CoreShaders.h"
 
@@ -81,13 +83,24 @@ public:
      * 每个球体生成 (m_rings+1) * (m_sectors+1) 个顶点和
      * m_rings * m_sectors * 6 个索引（每个四边形两个三角形）。
      *
-     * @param center 球心位置（世界坐标）
-     * @param color  球体颜色（RGBA，默认深红色）
+     * 同时记录 vertexId 对应的颜色数组范围，供 updateSphereColor() 后续
+     * 增量更新颜色使用（避免全量几何体重建）。
+     *
+     * @param center   球心位置（世界坐标）
+     * @param color    球体颜色（RGBA，默认深红色）
+     * @param vertexId 对应的顶点 ID（用于后续增量颜色更新，默认 -1 不追踪）
      */
     void appendSphere(const osg::Vec3d& center,
-                      const osg::Vec4& color = osg::Vec4(0.2f, 0.0f, 0.0f, 1.0f)) {
+                      const osg::Vec4& color = osg::Vec4(0.2f, 0.0f, 0.0f, 1.0f),
+                      long vertexId = -1) {
         const float pi = 3.14159265f;
         unsigned int base = m_verts->size();  // 当前已有点数，作为索引基准
+
+        // 记录该球体在颜色数组中的范围（用于增量更新）
+        int vtxCount = (m_rings + 1) * (m_sectors + 1);
+        if (vertexId >= 0) {
+            m_sphereRanges[vertexId] = {static_cast<unsigned int>(m_colors->size()), vtxCount};
+        }
 
         // 生成 Y 轴朝上的球体顶点
         // r: 纬度环索引（0 到 m_rings，每环增加 phi）
@@ -128,6 +141,25 @@ public:
         }
     }
 
+    /**
+     * @brief 按顶点 ID 更新单个球体的颜色（不重建几何体）
+     *
+     * 从 m_sphereRanges 中查找该顶点对应的颜色数组范围，仅更新该范围的颜色值。
+     * 与 clear() + appendSphere() + finish() 的全量重建相比，此方法
+     * 只需更新 ~81 个颜色值 + 一次 dirty()，O(1) 复杂度，与总关键帧数无关。
+     *
+     * @param vertexId 顶点 ID（需已在 appendSphere 中添加过）
+     * @param newColor 新颜色（RGBA）
+     */
+    void updateSphereColor(long vertexId, const osg::Vec4& newColor) {
+        auto it = m_sphereRanges.find(vertexId);
+        if (it == m_sphereRanges.end()) return;
+        const auto& range = it->second;
+        for (int i = 0; i < range.vertexCount; ++i)
+            (*m_colors)[range.startIndex + i] = newColor;
+        m_colors->dirty();
+    }
+
     /** @brief 设置球体半径 */
     void setRadius(float r) { m_radius = r; }
 
@@ -156,9 +188,21 @@ public:
         m_verts->clear();
         m_colors->clear();
         m_indices->clear();
+        m_sphereRanges.clear();
     }
 
 private:
+    /**
+     * @brief 单个球体在颜色数组中的范围
+     *
+     * 用于 updateSphereColor() 定位需要更新的颜色值范围，
+     * 避免遍历所有球体。
+     */
+    struct SphereRange {
+        unsigned int startIndex;  ///< 在 m_colors 中的起始索引
+        int vertexCount;          ///< 该球体的顶点数（= (rings+1)*(sectors+1)）
+    };
+
     float m_radius;  ///< 球体半径
     int m_rings;     ///< 纬度环数
     int m_sectors;   ///< 经线段数
@@ -168,4 +212,8 @@ private:
     osg::ref_ptr<osg::Vec3Array> m_verts;          ///< 顶点数组
     osg::ref_ptr<osg::Vec4Array> m_colors;         ///< 颜色数组
     osg::ref_ptr<osg::DrawElementsUInt> m_indices; ///< 索引数组
+
+    /** @brief 顶点 ID → 颜色数组范围的映射（用于增量颜色更新）
+     *         由 appendSphere() 在添加球体时填充 */
+    std::unordered_map<long, SphereRange> m_sphereRanges;
 };

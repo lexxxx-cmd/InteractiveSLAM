@@ -248,6 +248,37 @@ public:
     long selectedVertex() const { return m_selectedVertexId; }
 
     /**
+     * @brief 轻量级播放高亮（不重建球体几何体）
+     *
+     * 用于播放轴功能，在滑块拖动或自动播放时调用。
+     * 仅更新两个球体的颜色数组（上一个恢复红色，当前变橙色）
+     * + 点云高亮，不触发完整的球体几何体重建。
+     *
+     * 与 setSelectedVertex() 独立管理，两者互不干扰。
+     *
+     * @param id 顶点 ID（设为 -1 取消高亮）
+     */
+    void highlightPlaybackVertex(long id) {
+        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);   // 红色 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);  // 橙色 —— 选中
+
+        // 恢复上一个播放高亮球体为默认红色
+        if (m_playbackPrevId >= 0 && m_sphereViz) {
+            m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
+        }
+        // 设置新球体为橙色
+        if (id >= 0 && m_sphereViz) {
+            m_sphereViz->updateSphereColor(id, selectedColor);
+        }
+        m_playbackPrevId = id;
+
+        // 点云高亮（已很高效，只更新颜色数组）
+        if (m_cloudViz) {
+            m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
+        }
+    }
+
+    /**
      * @brief 设置高亮窗口半宽
      *
      * 选中顶点时，其前后各 highlightWindowHalf 个时序邻居帧的
@@ -476,7 +507,7 @@ private:
             } else if (m_loopCandidateIds.count(id)) {
                 color = loopCandColor;
             }
-            m_sphereViz->appendSphere(center, color);
+            m_sphereViz->appendSphere(center, color, id);
         }
         m_sphereViz->finish();
     }
@@ -556,6 +587,7 @@ private:
     long m_loopSourceId = -1;              ///< 回环检测搜索源顶点 ID
     std::set<long> m_loopCandidateIds;     ///< 回环检测候选顶点 ID 集合
     long m_selectedVertexId = -1;          ///< 当前选中的顶点 ID（-1 表示无选中）
+    long m_playbackPrevId = -1;            ///< 播放轴上一个高亮的顶点 ID（用于恢复颜色）
     int  m_highlightWindowHalf = 1;        ///< 高亮窗口半宽（与 m_submapWindowHalfSize 一致）
 
     // —— 渲染采样 ——

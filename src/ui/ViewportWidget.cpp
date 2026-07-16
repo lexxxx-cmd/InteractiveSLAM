@@ -339,6 +339,7 @@ void ViewportWidget::setSampleStride(int stride) {
     m_flags.sample_stride = stride;
     m_sceneViz->setSampleStride(stride);
     m_osgWidget->update();
+    emit sampleStrideChanged(stride);
 }
 
 void ViewportWidget::setPointSize(int size) {
@@ -499,6 +500,15 @@ void ViewportWidget::onVertexPicked(long vertexId) {
     }
 
     emit vertexSelected(vertexId);
+}
+
+void ViewportWidget::selectVertex(long vertexId) {
+    onVertexPicked(vertexId);
+}
+
+void ViewportWidget::highlightPlaybackVertex(long vertexId) {
+    m_sceneViz->highlightPlaybackVertex(vertexId);
+    m_osgWidget->update();
 }
 
 // ---------------------------------------------------------------------------

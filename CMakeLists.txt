@@ -99,6 +99,7 @@ set(UI_SOURCES
     src/ui/LoopClosureDialog.cpp                          # 回环闭合对话框
     src/ui/AutoLoopClosurePanel.cpp                       # 自动回环面板
     src/ui/EdgeListPanel.cpp                              # 边列表面板
+    src/ui/PlaybackPanel.cpp                              # 播放轴面板
     src/ui/OverlayPanelWidget.cpp                         # 叠加面板控件
 )
 
