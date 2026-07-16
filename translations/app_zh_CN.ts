@@ -294,6 +294,11 @@
         <source>Loop Closure</source>
         <translation>回环闭合</translation>
     </message>
+<message>
+        <location filename="../src/ui/LoopClosureDialog.cpp" line="+79"/>
+        <source>fitness score:</source>
+        <translation>配准度：</translation>
+    </message>
     <message>
         <location line="+6"/>
         <location line="+8"/>
@@ -321,6 +326,10 @@
         <location line="+42"/>
         <source>fitness_score: —</source>
         <translation>配准评分：—</translation>
+    </message>
+    <message>
+        <source>fitness_score: %1</source>
+        <translation>配准评分：%1</translation>
     </message>
     <message>
         <location line="+5"/>
@@ -634,6 +643,10 @@
         <translation>颜色范围</translation>
     </message>
     <message>
+        <source>Playback</source>
+        <translation>播放轴</translation>
+    </message>
+    <message>
         <location line="-139"/>
         <source>Auto Loop Closure</source>
         <translation>自动回环闭合</translation>
@@ -877,6 +890,15 @@ N = 0 仅合并选中的关键帧本身。</translation>
         <source>Point Opacity:</source>
         <translation>点透明度：</translation>
     </message>
+<message>
+        <location line="+11"/>
+        <source>Sample Stride:</source>
+        <translation>帧采样步长：</translation>
+    </message>
+    <message>
+        <source>Render every Nth keyframe (1 = all)</source>
+        <translation>每 N 帧渲染一个关键帧（1 = 全部）</translation>
+    </message>
 </context>
 <context>
     <name>ZClippingPanel</name>
@@ -931,6 +953,84 @@ N = 0 仅合并选中的关键帧本身。</translation>
         <location line="+0"/>
         <source>Screen</source>
         <translation>屏幕</translation>
+    </message>
+</context>
+<context>
+    <name>PlaybackPanel</name>
+    <message>
+        <source>Skip to start</source>
+        <translation>跳转到开头</translation>
+    </message>
+    <message>
+        <source>Previous frame</source>
+        <translation>上一帧</translation>
+    </message>
+    <message>
+        <source>Play / Pause</source>
+        <translation>播放/暂停</translation>
+    </message>
+    <message>
+        <source>Next frame</source>
+        <translation>下一帧</translation>
+    </message>
+    <message>
+        <source>Skip to end</source>
+        <translation>跳转到末尾</translation>
+    </message>
+    <message>
+        <source>0 / 0</source>
+        <translation>0 / 0</translation>
+    </message>
+    <message>
+        <source>Current frame / Total frames</source>
+        <translation>当前帧 / 总帧数</translation>
+    </message>
+    <message>
+        <source>Playback speed multiplier</source>
+        <translation>播放速度倍率</translation>
+    </message>
+    <message>
+        <source>Drag to seek through keyframes</source>
+        <translation>拖动以浏览关键帧</translation>
+    </message>
+    <message>
+        <source>%1 / %2</source>
+        <translation>%1 / %2</translation>
+    </message>
+</context>
+<context>
+    <name>PointCloudFiltersPanel</name>
+    <message>
+        <source>Z-Clipping</source>
+        <translation>Z 轴裁剪</translation>
+    </message>
+    <message>
+        <source>Enable Z-Clipping</source>
+        <translation>启用 Z 轴裁剪</translation>
+    </message>
+    <message>
+        <source>Data Z: (no data)</source>
+        <translation>数据 Z 范围：（无数据）</translation>
+    </message>
+    <message>
+        <source>Min Z:</source>
+        <translation>最小 Z：</translation>
+    </message>
+    <message>
+        <source>Max Z:</source>
+        <translation>最大 Z：</translation>
+    </message>
+    <message>
+        <source>Elevation Color Range</source>
+        <translation>高程颜色范围</translation>
+    </message>
+    <message>
+        <source>Auto Color Range</source>
+        <translation>自动颜色范围</translation>
+    </message>
+    <message>
+        <source>Data Z: %1 .. %2</source>
+        <translation>数据 Z 范围：%1 .. %2</translation>
     </message>
 </context>
 </TS>

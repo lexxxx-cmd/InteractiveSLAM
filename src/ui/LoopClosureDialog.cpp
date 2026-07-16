@@ -398,7 +398,7 @@ void LoopClosureDialog::updateFitnessScore() {
     double score = hdl_graph_slam::InformationMatrixCalculator::calc_fitness_score(
         m_beginCloud, m_endCloud, relative, 1.0);
     score = std::min(1000000.0, score);
-    m_fitnessLabel->setText(QString("fitness_score: %1").arg(score, 0, 'f', 4));
+    m_fitnessLabel->setText(tr("fitness_score: %1").arg(score, 0, 'f', 4));
 }
 
 // ---------------------------------------------------------------------------
