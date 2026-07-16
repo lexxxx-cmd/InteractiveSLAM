@@ -486,8 +486,9 @@ private:
             if (!v) continue;
 
             // 采样过滤：仅渲染 id % stride == 0 的关键帧
-            // 但特殊球体（选中、回环源、回环候选）始终渲染，绕过采样
+            // 但特殊球体（选中、播放高亮、回环源、回环候选）始终渲染，绕过采样
             bool isSpecial = (id == m_selectedVertexId ||
+                              id == m_playbackPrevId ||
                               id == m_loopSourceId ||
                               m_loopCandidateIds.count(id));
             if (m_sampleStride > 1 && !isSpecial && (id % m_sampleStride != 0)) continue;
@@ -498,16 +499,23 @@ private:
             // 缓存球心位置（用于鼠标拾取）—— 仅采样后的球体
             m_sphereCenters.emplace_back(center, id);
 
-            // 根据状态选择颜色
+            // 根据状态选择颜色和半径
             osg::Vec4 color = defaultColor;
+            float customRadius = -1.0f;  // < 0 表示使用全局默认半径
             if (id == m_selectedVertexId) {
                 color = selectedColor;
+                customRadius = m_sphereRadius * 2.0f;
             } else if (id == m_loopSourceId) {
                 color = loopSourceColor;
             } else if (m_loopCandidateIds.count(id)) {
                 color = loopCandColor;
+            } else if (id == m_playbackPrevId) {
+                // 播放轴高亮球体同样放大 2 倍（仅在完整重建时生效）
+                // 轻量级 highlightPlaybackVertex 路径仅更新颜色，不做几何重建
+                color = selectedColor;
+                customRadius = m_sphereRadius * 2.0f;
             }
-            m_sphereViz->appendSphere(center, color, id);
+            m_sphereViz->appendSphere(center, color, id, customRadius);
         }
         m_sphereViz->finish();
     }

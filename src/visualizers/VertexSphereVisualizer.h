@@ -89,12 +89,15 @@ public:
      * @param center   球心位置（世界坐标）
      * @param color    球体颜色（RGBA，默认深红色）
      * @param vertexId 对应的顶点 ID（用于后续增量颜色更新，默认 -1 不追踪）
+     * @param radius   球体半径（< 0 时使用构造时设置的全局半径 m_radius）
      */
     void appendSphere(const osg::Vec3d& center,
                       const osg::Vec4& color = osg::Vec4(0.2f, 0.0f, 0.0f, 1.0f),
-                      long vertexId = -1) {
+                      long vertexId = -1,
+                      float radius = -1.0f) {
         const float pi = 3.14159265f;
         unsigned int base = m_verts->size();  // 当前已有点数，作为索引基准
+        float sphereR = (radius >= 0.0f) ? radius : m_radius;  // 使用自定义半径或全局半径
 
         // 记录该球体在颜色数组中的范围（用于增量更新）
         int vtxCount = (m_rings + 1) * (m_sectors + 1);
@@ -117,9 +120,9 @@ public:
 
                 // 计算顶点位置：球心 + 半径 * 方向向量（Y-up）
                 m_verts->push_back(osg::Vec3(
-                    center.x() + m_radius * sinPhi * cosT,
-                    center.y() + m_radius * cosPhi,
-                    center.z() + m_radius * sinPhi * sinT));
+                    center.x() + sphereR * sinPhi * cosT,
+                    center.y() + sphereR * cosPhi,
+                    center.z() + sphereR * sinPhi * sinT));
                 m_colors->push_back(color);
             }
         }
