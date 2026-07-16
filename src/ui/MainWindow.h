@@ -91,7 +91,7 @@ private:
 
     long m_loopBeginVertexId = -1;   ///< 手动闭环起点顶点 ID，-1 表示未选择
     QAction* m_orthoViewAction = nullptr;  ///< 正交视图切换动作
-    int m_submapWindowHalfSize = 1;  ///< 闭环匹配时合并的相邻关键帧数（±N 帧）
+    int m_submapWindowHalfSize = 7;  ///< 闭环匹配时合并的相邻关键帧数（±N 帧）
     QAction* m_optimizeAction = nullptr;  ///< 图优化动作（用于启用/禁用状态同步）
     bool m_optimizePending = false;  ///< 优化是否正在进行中（防止重复触发）
 };

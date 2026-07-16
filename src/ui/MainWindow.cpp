@@ -556,11 +556,13 @@ void MainWindow::onSavePoseGraph() {
 }
 
 /**
- * @brief 保存地图（含 LVBA 格式输出）
+ * @brief 保存地图（含 LVBA 格式输出 + 全局全量点云地图）
  *
  * 调用 graph->dump() 保存标准格式地图数据，
- * 并尝试调用 graph->saveLVBA() 额外输出 LVBA 格式。
- * LVBA 转换失败仅记录日志，不影响主保存操作。
+ * 并依次尝试额外导出：
+ *   - LVBA 格式（saveLVBA）
+ *   - 全局全量拼接点云地图（save_pointcloud → accumulated_cloud.pcd）
+ * 额外格式导出失败仅记录日志，不影响主保存操作。
  */
 void MainWindow::onSaveMap() {
     if (!m_manager->isLoaded()) {
@@ -583,6 +585,18 @@ void MainWindow::onSaveMap() {
             graph->saveLVBA(dir.toStdString(), *m_manager->progress());
         } catch (const std::exception& e) {
             std::cerr << "[MainWindow] LVBA conversion failed: "
+                      << e.what() << std::endl;
+        }
+
+        // 尽力尝试保存全局全量拼接点云地图 —— 失败仅记录日志
+        try {
+            std::string cloudPath = dir.toStdString() + "/accumulated_cloud.pcd";
+            if (!graph->save_pointcloud(cloudPath, *m_manager->progress())) {
+                std::cerr << "[MainWindow] save_pointcloud returned false"
+                          << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[MainWindow] save_pointcloud failed: "
                       << e.what() << std::endl;
         }
 
