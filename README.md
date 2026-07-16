@@ -61,9 +61,7 @@ cd InteractiveSLAM
 mkdir build && cd build
 
 # 3. 配置（指定 Qt6 路径和 vcpkg toolchain）
-cmake .. -G "Visual Studio 17 2022" -A x64 \
-    -DCMAKE_PREFIX_PATH="E:/ToolsApp/Qt/6.9.1/msvc2022_64" \
-    -DCMAKE_TOOLCHAIN_FILE="E:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+cmake .. -DCMAKE_TOOLCHAIN_FILE="E:/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
 # 4. 构建（Release 模式）
 cmake --build . --config Release

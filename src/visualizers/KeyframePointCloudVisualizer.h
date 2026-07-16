@@ -184,6 +184,7 @@ public:
     void recolorHighlight(const std::set<long>& highlightIds) {
         if (!m_colors || m_cloudRanges.empty()) return;
 
+        const osg::Vec4 white(1.0f, 1.0f, 1.0f, 1.0f);
         // 遍历每个关键帧的顶点范围
         for (const auto& range : m_cloudRanges) {
             float alpha = highlightIds.count(range.vertexId)
@@ -192,8 +193,12 @@ public:
             for (size_t i = range.startVertex;
                  i < range.startVertex + range.vertexCount; ++i) {
                 float wz = static_cast<float>(m_allWorldPoints[i].z());
-                (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
-                (*m_colors)[i].a() = alpha;
+                if (alpha == m_opacity) (*m_colors)[i] = white;
+                else {
+                    (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
+                    (*m_colors)[i].a() = alpha;
+                }
+                
             }
         }
         m_colors->dirty();
