@@ -71,11 +71,9 @@ public:
         m_zClipUniform  = ss->getUniform("z_clipping");
         m_zRangeUniform = ss->getUniform("z_range");
 
-        // 透明度控制（使用常量 alpha 混合）
-        m_blendColor = new osg::BlendColor(osg::Vec4(1, 1, 1, m_opacity));
-        ss->setAttributeAndModes(m_blendColor, osg::StateAttribute::ON);
+        // 透明度控制（使用 per-vertex alpha，支持逐帧差异化透明度）
         ss->setAttributeAndModes(
-            new osg::BlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA),
+            new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
             osg::StateAttribute::ON);
 
         m_geode = new osg::Geode;
@@ -151,14 +149,16 @@ public:
         m_vertices->reserve(m_allWorldPoints.size());
         m_colors->reserve(m_allWorldPoints.size());
 
-        // 构建顶点并应用 Turbo 颜色映射
+        // 构建顶点并应用 Turbo 颜色映射（含透明度）
         for (const auto& wp : m_allWorldPoints) {
             m_vertices->push_back(osg::Vec3(
                 static_cast<float>(wp.x()),
                 static_cast<float>(wp.y()),
                 static_cast<float>(wp.z())));
-            m_colors->push_back(
-                turboColor(static_cast<float>(wp.z()), m_colorZMin, m_colorZMax));
+            osg::Vec4 color = turboColor(
+                static_cast<float>(wp.z()), m_colorZMin, m_colorZMax);
+            color.a() = m_opacity;
+            m_colors->push_back(color);
         }
 
         // 标记数据为脏，使 OSG 重新上传到 GPU
@@ -172,32 +172,28 @@ public:
     }
 
     /**
-     * @brief 对指定关键帧集合的点云重新着色（高亮为白色）
+     * @brief 对指定关键帧集合的点云差异化透明度
      *
-     * 在 finish() 之后调用。将指定顶点 ID 对应的点云设置为白色，
-     * 其他点云恢复为 Turbo 高程颜色映射。
+     * 在 finish() 之后调用。选中/高亮帧保持当前透明度 m_opacity，
+     * 非选中帧透明度变为 m_opacity × 0.5，形成视觉层次。
+     * 传入空集合可恢复所有点云为完整透明度。
      *
-     * @param highlightIds 需要高亮为白色的顶点 ID 集合。
-     *                     传入空集合可恢复所有点云为 Turbo 着色。
+     * @param highlightIds 需要保持完全可见的顶点 ID 集合。
+     *                     传入空集合可恢复所有点云为 m_opacity。
      */
     void recolorHighlight(const std::set<long>& highlightIds) {
         if (!m_colors || m_cloudRanges.empty()) return;
 
-        const osg::Vec4 white(1.0f, 1.0f, 1.0f, 1.0f);
-
         // 遍历每个关键帧的顶点范围
         for (const auto& range : m_cloudRanges) {
-            if (highlightIds.count(range.vertexId)) {
-                // 高亮帧：将对应范围的点设置为白色
-                for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
-                    (*m_colors)[i] = white;
-                }
-            } else {
-                // 非高亮帧：恢复为 Turbo 高程颜色
-                for (size_t i = range.startVertex; i < range.startVertex + range.vertexCount; ++i) {
-                    float wz = static_cast<float>(m_allWorldPoints[i].z());
-                    (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
-                }
+            float alpha = highlightIds.count(range.vertexId)
+                              ? m_opacity          // 选中帧：保持当前透明度
+                              : m_opacity * 0.5f;  // 非选中帧：半透明度
+            for (size_t i = range.startVertex;
+                 i < range.startVertex + range.vertexCount; ++i) {
+                float wz = static_cast<float>(m_allWorldPoints[i].z());
+                (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
+                (*m_colors)[i].a() = alpha;
             }
         }
         m_colors->dirty();
@@ -227,8 +223,8 @@ public:
     /** @brief 设置点云透明度 */
     void setOpacity(float opacity) {
         m_opacity = opacity;
-        if (m_blendColor)
-            m_blendColor->setConstantColor(osg::Vec4(1, 1, 1, opacity));
+        // 透明度变化需更新所有顶点的 alpha 通道
+        recolorAll();
     }
 
     // ========================================================================
@@ -322,6 +318,7 @@ private:
         for (size_t i = 0; i < m_allWorldPoints.size(); ++i) {
             float wz = static_cast<float>(m_allWorldPoints[i].z());
             (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
+            (*m_colors)[i].a() = m_opacity;
         }
         m_colors->dirty();
     }
@@ -331,7 +328,7 @@ private:
     osg::ref_ptr<osg::Geometry>  m_geom;          ///< 点云几何体
     osg::ref_ptr<osg::Vec3Array> m_vertices;      ///< 顶点数组
     osg::ref_ptr<osg::Vec4Array> m_colors;        ///< 颜色数组
-    osg::ref_ptr<osg::BlendColor> m_blendColor;   ///< 混合颜色（控制透明度）
+    // BlendColor 已移除，透明度通过 per-vertex alpha 控制
     osg::ref_ptr<osg::Uniform>    m_pointSizeUniform; ///< 点大小 uniform
     osg::ref_ptr<osg::Uniform>    m_zClipUniform;     ///< Z 轴裁剪开关 uniform
     osg::ref_ptr<osg::Uniform>    m_zRangeUniform;    ///< Z 轴裁剪范围 uniform
