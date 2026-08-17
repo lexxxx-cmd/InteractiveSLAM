@@ -18,6 +18,7 @@
 
 #include <QWidget>
 #include <QTimer>
+#include <QFutureWatcher>
 #include <memory>
 #include <set>
 #include <vector>
@@ -26,6 +27,7 @@
 #include <osgViewer/Viewer>
 
 #include "visualizers/GraphSceneVisualizer.h"
+#include "visualizers/PointCloudBuilder.h"
 #include "ui/DrawFlags.h"
 
 class osgQOpenGLWidget;
@@ -90,8 +92,9 @@ public slots:
     void refreshScene();
 
     /**
-     * @brief 重建点云
-     * @note 这是重量级操作，仅在优化完成后调用
+     * @brief 重建点云（异步）
+     * @note 计算密集的 CPU 变换/降采样在后台线程执行，完成后在主线程
+     *       换入场景，不阻塞 UI。多次调用会自动合并为一次构建。
      */
     void rebuildPointClouds();
 
@@ -195,8 +198,12 @@ private slots:
     void initOsg();          ///< OSG 初始化（osgQOpenGLWidget 准备就绪后调用）
     void updateScene();      ///< 定时场景更新（姿态/边刷新 + FPS 统计）
     void onVertexPicked(long vertexId);  ///< 顶点选中回调（Ctrl+Click）
+    void onCloudBuildFinished();         ///< 后台点云构建完成回调（主线程）
 
 private:
+    // === 异步点云构建调度 ===
+    void requestCloudBuild();   ///< 请求一次点云构建（运行中则合并为一次）
+    void startCloudBuild();     ///< 启动后台构建任务
     osgQOpenGLWidget* m_osgWidget = nullptr;                      ///< OSG 嵌入 Qt 的 OpenGL 部件
     std::unique_ptr<GraphSceneVisualizer> m_sceneViz;             ///< 场景可视化器
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;    ///< 当前加载的图谱
@@ -217,4 +224,11 @@ private:
     int m_frameCount = 0;    ///< 帧计数器
     float m_fpsAccum = 0.0f;  ///< FPS 累加器
     float m_fps = 0.0f;       ///< 当前 FPS 值
+
+    // 异步点云构建状态
+    QFutureWatcher<hdl_graph_slam::PointCloudBuildResult>* m_cloudBuildWatcher = nullptr; ///< 后台构建监视器
+    int m_cloudBuildSeq = 0;         ///< 构建版本号（图变化时递增，使在途结果作废）
+    int m_cloudBuildActiveSeq = -1;  ///< 当前在途构建对应的版本号
+    bool m_cloudBuildRunning = false; ///< 是否有构建任务正在运行
+    bool m_cloudBuildPending = false; ///< 构建期间是否收到新的构建请求（合并用）
 };

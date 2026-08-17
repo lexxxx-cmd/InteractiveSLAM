@@ -17,6 +17,7 @@
 #include <QVBoxLayout>
 #include <QColor>
 #include <QResizeEvent>
+#include <QtConcurrent/QtConcurrent>
 #include <chrono>
 
 #include <osg/Notify>
@@ -26,6 +27,7 @@
 #include "osgQOpenGL/OSGRenderer.h"
 #include "backend/graph_manager.hpp"
 #include "visualizers/SpherePickingHandler.h"
+#include "visualizers/PointCloudBuilder.h"
 #include "ui/OverlayPanelWidget.h"
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,12 @@ ViewportWidget::ViewportWidget(QWidget* parent)
     m_updateTimer = new QTimer(this);
     connect(m_updateTimer, &QTimer::timeout, this, &ViewportWidget::updateScene);
     m_updateTimer->start(16);
+
+    // 后台点云构建监视器：构建完成在主线程换入场景
+    m_cloudBuildWatcher =
+        new QFutureWatcher<hdl_graph_slam::PointCloudBuildResult>(this);
+    connect(m_cloudBuildWatcher, &QFutureWatcher<hdl_graph_slam::PointCloudBuildResult>::finished,
+            this, &ViewportWidget::onCloudBuildFinished);
 }
 
 ViewportWidget::~ViewportWidget() = default;
@@ -262,19 +270,23 @@ void ViewportWidget::initOsg() {
 /**
  * @brief 图谱加载完成
  *
- * 将图谱数据传递给场景可视化器构建场景，应用当前设置，
- * 发射 cloudDataReady 信号供 UI 面板初始化，更新投影并重置摄像机。
+ * 将图谱数据传递给场景可视化器构建场景（球体/边线同步，
+ * 点云后台异步构建），应用当前设置，更新投影并重置摄像机。
+ *
+ * 点云构建完成后（onCloudBuildFinished）发射 cloudDataReady 供 UI
+ * 面板初始化，并刷新渲染统计。
  */
 void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
     m_graph = graph;
+    ++m_cloudBuildSeq;  // 使任何在途构建结果作废
     m_sceneViz->buildFromGraph(graph, m_flags);
 
     // 应用当前设置
     m_sceneViz->setPointOpacity(m_flags.draw_keyframe_vertices ? 1.0f : 0.0f);
     m_osgWidget->update();
 
-    // 发射数据范围信号供 UI 面板初始化
-    emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
+    // 后台异步构建点云（完成后发射 cloudDataReady / pointCloudStatsChanged）
+    rebuildPointClouds();
 
     // 为新加载的场景更新正交投影，然后让摄像机定格到整个场景
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
@@ -287,10 +299,11 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
 /**
  * @brief 图谱关闭
  *
- * 重置共享指针，清空场景可视化器。
+ * 重置共享指针，清空场景可视化器，并使在途点云构建结果作废。
  */
 void ViewportWidget::onGraphClosed() {
     m_graph.reset();
+    ++m_cloudBuildSeq;  // 使在途构建结果作废
     m_sceneViz->clear();
     m_osgWidget->update();
 }
@@ -355,10 +368,10 @@ void ViewportWidget::setPointOpacity(int opacity) {
 void ViewportWidget::setPointBudget(int maxPoints) {
     m_flags.point_budget = maxPoints;
     m_sceneViz->setPointBudget(maxPoints);
-    emit pointCloudStatsChanged(
-        static_cast<qint64>(m_sceneViz->renderPointCount()),
-        static_cast<qint64>(m_sceneViz->totalPointCount()));
-    m_osgWidget->update();
+    // 已有点云数据时触发后台异步重建（降采样按新预算生效）
+    if (m_graph && m_sceneViz->hasPointCloud()) {
+        requestCloudBuild();
+    }
 }
 
 void ViewportWidget::setZClipping(bool enabled) {
@@ -426,14 +439,74 @@ void ViewportWidget::refreshScene() {
     m_osgWidget->update();
 }
 
-void ViewportWidget::rebuildPointClouds() {
+// ---------------------------------------------------------------------------
+// 异步点云构建调度
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 请求重建点云（异步，自动合并）
+ *
+ * 若已有构建任务在运行，仅标记 pending，当前任务完成后自动再启动一次，
+ * 避免多次连续触发（自动回环插入边、图优化等）导致并行构建竞争。
+ */
+void ViewportWidget::requestCloudBuild() {
     if (!m_graph) return;
-    m_sceneViz->rebuildPointClouds(m_graph);
-    emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
-    emit pointCloudStatsChanged(
-        static_cast<qint64>(m_sceneViz->renderPointCount()),
-        static_cast<qint64>(m_sceneViz->totalPointCount()));
-    m_osgWidget->update();
+    m_cloudBuildPending = true;
+    if (m_cloudBuildRunning) return;  // 已有任务在跑，完成后再处理
+    startCloudBuild();
+}
+
+/**
+ * @brief 启动后台点云构建任务
+ *
+ * 计算密集部分（位姿快照、CPU 变换、体素降采样、顶点数组构建）
+ * 在 QtConcurrent 工作线程执行，不阻塞 UI。完成后由
+ * onCloudBuildFinished() 在主线程换入场景。
+ */
+void ViewportWidget::startCloudBuild() {
+    m_cloudBuildRunning = true;
+    m_cloudBuildPending = false;
+    m_cloudBuildActiveSeq = m_cloudBuildSeq;
+
+    auto graph = m_graph;
+    int budget = m_sceneViz->pointBudget();
+    m_cloudBuildWatcher->setFuture(QtConcurrent::run([graph, budget]() {
+        return hdl_graph_slam::PointCloudBuilder::build(graph, budget);
+    }));
+}
+
+/**
+ * @brief 后台点云构建完成（主线程回调）
+ *
+ * 若构建期间图已更换/关闭（版本号不匹配）则丢弃结果；
+ * 否则换入场景、发射数据范围与渲染统计信号并刷新视图。
+ */
+void ViewportWidget::onCloudBuildFinished() {
+    m_cloudBuildRunning = false;
+
+    if (m_cloudBuildActiveSeq == m_cloudBuildSeq) {
+        auto result = m_cloudBuildWatcher->result();
+        m_sceneViz->commitPointCloudBuild(std::move(result));
+
+        // 发射数据范围信号供 UI 面板初始化/更新
+        emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
+        emit pointCloudStatsChanged(
+            static_cast<qint64>(m_sceneViz->renderPointCount()),
+            static_cast<qint64>(m_sceneViz->totalPointCount()));
+        m_osgWidget->update();
+    }
+
+    // 构建期间有新请求（预算变化/优化完成等）→ 用最新状态再构建一次
+    if (m_cloudBuildPending) {
+        startCloudBuild();
+    }
+}
+
+/**
+ * @brief 重建点云（异步入口，保持历史调用点兼容）
+ */
+void ViewportWidget::rebuildPointClouds() {
+    requestCloudBuild();
 }
 
 // ---------------------------------------------------------------------------

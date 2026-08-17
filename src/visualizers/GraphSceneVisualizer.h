@@ -37,6 +37,7 @@
 #include "visualizers/CoordinateAxesVisualizer.h"
 #include "visualizers/GroundGridVisualizer.h"
 #include "visualizers/VertexSphereVisualizer.h"
+#include "visualizers/PointCloudBuilder.h"
 #include "visualizers/KeyframePointCloudVisualizer.h"
 #include "visualizers/EdgeLineVisualizer.h"
 
@@ -54,7 +55,8 @@
  *
  * 性能考虑：
  *   - updatePoses() 每帧调用，仅更新球体和边位置
- *   - rebuildPointClouds() 计算密集，仅在优化完成后调用
+ *   - 点云由 PointCloudBuilder 在后台线程构建，commitPointCloudBuild()
+ *     换入场景，不阻塞主线程
  */
 class GraphSceneVisualizer {
 public:
@@ -121,15 +123,14 @@ public:
     /**
      * @brief 设置点云渲染点预算（点数上限）
      *
-     * 当合并后的全量点数超过预算时，点云可视化器自动体素降采样，
-     * 使上传到 GPU 的渲染点数收敛到预算以内。全量点数据保留在内存，
-     * 用于高亮、颜色统计等。预算 ≤ 0 表示全量渲染。
+     * 仅记录预算；实际降采样由 PointCloudBuilder 在后台构建时应用
+     * （ViewportWidget 检测到预算变化后触发异步重建）。
+     * 预算 ≤ 0 表示全量渲染。
      *
      * @param maxPoints 渲染点数上限（≤0 = 全量）
      */
     void setPointBudget(int maxPoints) {
         m_pointBudget = maxPoints;
-        if (m_cloudViz) m_cloudViz->setPointBudget(maxPoints);
     }
 
     /** @brief 查询当前点预算（≤0 表示全量） */
@@ -328,7 +329,8 @@ public:
      * 构建顺序：
      *   1. 清除旧的场景数据
      *   2. 重建顶点球体（世界坐标系）
-     *   3. 重建合并点云（世界坐标系）
+     *   3. 点云 —— 由 ViewportWidget 通过 PointCloudBuilder 在后台线程
+     *      构建，完成后经 commitPointCloudBuild() 换入场景（本方法不阻塞）
      *   4. 重建边线段（世界坐标系，按来源着色）
      *
      * @param graph 交互式图数据共享指针
@@ -346,8 +348,8 @@ public:
         rebuildSpheres(graph);
         m_sphereGroup->addChild(m_sphereViz->getNode());
 
-        // 2. 点云 —— 世界坐标系，所有关键帧点云合并
-        rebuildPointClouds(graph);
+        // 2. 点云 —— 后台异步构建（见 ViewportWidget::rebuildPointClouds），
+        //    完成后 commitPointCloudBuild() 换入，此处不阻塞主线程
 
         // 3. 边线 —— 世界坐标系线段，按 EdgeSource 着色
         m_edgeLineViz = std::make_unique<EdgeLineVisualizer>();
@@ -360,8 +362,8 @@ public:
     /**
      * @brief 每帧更新球体和边线位置（不更新点云）
      *
-     * 点云重建计算密集，需要在 CPU 上进行点变换和 GPU 上传，
-     * 因此仅在优化完成后通过 rebuildPointClouds() 显式触发。
+     * 点云重建计算密集，由 PointCloudBuilder 在后台线程构建，
+     * 完成后通过 commitPointCloudBuild() 换入（见 ViewportWidget）。
      *
      * @param graph 最新的图数据共享指针
      */
@@ -400,25 +402,21 @@ public:
     }
 
     /**
-     * @brief 重建合并后的世界坐标系点云
+     * @brief 换入后台构建完成的点云数据（主线程调用）
      *
-     * 这是一个计算密集型操作（CPU 点变换 + GPU 上传所有点），
-     * 仅在图优化完成后调用，不应每帧执行。
+     * 由 ViewportWidget 在 PointCloudBuilder 后台构建完成后调用。
+     * 点云数据经 KeyframePointCloudVisualizer::commitBuild() 以 swap
+     * 方式换入（旧几何体持续渲染到新数据就绪，避免闪烁/撕裂），
+     * 然后恢复用户当前的 Z 轴裁剪、颜色范围设置与选中/播放高亮。
      *
-     * 此方法会在清除前保存用户的 Z 轴裁剪和颜色范围设置，
-     * 在重建完成后恢复。
-     *
-     * @param graph 交互式图数据共享指针
+     * @param result 后台构建结果（右值，内容被交换移入）
      */
-    void rebuildPointClouds(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
-        if (!graph) return;
-
+    void commitPointCloudBuild(hdl_graph_slam::PointCloudBuildResult&& result) {
         // 首次调用时创建点云可视化器
         if (!m_cloudViz) {
             m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
             m_cloudViz->setPointSize(m_pointSize);
             m_cloudViz->setOpacity(m_pointOpacity);
-            m_cloudViz->setPointBudget(m_pointBudget);
             m_cloudGroup->addChild(m_cloudViz->getNode());
         }
 
@@ -429,28 +427,38 @@ public:
         bool  savedAutoColor = m_cloudViz->isAutoColorRange();
         float savedColorMin  = m_cloudViz->getColorZMin();
         float savedColorMax  = m_cloudViz->getColorZMax();
+        bool  firstBuild     = !m_cloudViz->isClipRangeInitialized();
 
-        // 清除旧点云并重新添加所有关键帧的点云
-        m_cloudViz->clear();
-        for (auto& [id, kf] : graph->keyframes) {
-            auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
-            if (!v || !kf->cloud || kf->cloud->empty()) continue;
-            m_cloudViz->appendCloud(kf->cloud, v->estimate(), id);
-        }
-        m_cloudViz->finish();
+        // 换入新数据
+        m_cloudViz->commitBuild(std::move(result));
 
         // 恢复用户的 Z 轴裁剪和颜色范围设置
         m_cloudViz->setZClipping(savedZClip);
-        m_cloudViz->setZClipRange(savedClipMin, savedClipMax);
-        if (!savedAutoColor) {
+        // 首次构建时裁剪范围已由 commitBuild 初始化为数据范围，无需覆盖
+        if (!firstBuild) {
+            m_cloudViz->setZClipRange(savedClipMin, savedClipMax);
+        }
+        if (savedAutoColor) {
+            m_cloudViz->setAutoColorRange(true);
+        } else {
             m_cloudViz->setColorZRange(savedColorMin, savedColorMax);
         }
 
-        // 如果之前有选中的顶点，重新应用高亮
+        // 恢复选中/播放高亮；无高亮状态时清除高亮并恢复默认着色
         if (m_selectedVertexId >= 0) {
             m_cloudViz->recolorHighlight(getTemporalNeighbors(m_selectedVertexId));
+        } else if (m_playbackPrevId >= 0) {
+            m_cloudViz->recolorHighlight(getTemporalNeighbors(m_playbackPrevId));
+        } else {
+            m_cloudViz->clearHighlight();
         }
     }
+
+    /** @brief 是否已有点云可视化器（是否有已构建/构建中的点云） */
+    bool hasPointCloud() const { return m_cloudViz != nullptr; }
+
+    /** @brief 最近一次构建场景所用的图（供后台点云构建使用） */
+    std::shared_ptr<hdl_graph_slam::InteractiveGraph> lastGraph() const { return m_lastGraph; }
 
     /** @brief 清除整个场景 */
     void clear() {
