@@ -352,6 +352,15 @@ void ViewportWidget::setPointOpacity(int opacity) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setPointBudget(int maxPoints) {
+    m_flags.point_budget = maxPoints;
+    m_sceneViz->setPointBudget(maxPoints);
+    emit pointCloudStatsChanged(
+        static_cast<qint64>(m_sceneViz->renderPointCount()),
+        static_cast<qint64>(m_sceneViz->totalPointCount()));
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setZClipping(bool enabled) {
     m_sceneViz->setZClipping(enabled);
     m_osgWidget->update();
@@ -421,6 +430,9 @@ void ViewportWidget::rebuildPointClouds() {
     if (!m_graph) return;
     m_sceneViz->rebuildPointClouds(m_graph);
     emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
+    emit pointCloudStatsChanged(
+        static_cast<qint64>(m_sceneViz->renderPointCount()),
+        static_cast<qint64>(m_sceneViz->totalPointCount()));
     m_osgWidget->update();
 }
 

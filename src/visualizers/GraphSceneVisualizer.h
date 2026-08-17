@@ -118,6 +118,33 @@ public:
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
     }
 
+    /**
+     * @brief 设置点云渲染点预算（点数上限）
+     *
+     * 当合并后的全量点数超过预算时，点云可视化器自动体素降采样，
+     * 使上传到 GPU 的渲染点数收敛到预算以内。全量点数据保留在内存，
+     * 用于高亮、颜色统计等。预算 ≤ 0 表示全量渲染。
+     *
+     * @param maxPoints 渲染点数上限（≤0 = 全量）
+     */
+    void setPointBudget(int maxPoints) {
+        m_pointBudget = maxPoints;
+        if (m_cloudViz) m_cloudViz->setPointBudget(maxPoints);
+    }
+
+    /** @brief 查询当前点预算（≤0 表示全量） */
+    int pointBudget() const { return m_pointBudget; }
+
+    /** @brief 当前实际渲染的点数（降采样后） */
+    int renderPointCount() const {
+        return m_cloudViz ? m_cloudViz->renderPointCount() : 0;
+    }
+
+    /** @brief 全量点云总点数（降采样前） */
+    size_t totalPointCount() const {
+        return m_cloudViz ? m_cloudViz->totalPointCount() : 0;
+    }
+
     // ========================================================================
     // Z 轴裁剪控制
     // ========================================================================
@@ -391,6 +418,7 @@ public:
             m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
             m_cloudViz->setPointSize(m_pointSize);
             m_cloudViz->setOpacity(m_pointOpacity);
+            m_cloudViz->setPointBudget(m_pointBudget);
             m_cloudGroup->addChild(m_cloudViz->getNode());
         }
 
@@ -609,4 +637,5 @@ private:
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
     float m_pointSize     = 3.0f; ///< 点云点大小（像素）
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
+    int   m_pointBudget   = 5000000; ///< 点云渲染点预算（≤0=全量，默认 500 万）
 };

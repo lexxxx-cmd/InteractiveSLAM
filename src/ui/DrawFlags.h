@@ -25,6 +25,7 @@ struct DrawFlags {
     bool draw_se3_edges        = true;   ///< 是否绘制 SE3 约束边
     bool z_clipping            = false;  ///< 是否启用 Z 轴裁剪
     int  sample_stride         = 1;     ///< 渲染采样步长（1=全部渲染, N=每N帧渲染1个球体）
+    int  point_budget          = 5000000; ///< 点云渲染点预算（≤0=全量，超过自动体素降采样）
 };
 
 }  // namespace hdl_graph_slam

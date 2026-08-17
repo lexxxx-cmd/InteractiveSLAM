@@ -68,6 +68,19 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_sampleStrideLabel->setText(QString::number(val));
         m_viewport->setSampleStride(val);
     });
+
+    // 点预算下拉框：点数上限档位（-1 = 全量），超过上限自动体素降采样
+    connect(m_pointBudgetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+        m_viewport->setPointBudget(m_pointBudgetCombo->currentData().toInt());
+    });
+
+    // 渲染统计显示：已渲染点数 / 全量点数
+    connect(m_viewport, &ViewportWidget::pointCloudStatsChanged,
+            this, [this](qint64 rendered, qint64 total) {
+        m_pointBudgetCountLabel->setText(
+            tr("Rendered: %1 / %2 points").arg(rendered).arg(total));
+    });
 }
 
 /**
@@ -140,6 +153,24 @@ void RenderingPanel::setupUi() {
     opacityRow->addWidget(m_pointOpacitySlider);
     opacityRow->addWidget(m_pointOpacityLabel);
     renderLayout->addLayout(opacityRow);
+
+    // 点预算下拉框（点数上限档位，默认 500 万）
+    // 全量点数超过预算时，点云自动体素降采样，使渲染点数收敛到预算以内
+    renderLayout->addWidget(new QLabel(tr("Point Budget:")));
+    m_pointBudgetCombo = new QComboBox;
+    m_pointBudgetCombo->addItem(tr("Full (all points)"), -1);
+    m_pointBudgetCombo->addItem(tr("10,000,000"), 10000000);
+    m_pointBudgetCombo->addItem(tr("5,000,000"), 5000000);
+    m_pointBudgetCombo->addItem(tr("2,000,000"), 2000000);
+    m_pointBudgetCombo->addItem(tr("1,000,000"), 1000000);
+    m_pointBudgetCombo->addItem(tr("500,000"), 500000);
+    m_pointBudgetCombo->setToolTip(
+        tr("Cap rendered points. Larger maps are voxel-downsampled to fit the budget."));
+    int budgetIdx = m_pointBudgetCombo->findData(5000000);
+    m_pointBudgetCombo->setCurrentIndex(budgetIdx >= 0 ? budgetIdx : 0);
+    m_pointBudgetCountLabel = new QLabel(tr("Rendered: -"));
+    renderLayout->addWidget(m_pointBudgetCombo);
+    renderLayout->addWidget(m_pointBudgetCountLabel);
 
     // 采样步长 SpinBox（1-100，默认 1）
     renderLayout->addWidget(new QLabel(tr("Sample Stride:")));

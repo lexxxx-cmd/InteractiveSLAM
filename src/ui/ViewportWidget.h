@@ -105,6 +105,7 @@ public slots:
     void setSampleStride(int stride);        ///< 设置渲染采样步长
     void setPointSize(int size);             ///< 设置点云点大小
     void setPointOpacity(int opacity);       ///< 设置点云不透明度（0-100）
+    void setPointBudget(int maxPoints);      ///< 设置点云渲染点预算（≤0=全量）
     void setBackgroundColor(const QColor& color);  ///< 设置背景色
     void setHiddenEdges(const std::set<long>& ids);     ///< 设置隐藏边集合
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);  ///< 闭环高亮
@@ -145,6 +146,17 @@ signals:
     void initialized();                                   ///< OSG 初始化完成信号
     void cloudDataReady(float dataZMin, float dataZMax);  ///< 点云数据范围就绪信号
     void vertexSelected(long vertexId);                   ///< 顶点选中信号
+
+    /**
+     * @brief 点云渲染统计信号（降采样后）
+     *
+     * 点云重建完成或点预算变化时发射，供渲染面板显示
+     * "已渲染点数 / 全量点数"。
+     *
+     * @param renderedPoints 实际渲染到 GPU 的点数
+     * @param totalPoints    全量点云总点数（降采样前）
+     */
+    void pointCloudStatsChanged(qint64 renderedPoints, qint64 totalPoints);
 
     /**
      * @brief 采样步长变化信号

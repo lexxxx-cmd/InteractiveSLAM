@@ -16,6 +16,7 @@
 #include <QCheckBox>
 #include <QSlider>
 #include <QSpinBox>
+#include <QComboBox>
 
 class ViewportWidget;
 
@@ -61,4 +62,7 @@ private:
 
     QSpinBox* m_sampleStrideSpin;   ///< 采样步长输入框
     QLabel*   m_sampleStrideLabel;  ///< 采样步长标签
+
+    QComboBox* m_pointBudgetCombo;      ///< 点预算下拉框（点数上限档位）
+    QLabel*    m_pointBudgetCountLabel; ///< 当前渲染点数 / 全量点数显示
 };
