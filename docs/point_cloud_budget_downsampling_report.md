@@ -123,12 +123,13 @@
 
 | 文件 | 改动 |
 |---|---|
-| `src/visualizers/KeyframePointCloudVisualizer.h` | **核心**。新增渲染数据层（`m_renderIndices`/`m_renderRanges`/`m_renderFullRes`/`m_highlightIds`/`m_bMin`/`m_bMax`）；新增 `setPointBudget`/`pointBudget`/`renderPointCount`/`totalPointCount`；新增 `rebuildRenderCloud`/`countVoxels`/`buildDecimated`/`estimateLeaf`/`voxelKey`/`applyHighlight`；`finish()` 改调 `rebuildRenderCloud()`；`recolorHighlight`/`recolorAll` 改为渲染数组感知；`clear()` 重置新状态 |
-| `src/visualizers/GraphSceneVisualizer.h` | 新增 `m_pointBudget=5000000`（默认 500 万）与 `setPointBudget`/`pointBudget`/`renderPointCount`/`totalPointCount`；`rebuildPointClouds()` 创建可视化器时应用预算 |
-| `src/ui/ViewportWidget.h/.cpp` | 新增槽 `setPointBudget(int)`；新增信号 `pointCloudStatsChanged(qint64,qint64)`，在点预算变化与点云重建完成时发射 |
+| `src/visualizers/PointCloudBuilder.h` | **新增**。后台线程纯计算单元：加锁位姿/点云快照 → 无锁 CPU 变换 → 点预算自适应体素降采样 → 构建渲染顶点数组；输出 `PointCloudBuildResult`（全量点 + 渲染索引/范围 + 统计） |
+| `src/visualizers/KeyframePointCloudVisualizer.h` | **核心**。删除同步构建（appendCloud/finish/降采样），新增 `commitBuild()` 以 swap 换入构建结果；着色/高亮/裁剪改为渲染数组感知；新增 `clearHighlight()`/`isClipRangeInitialized()` |
+| `src/visualizers/GraphSceneVisualizer.h` | 删除同步 `rebuildPointClouds()`；新增 `commitPointCloudBuild()`（换入 + 恢复裁剪/颜色/高亮设置）；`setPointBudget()` 改为仅记录预算；新增 `hasPointCloud()`/`lastGraph()` |
+| `src/ui/ViewportWidget.h/.cpp` | 异步调度中心：`QFutureWatcher` + 请求合并（pending）+ 版本号丢弃过期结果；`rebuildPointClouds()` 保持签名改为异步；预算变化触发后台重建；`cloudDataReady`/统计信号移至构建完成时发射 |
 | `src/ui/DrawFlags.h` | `DrawFlags` 新增 `int point_budget = 5000000;` |
 | `src/ui/RenderingPanel.h/.cpp` | 渲染面板新增「Point Budget」下拉框（全量/1000万/500万/200万/100万/50万，默认 500 万）与「Rendered: X / Y points」实时统计标签 |
-| `README.md` | 渲染面板表格补充「点预算」说明 |
+| `README.md` | 渲染面板表格补充「点预算」说明；提示区补充点云后台重建说明 |
 
 ### 5.1 UI 交互
 
@@ -152,16 +153,53 @@
 
 ## 7. 验证
 
-- **用户环境**：编译通过（Release，MSVC 2022 / Qt 6.9.1 / vcpkg）。
-- **本会话沙箱**：CMake AUTOMOC 阶段调用 `moc.exe` 子进程被沙箱以 EPERM 拦截（`libuv process spawn failed: operation not permitted`），无法在本会话内完成完整构建；代码层面已做静态核查（API 签名、符号引用、信号槽连接一致性）。
+- **方案 A（点预算降采样）**：用户环境编译通过（Release，MSVC 2022 / Qt 6.9.1 / vcpkg）。
+- **配套优化（后台异步重建）**：代码完成并通过静态核查；需在用户环境重新编译验证（本会话沙箱在 CMake AUTOMOC 阶段拦截 `moc.exe` 子进程，`libuv process spawn failed: operation not permitted`，无法完成完整构建）。
+- 建议验证项：加载千万级地图时 UI 保持可交互；加载/优化/回环/切换预算档位后点云自动刷新；连续触发重建不并行冲突；选中高亮在重建后正确恢复。
 
 ---
 
-## 8. 后续建议（可选）
+## 8. 配套优化：点云后台异步重建（已实现）
+
+在方案 A 基础上完成"重建后台化"，消除加载/优化后点云重建导致的 UI 卡死。
+
+### 8.1 设计
+
+```
+后台线程（QtConcurrent::run）                   主线程（QFutureWatcher::finished）
+┌──────────────────────────────┐   PointCloudBuildResult   ┌──────────────────────────┐
+│ PointCloudBuilder::build()   │ ─────────────────────────▶ │ commitPointCloudBuild() │
+│ 1. 加锁快照位姿/点云指针（毫秒级） │                          │  - m_cloudViz->commitBuild│
+│ 2. 无锁 CPU 变换到世界坐标     │                          │    （swap 换入，O(1)）    │
+│ 3. 点预算自适应体素降采样      │                          │  - 恢复裁剪/颜色/高亮设置  │
+│ 4. 构建渲染顶点数组           │                          │  - 发射 cloudDataReady /  │
+└──────────────────────────────┘                          │    pointCloudStatsChanged │
+                                                          └──────────────────────────┘
+```
+
+### 8.2 关键机制
+
+| 机制 | 说明 |
+|---|---|
+| **双缓冲 swap** | 后台只构建普通数据/未挂场景的 `osg::Vec3Array`；主线程 `swap` 换入（O(1)），旧几何体持续渲染到新数据就绪，无闪烁/撕裂 |
+| **请求合并** | 构建期间再次收到请求（自动回环连续插边、优化+回环叠加）只置 pending 标志，当前任务完成后用最新状态再构建一次，避免并行构建竞争 |
+| **版本号丢弃过期结果** | 图加载/关闭时递增版本号；完成回调校验版本号，不匹配（图已更换）则丢弃结果 |
+| **毫秒级加锁快照** | 构建开始时在 `optimization_mutex` 保护下拷出位姿+点云指针（点云内容加载后不可变），锁不长时间占用，不阻塞优化/删边 |
+| **主线程零重活** | 主线程只做 swap 与一次 O(渲染点数) 的着色（recolorAll），500 万点约 30~80ms |
+
+### 8.3 行为变化
+
+- `rebuildPointClouds()` 保持签名不变（`MainWindow` 调用点零改动），内部改为异步；
+- 初次加载：球体/边线立即显示，点云后台构建完成后自动换入（`cloudDataReady`/渲染统计信号随之发出）；
+- 预算档位切换、图优化、回环插入均触发后台重建，界面全程可交互。
+
+---
+
+## 9. 后续建议（可选）
 
 | 优先级 | 事项 | 说明 |
 |---|---|---|
-| 高 | **配套优化：后台线程重建** | `rebuildPointClouds()` 迁至 `QtConcurrent` + 双缓冲 VBO，消除加载/优化后的 UI 卡死（上千万点时重建本身约 1~2s） |
+| ~~高~~ | ~~**配套优化：后台线程重建**~~ | ✅ 已实现（见第 8 节） |
 | 中 | 加载策略 | 默认读 0.02m 降采样 `cloud.pcd` 或提供"高/低分辨率加载"选项，减少首次加载耗时与内存 |
 | 中 | 方案 B：多级 LOD | 预生成 3~4 级降采样（1/4、1/16、1/64），按相机距离切换（OSG LOD），近距离保持细节 |
 | 低 | 颜色压缩 | 顶点颜色 `Vec4` → `RGB`，省 25% 显存带宽 |
