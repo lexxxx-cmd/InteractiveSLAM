@@ -121,28 +121,12 @@ public:
     }
 
     /**
-     * @brief 设置点云渲染点预算（点数上限）
+     * @brief 设置 LOD 多级渲染开关
      *
-     * 仅记录预算；实际降采样由 PointCloudBuilder 在后台构建时应用
-     * （ViewportWidget 检测到预算变化后触发异步重建）。
-     * 预算 ≤ 0 表示全量渲染。
-     *
-     * @param maxPoints 渲染点数上限（≤0 = 全量）
-     */
-    void setPointBudget(int maxPoints) {
-        m_pointBudget = maxPoints;
-    }
-
-    /** @brief 查询当前点预算（≤0 表示全量） */
-    int pointBudget() const { return m_pointBudget; }
-
-    /**
-     * @brief 设置 LOD 多级渲染开关（仅在全量模式下生效）
-     *
-     * 开启后 PointCloudBuilder 在后台构建多级降采样（level 1~3），
-     * ViewportWidget 按相机距离自动切换级别：近处全量细节，
-     * 远处低分辨率轮廓，减少远距离顶点处理量。
-     * 预算模式（pointBudget > 0）下忽略此开关。
+     * 开启后 PointCloudBuilder 在后台构建多级降采样，
+     * ViewportWidget 按相机距离自动切换级别或手动固定层级：
+     * 近处全量细节，远处低分辨率轮廓，减少远距离顶点处理量。
+     * 渲染固定为"全量 + LOD"（点预算档位已移除）。
      */
     void setLodEnabled(bool enabled) {
         m_lodEnabled = enabled;
@@ -685,6 +669,5 @@ private:
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
     float m_pointSize     = 3.0f; ///< 点云点大小（像素）
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
-    int   m_pointBudget   = 5000000; ///< 点云渲染点预算（≤0=全量，默认 500 万）
-    bool  m_lodEnabled    = false;   ///< LOD 多级渲染开关（仅全量模式生效）
+    bool  m_lodEnabled    = true; ///< LOD 多级渲染开关（渲染固定为全量 + LOD）
 };

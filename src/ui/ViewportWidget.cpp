@@ -286,7 +286,7 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
     m_sceneViz->setPointOpacity(m_flags.draw_keyframe_vertices ? 1.0f : 0.0f);
     m_osgWidget->update();
 
-    // 后台异步构建点云（完成后发射 cloudDataReady / pointCloudStatsChanged）
+    // 后台异步构建点云（完成后发射 cloudDataReady）
     rebuildPointClouds();
 
     // 为新加载的场景更新正交投影，然后让摄像机定格到整个场景
@@ -364,15 +364,6 @@ void ViewportWidget::setPointSize(int size) {
 void ViewportWidget::setPointOpacity(int opacity) {
     m_sceneViz->setPointOpacity(opacity / 100.0f);
     m_osgWidget->update();
-}
-
-void ViewportWidget::setPointBudget(int maxPoints) {
-    m_flags.point_budget = maxPoints;
-    m_sceneViz->setPointBudget(maxPoints);
-    // 已有点云数据时触发后台异步重建（降采样按新预算生效）
-    if (m_graph && m_sceneViz->hasPointCloud()) {
-        requestCloudBuild();
-    }
 }
 
 void ViewportWidget::setLodEnabled(bool enabled) {
@@ -508,7 +499,6 @@ void ViewportWidget::startCloudBuild() {
 
     auto graph = m_graph;
     hdl_graph_slam::BuildOptions options;
-    options.maxRenderPoints = m_sceneViz->pointBudget();
     options.lodEnabled = m_sceneViz->lodEnabled();
     m_cloudBuildWatcher->setFuture(QtConcurrent::run([graph, options]() {
         return hdl_graph_slam::PointCloudBuilder::build(graph, options);
@@ -519,7 +509,7 @@ void ViewportWidget::startCloudBuild() {
  * @brief 后台点云构建完成（主线程回调）
  *
  * 若构建期间图已更换/关闭（版本号不匹配）则丢弃结果；
- * 否则换入场景、发射数据范围与渲染统计信号并刷新视图。
+ * 否则换入场景、发射数据范围信号并刷新视图。
  */
 void ViewportWidget::onCloudBuildFinished() {
     m_cloudBuildRunning = false;
@@ -530,9 +520,6 @@ void ViewportWidget::onCloudBuildFinished() {
 
         // 发射数据范围信号供 UI 面板初始化/更新
         emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
-        emit pointCloudStatsChanged(
-            static_cast<qint64>(m_sceneViz->renderPointCount()),
-            static_cast<qint64>(m_sceneViz->totalPointCount()));
 
         // LOD 状态提示：手动模式恢复用户选择的层级；自动模式从 level 0 起步
         if (m_sceneViz->lodEnabled()) {

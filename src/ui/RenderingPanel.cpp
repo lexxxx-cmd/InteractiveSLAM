@@ -69,14 +69,7 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->setSampleStride(val);
     });
 
-    // 点预算下拉框：点数上限档位（-1 = 全量），超过上限自动体素降采样
-    connect(m_pointBudgetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int) {
-        m_viewport->setPointBudget(m_pointBudgetCombo->currentData().toInt());
-        updateLodAvailability();
-    });
-
-    // LOD 多级渲染开关（仅全量模式启用；预算模式自动取消勾选并灰显）
+    // LOD 多级渲染开关（默认开启）
     connect(m_lodCb, &QCheckBox::toggled, this, [this](bool checked) {
         m_viewport->setLodEnabled(checked);
         if (!checked) {
@@ -104,31 +97,17 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
     connect(m_viewport, &ViewportWidget::lodLevelChanged,
             this, &RenderingPanel::onLodLevelChanged);
 
-    // 渲染统计显示：已渲染点数 / 全量点数
-    connect(m_viewport, &ViewportWidget::pointCloudStatsChanged,
-            this, [this](qint64 rendered, qint64 total) {
-        m_pointBudgetCountLabel->setText(
-            tr("Rendered: %1 / %2 points").arg(rendered).arg(total));
-    });
-
-    // 初始化 LOD 可用性（默认预算 500 万 → LOD 禁用）
+    // 初始化 LOD 控件可用性
     updateLodAvailability();
 }
 
 /**
- * @brief 根据点预算档位/LOD 开关联动控件可用性
+ * @brief 根据 LOD 开关联动控件可用性
  *
- * LOD 仅在"全量"模式下有意义（预算模式已固定点数上限）。
- * 预算模式（>0）下禁用并自动取消勾选 LOD；
  * LOD 未启用时禁用模式/层级下拉，Manual 模式才启用层级下拉。
  */
 void RenderingPanel::updateLodAvailability() {
-    bool fullMode = m_pointBudgetCombo->currentData().toInt() <= 0;
-    m_lodCb->setEnabled(fullMode);
-    if (!fullMode) {
-        m_lodCb->setChecked(false);
-    }
-    bool lodActive = fullMode && m_lodCb->isChecked();
+    bool lodActive = m_lodCb->isChecked();
     m_lodModeCombo->setEnabled(lodActive);
     m_lodLevelCombo->setEnabled(lodActive &&
                                 m_lodModeCombo->currentIndex() == 1);
@@ -239,28 +218,11 @@ void RenderingPanel::setupUi() {
     opacityRow->addWidget(m_pointOpacityLabel);
     renderLayout->addLayout(opacityRow);
 
-    // 点预算下拉框（点数上限档位，默认 500 万）
-    // 全量点数超过预算时，点云自动体素降采样，使渲染点数收敛到预算以内
-    renderLayout->addWidget(new QLabel(tr("Point Budget:")));
-    m_pointBudgetCombo = new QComboBox;
-    m_pointBudgetCombo->addItem(tr("Full (all points)"), -1);
-    m_pointBudgetCombo->addItem(tr("10,000,000"), 10000000);
-    m_pointBudgetCombo->addItem(tr("5,000,000"), 5000000);
-    m_pointBudgetCombo->addItem(tr("2,000,000"), 2000000);
-    m_pointBudgetCombo->addItem(tr("1,000,000"), 1000000);
-    m_pointBudgetCombo->addItem(tr("500,000"), 500000);
-    m_pointBudgetCombo->setToolTip(
-        tr("Cap rendered points. Larger maps are voxel-downsampled to fit the budget."));
-    int budgetIdx = m_pointBudgetCombo->findData(5000000);
-    m_pointBudgetCombo->setCurrentIndex(budgetIdx >= 0 ? budgetIdx : 0);
-    m_pointBudgetCountLabel = new QLabel(tr("Rendered: -"));
-    renderLayout->addWidget(m_pointBudgetCombo);
-    renderLayout->addWidget(m_pointBudgetCountLabel);
-
-    // LOD 多级渲染（仅全量模式可用，预算模式自动灰显）
+    // LOD 多级渲染（默认开启；渲染固定为全量 + LOD）
     m_lodCb = new QCheckBox(tr("LOD (full mode)"));
+    m_lodCb->setChecked(true);
     m_lodCb->setToolTip(
-        tr("Distance-based level switching: full detail when close, fewer points when far. Only available in Full mode."));
+        tr("Multi-level rendering: full detail when close, fewer points when far."));
     renderLayout->addWidget(m_lodCb);
     m_lodLevelLabel = new QLabel(tr("LOD: off"));
     renderLayout->addWidget(m_lodLevelLabel);

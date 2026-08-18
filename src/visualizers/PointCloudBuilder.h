@@ -13,12 +13,12 @@
 //      锁只覆盖毫秒级快照，不阻塞优化/删边等图操作；
 //   2. 无锁变换：将每个关键帧的点按位姿变换到世界坐标系，统计
 //      Z 值范围与包围盒，记录每帧全量范围；
-//   3. 点预算降采样：全量点数超过预算时，自适应迭代选取体素边长，
-//      构建渲染索引与逐帧渲染范围；
-//   4. 多级 LOD（仅全量模式）：当 maxRenderPoints ≤ 0 且 lodEnabled 时，
-//      在全量点基础上按递增体素边长生成 level1~5（目标点数 N/2、N/4、
-//      N/8、N/16、N/32，级间 2×，每级不低于 5 万点），每级都映射回
-//      同一个全量点数组，供相机距离切换或手动选择使用；
+//   3. 主级别（全量）：所有关键帧点变换到世界坐标后即为主渲染数据，
+//      不做预算降采样（点预算档位已移除，渲染固定为"全量 + LOD"）；
+//   4. 多级 LOD：当 lodEnabled 时，在全量点基础上按递增体素边长生成
+//      level1~5（目标点数 N/2、N/4、N/8、N/16、N/32，级间 2×，每级
+//      不低于 5 万点），每级都映射回同一个全量点数组，供相机距离
+//      自动切换或手动选择使用；
 //   5. 构建渲染顶点数组（osg::Vec3Array，仅普通容器填充，无 GL 调用）。
 //
 // 输出 PointCloudBuildResult 由主线程 KeyframePointCloudVisualizer::
@@ -79,8 +79,7 @@ struct LodLevel {
  * @brief 点云构建选项
  */
 struct BuildOptions {
-    int  maxRenderPoints = -1;  ///< 渲染点预算（≤0 = 全量）
-    bool lodEnabled = false;    ///< 是否生成多级 LOD（仅在 maxRenderPoints ≤ 0 时生效）
+    bool lodEnabled = false;    ///< 是否生成多级 LOD（渲染固定为全量 + LOD）
 };
 
 /**
@@ -120,7 +119,7 @@ public:
     /**
      * @brief 构建点云渲染数据（可在后台线程调用）
      * @param graph   交互式图数据（读取 keyframes 与位姿）
-     * @param options 构建选项（点预算 + LOD 开关）
+     * @param options 构建选项（LOD 开关）
      * @return 构建结果（全量点 + 渲染索引/范围 + 顶点数组 + LOD 级别 + 统计）
      *
      * 线程安全：开始时在 optimization_mutex 保护下做毫秒级位姿/点云
@@ -184,33 +183,18 @@ public:
             r.zMax += 0.5f;
         }
 
-        // ---- 阶段 3：主级别（预算降采样或全量） ----
+        // ---- 阶段 3：主级别（全量，LOD 分级在阶段 5 生成） ----
         const size_t n = r.allWorldPoints.size();
-        const bool decimate = (options.maxRenderPoints > 0 &&
-                               n > (size_t)options.maxRenderPoints);
-        if (decimate) {
-            float leaf = estimateLeafFromBounds(r.bMin, r.bMax, options.maxRenderPoints);
-            for (int iter = 0; iter < 6; ++iter) {
-                size_t c = countVoxels(r.allWorldPoints, leaf);
-                if (c == 0 || c <= (size_t)options.maxRenderPoints) break;  // 已满足预算
-                double ratio = (double)c / (double)options.maxRenderPoints;
-                leaf *= (float)(std::pow(ratio, 0.5) * 1.03);
-            }
-            decimateTo(r.allWorldPoints, r.cloudRanges, leaf,
-                       r.renderIndices, r.renderRanges);
-            r.renderFullRes = false;
-        } else {
-            r.renderRanges = r.cloudRanges;
-            r.renderFullRes = true;
-        }
+        r.renderRanges = r.cloudRanges;
+        r.renderFullRes = true;
 
         // ---- 阶段 4：构建主级别顶点数组 ----
         buildVertices(r.allWorldPoints, r.renderIndices, r.renderFullRes, r.vertices);
 
-        // ---- 阶段 5：多级 LOD（仅全量模式） ----
+        // ---- 阶段 5：多级 LOD ----
         // 目标点数 N/2、N/4、…、N/32（级间 2×，最多 5 级；每级不低于 minLodPoints）
         // 级间 2× 使相机距离切换过渡平滑，避免 4× 时"差一级就跳回全量"的突兀感
-        if (options.lodEnabled && options.maxRenderPoints <= 0) {
+        if (options.lodEnabled) {
             const size_t minLodPoints = 50000;
             const int    maxLodLevels = 5;
             size_t target = n / 2;
