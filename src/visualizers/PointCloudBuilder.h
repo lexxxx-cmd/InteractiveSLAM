@@ -14,9 +14,12 @@
 //   2. 无锁变换：将每个关键帧的点按位姿变换到世界坐标系，统计
 //      Z 值范围与包围盒，记录每帧全量范围；
 //   3. 点预算降采样：全量点数超过预算时，自适应迭代选取体素边长，
-//      构建渲染索引与逐帧渲染范围（与 KeyframePointCloudVisualizer
-//      原实现相同的算法，独立成纯数据版本）；
-//   4. 构建渲染顶点数组（osg::Vec3Array，仅普通容器填充，无 GL 调用）。
+//      构建渲染索引与逐帧渲染范围；
+//   4. 多级 LOD（仅全量模式）：当 maxRenderPoints ≤ 0 且 lodEnabled 时，
+//      在全量点基础上按递增体素边长生成 level1~5（目标点数 N/2、N/4、
+//      N/8、N/16、N/32，级间 2×，每级不低于 5 万点），每级都映射回
+//      同一个全量点数组，供相机距离切换或手动选择使用；
+//   5. 构建渲染顶点数组（osg::Vec3Array，仅普通容器填充，无 GL 调用）。
 //
 // 输出 PointCloudBuildResult 由主线程 KeyframePointCloudVisualizer::
 // commitBuild() 以 swap 方式换入场景（O(1) 交换，旧几何体渲染到新数据
@@ -33,6 +36,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Geometry>
@@ -57,6 +61,29 @@ struct CloudRange {
 };
 
 /**
+ * @brief 单个 LOD 级别（level 0 = 全量 / 预算降采样主级别）
+ *
+ * 每级渲染数据都映射回同一个全量点数组（renderIndices / renderRanges），
+ * 因此选中高亮、Z 统计等在任意级别均正确。
+ * colors 数组由 KeyframePointCloudVisualizer 生成（本类不产生颜色）。
+ */
+struct LodLevel {
+    osg::ref_ptr<osg::Vec3Array> vertices;      ///< 该级渲染顶点数组
+    osg::ref_ptr<osg::Vec4Array> colors;        ///< 该级渲染颜色数组（由可视化器生成）
+    std::vector<size_t>     renderIndices;      ///< 渲染索引 -> 全量索引（level0 全量时为空）
+    std::vector<CloudRange> renderRanges;       ///< 每个关键帧在该级渲染数组中的范围
+    bool renderFullRes = true;                  ///< true = 渲染索引与全量索引一致
+};
+
+/**
+ * @brief 点云构建选项
+ */
+struct BuildOptions {
+    int  maxRenderPoints = -1;  ///< 渲染点预算（≤0 = 全量）
+    bool lodEnabled = false;    ///< 是否生成多级 LOD（仅在 maxRenderPoints ≤ 0 时生效）
+};
+
+/**
  * @brief 点云构建结果（纯数据，可在线程间移动）
  *
  * 由 PointCloudBuilder::build() 在工作线程生成，
@@ -66,11 +93,13 @@ struct PointCloudBuildResult {
     std::vector<Eigen::Vector3d,
                 Eigen::aligned_allocator<Eigen::Vector3d>> allWorldPoints; ///< 全量世界坐标点
     std::vector<CloudRange> cloudRanges;    ///< 每个关键帧的全量范围
-    std::vector<size_t>     renderIndices;  ///< 渲染索引 -> 全量索引（降采样时使用）
-    std::vector<CloudRange> renderRanges;   ///< 每个关键帧在渲染数组中的范围
-    bool renderFullRes = true;              ///< true = 渲染索引与全量索引一致
+    std::vector<size_t>     renderIndices;  ///< 主级别渲染索引（降采样时使用）
+    std::vector<CloudRange> renderRanges;   ///< 主级别逐帧渲染范围
+    bool renderFullRes = true;              ///< 主级别是否全量
 
-    osg::ref_ptr<osg::Vec3Array> vertices;  ///< 渲染顶点数组（降采样后）
+    osg::ref_ptr<osg::Vec3Array> vertices;  ///< 主级别渲染顶点数组
+
+    std::vector<LodLevel> lodLevels;        ///< LOD 级别（不含主级别，仅全量模式生成）
 
     float zMin =  std::numeric_limits<float>::max();  ///< 数据 Z 最小值
     float zMax = -std::numeric_limits<float>::max();  ///< 数据 Z 最大值
@@ -90,15 +119,15 @@ public:
 
     /**
      * @brief 构建点云渲染数据（可在后台线程调用）
-     * @param graph         交互式图数据（读取 keyframes 与位姿）
-     * @param maxRenderPoints 渲染点预算（≤0 = 全量）
-     * @return 构建结果（全量点 + 渲染索引/范围 + 顶点数组 + 统计）
+     * @param graph   交互式图数据（读取 keyframes 与位姿）
+     * @param options 构建选项（点预算 + LOD 开关）
+     * @return 构建结果（全量点 + 渲染索引/范围 + 顶点数组 + LOD 级别 + 统计）
      *
      * 线程安全：开始时在 optimization_mutex 保护下做毫秒级位姿/点云
      * 快照，之后无锁处理（点云内容加载后不可变）。
      */
     static PointCloudBuildResult build(
-        const std::shared_ptr<InteractiveGraph>& graph, int maxRenderPoints) {
+        const std::shared_ptr<InteractiveGraph>& graph, const BuildOptions& options) {
         PointCloudBuildResult r;
         r.bMin = Eigen::Vector3d( std::numeric_limits<double>::max(),
                                   std::numeric_limits<double>::max(),
@@ -155,36 +184,41 @@ public:
             r.zMax += 0.5f;
         }
 
-        // ---- 阶段 3：点预算自适应体素降采样 ----
-        const bool decimate = (maxRenderPoints > 0 &&
-                               r.allWorldPoints.size() > (size_t)maxRenderPoints);
+        // ---- 阶段 3：主级别（预算降采样或全量） ----
+        const size_t n = r.allWorldPoints.size();
+        const bool decimate = (options.maxRenderPoints > 0 &&
+                               n > (size_t)options.maxRenderPoints);
         if (decimate) {
-            float leaf = estimateLeaf(r, maxRenderPoints);
+            float leaf = estimateLeafFromBounds(r.bMin, r.bMax, options.maxRenderPoints);
             for (int iter = 0; iter < 6; ++iter) {
                 size_t c = countVoxels(r.allWorldPoints, leaf);
-                if (c == 0 || c <= (size_t)maxRenderPoints) break;  // 已满足预算
-                double ratio = (double)c / (double)maxRenderPoints;
+                if (c == 0 || c <= (size_t)options.maxRenderPoints) break;  // 已满足预算
+                double ratio = (double)c / (double)options.maxRenderPoints;
                 leaf *= (float)(std::pow(ratio, 0.5) * 1.03);
             }
-            buildDecimated(r, leaf);
+            decimateTo(r.allWorldPoints, r.cloudRanges, leaf,
+                       r.renderIndices, r.renderRanges);
             r.renderFullRes = false;
         } else {
             r.renderRanges = r.cloudRanges;
             r.renderFullRes = true;
         }
 
-        // ---- 阶段 4：构建渲染顶点数组（普通容器填充，无 GL 调用） ----
-        const size_t renderCount =
-            r.renderFullRes ? r.allWorldPoints.size() : r.renderIndices.size();
-        r.vertices = new osg::Vec3Array;
-        r.vertices->reserve(renderCount);
-        for (size_t i = 0; i < renderCount; ++i) {
-            const Eigen::Vector3d& wp =
-                r.allWorldPoints[r.renderFullRes ? i : r.renderIndices[i]];
-            r.vertices->push_back(osg::Vec3(
-                static_cast<float>(wp.x()),
-                static_cast<float>(wp.y()),
-                static_cast<float>(wp.z())));
+        // ---- 阶段 4：构建主级别顶点数组 ----
+        buildVertices(r.allWorldPoints, r.renderIndices, r.renderFullRes, r.vertices);
+
+        // ---- 阶段 5：多级 LOD（仅全量模式） ----
+        // 目标点数 N/2、N/4、…、N/32（级间 2×，最多 5 级；每级不低于 minLodPoints）
+        // 级间 2× 使相机距离切换过渡平滑，避免 4× 时"差一级就跳回全量"的突兀感
+        if (options.lodEnabled && options.maxRenderPoints <= 0) {
+            const size_t minLodPoints = 50000;
+            const int    maxLodLevels = 5;
+            size_t target = n / 2;
+            while (target >= minLodPoints && (int)r.lodLevels.size() < maxLodLevels) {
+                r.lodLevels.push_back(
+                    buildLodLevel(r.allWorldPoints, r.cloudRanges, r.bMin, r.bMax, target));
+                target /= 2;
+            }
         }
 
         return r;
@@ -232,25 +266,30 @@ private:
      * 每个体素保留按原始顺序最先出现的点，因此渲染索引天然升序、
      * 逐帧范围可直接按关键帧切分计算。每帧至少保留一个点。
      */
-    static void buildDecimated(PointCloudBuildResult& r, float leaf) {
+    static void decimateTo(
+        const std::vector<Eigen::Vector3d,
+                          Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
+        const std::vector<CloudRange>& cloudRanges,
+        float leaf,
+        std::vector<size_t>& outIndices,
+        std::vector<CloudRange>& outRanges) {
         const float inv = 1.0f / leaf;
         // 体素键 -> 该体素首个点的全量索引
         std::unordered_map<uint64_t, size_t> kept;
-        kept.reserve(std::min<size_t>(r.allWorldPoints.size(),
-                                      std::max<size_t>(r.allWorldPoints.size() / 2, 4096)));
+        kept.reserve(std::min<size_t>(pts.size(),
+                                      std::max<size_t>(pts.size() / 2, 4096)));
 
         std::vector<size_t> sel;
-        sel.reserve(std::min<size_t>(r.allWorldPoints.size(),
-                                     r.allWorldPoints.size() / 2 + 1));
+        sel.reserve(std::min<size_t>(pts.size(), pts.size() / 2 + 1));
 
-        r.renderRanges.clear();
-        r.renderRanges.reserve(r.cloudRanges.size());
+        outRanges.clear();
+        outRanges.reserve(cloudRanges.size());
 
-        for (const auto& range : r.cloudRanges) {
+        for (const auto& range : cloudRanges) {
             size_t rstart = sel.size();
             for (size_t j = range.startVertex;
                  j < range.startVertex + range.vertexCount; ++j) {
-                const Eigen::Vector3d& p = r.allWorldPoints[j];
+                const Eigen::Vector3d& p = pts[j];
                 uint64_t k = voxelKey(static_cast<float>(p.x()),
                                       static_cast<float>(p.y()),
                                       static_cast<float>(p.z()), inv);
@@ -262,25 +301,77 @@ private:
             if (sel.size() == rstart && range.vertexCount > 0) {
                 sel.push_back(range.startVertex);
             }
-            r.renderRanges.push_back({rstart, sel.size() - rstart, range.vertexId});
+            outRanges.push_back({rstart, sel.size() - rstart, range.vertexId});
         }
 
-        r.renderIndices.swap(sel);
+        outIndices.swap(sel);
     }
 
     /**
-     * @brief 估计初始体素边长（从包围盒体积与预算反推）
+     * @brief 构建顶点数组（从全量点按渲染索引取值）
+     */
+    static void buildVertices(
+        const std::vector<Eigen::Vector3d,
+                          Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
+        const std::vector<size_t>& renderIndices,
+        bool renderFullRes,
+        osg::ref_ptr<osg::Vec3Array>& outVertices) {
+        const size_t count = renderFullRes ? pts.size() : renderIndices.size();
+        outVertices = new osg::Vec3Array;
+        outVertices->reserve(count);
+        for (size_t i = 0; i < count; ++i) {
+            const Eigen::Vector3d& wp = pts[renderFullRes ? i : renderIndices[i]];
+            outVertices->push_back(osg::Vec3(
+                static_cast<float>(wp.x()),
+                static_cast<float>(wp.y()),
+                static_cast<float>(wp.z())));
+        }
+    }
+
+    /**
+     * @brief 构建单个 LOD 级别（目标点数 targetCount 的自适应体素降采样）
+     */
+    static LodLevel buildLodLevel(
+        const std::vector<Eigen::Vector3d,
+                          Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
+        const std::vector<CloudRange>& cloudRanges,
+        const Eigen::Vector3d& bMin,
+        const Eigen::Vector3d& bMax,
+        size_t targetCount) {
+        LodLevel lod;
+        if (pts.size() <= targetCount) {
+            lod.renderFullRes = true;
+            lod.renderRanges = cloudRanges;
+        } else {
+            float leaf = estimateLeafFromBounds(bMin, bMax, targetCount);
+            for (int iter = 0; iter < 6; ++iter) {
+                size_t c = countVoxels(pts, leaf);
+                if (c == 0 || c <= targetCount) break;  // 已满足目标
+                double ratio = (double)c / (double)targetCount;
+                leaf *= (float)(std::pow(ratio, 0.5) * 1.03);
+            }
+            decimateTo(pts, cloudRanges, leaf, lod.renderIndices, lod.renderRanges);
+            lod.renderFullRes = false;
+        }
+        buildVertices(pts, lod.renderIndices, lod.renderFullRes, lod.vertices);
+        return lod;
+    }
+
+    /**
+     * @brief 估计初始体素边长（从包围盒体积与目标点数反推）
      *
      * 初始值刻意偏大（×2），使首轮体素数偏小，避免极端分布下
      * 临时哈希表占用过大的内存峰值。
      */
-    static float estimateLeaf(const PointCloudBuildResult& r, int maxRenderPoints) {
-        double extX = r.bMax.x() - r.bMin.x();
-        double extY = r.bMax.y() - r.bMin.y();
-        double extZ = r.bMax.z() - r.bMin.z();
+    static float estimateLeafFromBounds(const Eigen::Vector3d& bMin,
+                                        const Eigen::Vector3d& bMax,
+                                        size_t targetCount) {
+        double extX = bMax.x() - bMin.x();
+        double extY = bMax.y() - bMin.y();
+        double extZ = bMax.z() - bMin.z();
         double vol = extX * extY * extZ;
         if (!(vol > 0.0)) vol = 1.0;
-        double budget = (double)std::max(1, maxRenderPoints);
+        double budget = (double)std::max<size_t>(1, targetCount);
         float leaf = static_cast<float>(std::cbrt(vol / budget));
         if (!(leaf > 1e-4f)) leaf = 0.1f;
         return leaf * 2.0f;

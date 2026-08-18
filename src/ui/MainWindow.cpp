@@ -73,6 +73,15 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             statusBar()->clearMessage();
     });
 
+    // LOD 层级状态提示：多级构建完成与相机距离切换时在状态栏临时显示
+    connect(m_viewport, &ViewportWidget::lodLevelChanged,
+            this, [this](int level, int levelCount) {
+        if (levelCount > 1) {
+            statusBar()->showMessage(
+                tr("LOD level: %1/%2").arg(level).arg(levelCount), 2500);
+        }
+    });
+
     // 右键上下文菜单：显示顶点/边信息，支持手动闭环操作和边删除
     connect(m_viewport, &ViewportWidget::contextMenuRequested,
             this, [this](long vertexId, long edgeId,

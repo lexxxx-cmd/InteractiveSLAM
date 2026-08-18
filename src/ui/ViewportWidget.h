@@ -109,6 +109,20 @@ public slots:
     void setPointSize(int size);             ///< 设置点云点大小
     void setPointOpacity(int opacity);       ///< 设置点云不透明度（0-100）
     void setPointBudget(int maxPoints);      ///< 设置点云渲染点预算（≤0=全量）
+    void setLodEnabled(bool enabled);        ///< 设置 LOD 多级渲染开关（仅全量模式生效）
+
+    /**
+     * @brief 设置 LOD 切换模式
+     * @param manual true = 手动固定层级（由 setLodManualLevel 控制）；
+     *               false = 按相机距离自动切换（默认）
+     */
+    void setLodMode(bool manual);
+
+    /**
+     * @brief 手动指定 LOD 层级（仅手动模式下生效）
+     * @param level 目标级别（0 = 全量，越大点数越少）
+     */
+    void setLodManualLevel(int level);
     void setBackgroundColor(const QColor& color);  ///< 设置背景色
     void setHiddenEdges(const std::set<long>& ids);     ///< 设置隐藏边集合
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);  ///< 闭环高亮
@@ -160,6 +174,19 @@ signals:
      * @param totalPoints    全量点云总点数（降采样前）
      */
     void pointCloudStatsChanged(qint64 renderedPoints, qint64 totalPoints);
+
+    /**
+     * @brief LOD 层级状态信号
+     *
+     * 在以下时机发射：
+     *   - LOD 多级构建完成（level=0，levelCount>1 表示 LOD 已就绪）；
+     *   - 相机距离变化导致层级切换（level 为切换后的目标级别）。
+     * 供渲染面板持续显示当前层级、状态栏临时提示切换。
+     *
+     * @param level      当前级别（0 = 主级别/全量，越大点数越少）
+     * @param levelCount 级别总数（1 = 未启用 LOD）
+     */
+    void lodLevelChanged(int level, int levelCount);
 
     /**
      * @brief 采样步长变化信号
@@ -231,4 +258,8 @@ private:
     int m_cloudBuildActiveSeq = -1;  ///< 当前在途构建对应的版本号
     bool m_cloudBuildRunning = false; ///< 是否有构建任务正在运行
     bool m_cloudBuildPending = false; ///< 构建期间是否收到新的构建请求（合并用）
+
+    // LOD 模式状态
+    bool m_lodManualMode = false;  ///< true = 手动固定层级（不随距离自动切换）
+    int  m_lodManualLevel = 0;     ///< 手动模式下固定的目标层级
 };

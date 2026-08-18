@@ -26,6 +26,7 @@
 
 #include <limits>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "visualizers/PointCloudBuilder.h"
@@ -82,34 +83,22 @@ public:
     /**
      * @brief 换入后台构建的点云数据（主线程调用）
      *
-     * 将 PointCloudBuilder 构建结果通过 swap 换入本可视化器：
-     *   - 全量世界点 / 全量范围 / 渲染索引 / 渲染范围 / 顶点数组
-     *   - Z 值范围与包围盒统计
-     * 完成后顶点数组标记 dirty，OSG 在下一帧自动重新上传 GPU。
+     * 将 PointCloudBuilder 构建结果换入本可视化器：
+     *   - 全量世界点 / 全量范围 / Z 值范围与包围盒统计
+     *   - 主级别渲染数据 + 多级 LOD（全量模式生成）
+     * 当前渲染数组（m_vertices/m_colors）换绑到 level 0，
+     * 颜色由 recolorAll 按顶点数生成。之后可经 setLodLevel() 换绑到
+     * 其他级别（相机距离驱动）。
      *
      * @param result 后台构建结果（右值，内容被交换移入）
      */
     void commitBuild(hdl_graph_slam::PointCloudBuildResult&& result) {
         m_allWorldPoints.swap(result.allWorldPoints);
         m_cloudRanges.swap(result.cloudRanges);
-        m_renderIndices.swap(result.renderIndices);
-        m_renderRanges.swap(result.renderRanges);
-        m_renderFullRes = result.renderFullRes;
         m_zMin = result.zMin;
         m_zMax = result.zMax;
         m_bMin = result.bMin;
         m_bMax = result.bMax;
-
-        // 换入渲染顶点数组；颜色数组由 recolorAll 按顶点数生成，
-        // 因此这里只需将颜色数组大小与顶点数对齐（内容在下方 recolorAll 填充）
-        if (m_vertices && result.vertices) {
-            m_vertices->swap(*result.vertices);
-            m_colors->resize(m_vertices->size());
-        } else {
-            // 防御：结果为空时清空旧数据，避免与新全量点状态不一致
-            m_vertices->clear();
-            m_colors->clear();
-        }
 
         // 首次构建时从数据初始化裁剪范围
         if (!m_clipRangeInitialized && m_zMax > m_zMin) {
@@ -120,22 +109,64 @@ public:
         if (m_zRangeUniform)
             m_zRangeUniform->set(osg::Vec2(m_zClipMin, m_zClipMax));
 
-        // 标记数据为脏，使 OSG 重新上传到 GPU
-        m_vertices->dirty();
-        m_colors->dirty();
-
-        // 更新图元计数
-        auto* prim = static_cast<osg::DrawArrays*>(m_geom->getPrimitiveSet(0));
-        if (prim) prim->setCount(m_vertices->size());
-        m_geom->dirtyBound();
-
-        // 同步颜色范围（自动模式下用数据范围）并生成默认着色
+        // 同步颜色范围（自动模式下用数据范围）
         if (m_useAutoColorRange) {
             m_colorZMin = m_zMin;
             m_colorZMax = m_zMax;
         }
-        recolorAll();
+
+        // 构建 LOD 级别列表：level 0 = 主级别，其后为 builder 生成的远级别
+        m_lodLevels.clear();
+        m_lodLevels.reserve(1 + result.lodLevels.size());
+        {
+            hdl_graph_slam::LodLevel l0;
+            l0.vertices = result.vertices;
+            if (!l0.vertices.valid()) {
+                l0.vertices = new osg::Vec3Array;  // 防御：空结果也提供空数组
+            }
+            l0.colors = new osg::Vec4Array;
+            l0.renderIndices.swap(result.renderIndices);
+            l0.renderRanges.swap(result.renderRanges);
+            l0.renderFullRes = result.renderFullRes;
+            m_lodLevels.push_back(std::move(l0));
+        }
+        for (auto& lod : result.lodLevels) {
+            lod.colors = new osg::Vec4Array;
+            m_lodLevels.push_back(std::move(lod));
+        }
+        m_activeLodLevel = 0;
+
+        // 换绑当前渲染数组到 level 0（ref_ptr 指向同一数组，零拷贝）
+        bindLevel(0);
     }
+
+    /**
+     * @brief 按相机距离切换到指定 LOD 级别（主线程调用）
+     *
+     * 将渲染顶点/颜色数组换绑到目标级别（ref_ptr 指向级别数据，零拷贝），
+     * 拷贝该级渲染索引/范围，然后重新着色并标记上传。
+     * 级别 0 = 主级别（全量或预算降采样），级别越远点数越少。
+     *
+     * @param level 目标级别（0 .. lodLevelCount()-1）
+     */
+    void setLodLevel(int level) {
+        if (level == m_activeLodLevel) return;
+        if (level < 0 || (size_t)level >= m_lodLevels.size()) return;
+        bindLevel(level);
+        if (!m_highlightIds.empty()) applyHighlight();
+    }
+
+    /** @brief 当前激活的 LOD 级别 */
+    int currentLodLevel() const { return m_activeLodLevel; }
+
+    /** @brief LOD 级别总数（≥1，仅主级别时为 1） */
+    int lodLevelCount() const { return static_cast<int>(m_lodLevels.size()); }
+
+    /** @brief 点云世界包围盒中心（供相机距离计算） */
+    Eigen::Vector3d boundsCenter() const { return (m_bMin + m_bMax) * 0.5; }
+
+    /** @brief 点云世界包围球半径（供相机距离计算） */
+    double boundsRadius() const { return (m_bMax - m_bMin).norm() * 0.5; }
 
     /** @brief 裁剪范围是否已初始化（首次构建后为 true） */
     bool isClipRangeInitialized() const { return m_clipRangeInitialized; }
@@ -175,6 +206,8 @@ public:
         m_renderRanges.clear();
         m_renderFullRes = true;
         m_highlightIds.clear();
+        m_lodLevels.clear();
+        m_activeLodLevel = 0;
         m_vertices->clear();
         m_colors->clear();
         m_zMin =  std::numeric_limits<float>::max();
@@ -280,6 +313,37 @@ public:
 
 private:
     /**
+     * @brief 将当前渲染数组换绑到指定级别（ref_ptr 零拷贝）
+     *
+     * 目标级别的顶点/颜色数组直接成为当前渲染数组（geometry 重新绑定），
+     * 拷贝该级渲染索引/范围，重设颜色数组大小，重新着色并标记上传。
+     *
+     * @param level 目标级别索引（调用方需保证合法）
+     */
+    void bindLevel(int level) {
+        const hdl_graph_slam::LodLevel& lod = m_lodLevels[level];
+        m_vertices = lod.vertices;
+        m_colors = lod.colors;
+        m_renderIndices = lod.renderIndices;
+        m_renderRanges = lod.renderRanges;
+        m_renderFullRes = lod.renderFullRes;
+        m_activeLodLevel = level;
+
+        m_geom->setVertexArray(m_vertices);
+        m_geom->setColorArray(m_colors, osg::Array::BIND_PER_VERTEX);
+
+        // 颜色数组与顶点数对齐，重新着色
+        m_colors->resize(m_vertices->size());
+        m_vertices->dirty();
+        m_colors->dirty();
+        auto* prim = static_cast<osg::DrawArrays*>(m_geom->getPrimitiveSet(0));
+        if (prim) prim->setCount(m_vertices->size());
+        m_geom->dirtyBound();
+
+        recolorAll();
+    }
+
+    /**
      * @brief 应用当前高亮集合（选中帧白色，其余帧半透明）
      *
      * 遍历渲染范围而非全量范围，索引经 m_renderIndices 映射回全量点
@@ -344,10 +408,14 @@ private:
     std::vector<hdl_graph_slam::CloudRange> m_cloudRanges;
 
     // —— 降采样渲染状态 ——
-    std::vector<size_t> m_renderIndices;   ///< 渲染索引 -> 全量索引（仅降采样时使用）
+    std::vector<size_t> m_renderIndices;   ///< 渲染索引 -> 全量索引（当前激活级别）
     std::vector<hdl_graph_slam::CloudRange> m_renderRanges; ///< 每个关键帧在渲染数组中的范围
-    bool m_renderFullRes = true;           ///< true = 渲染索引与全量索引一致（不降采样）
+    bool m_renderFullRes = true;           ///< true = 渲染索引与全量索引一致（当前激活级别）
     std::set<long> m_highlightIds;         ///< 当前高亮的顶点 ID 集合（重建后重新应用）
+
+    // —— LOD 级别数据 ——
+    std::vector<hdl_graph_slam::LodLevel> m_lodLevels; ///< 全部级别（level0 = 主级别）
+    int m_activeLodLevel = 0;              ///< 当前激活的 LOD 级别索引
 
     // —— 数据范围 ——
     float m_zMin   =  std::numeric_limits<float>::max(); ///< 数据 Z 最小值

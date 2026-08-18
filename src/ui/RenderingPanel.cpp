@@ -73,7 +73,36 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
     connect(m_pointBudgetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
         m_viewport->setPointBudget(m_pointBudgetCombo->currentData().toInt());
+        updateLodAvailability();
     });
+
+    // LOD 多级渲染开关（仅全量模式启用；预算模式自动取消勾选并灰显）
+    connect(m_lodCb, &QCheckBox::toggled, this, [this](bool checked) {
+        m_viewport->setLodEnabled(checked);
+        if (!checked) {
+            m_lodLevelLabel->setText(tr("LOD: off"));
+        } else {
+            m_lodLevelLabel->setText(tr("LOD: building..."));
+        }
+        updateLodAvailability();
+    });
+
+    // LOD 切换模式：Auto（距离驱动）/ Manual（固定层级）
+    connect(m_lodModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+        m_viewport->setLodMode(index == 1);
+        m_lodLevelCombo->setEnabled(index == 1 && m_lodCb->isChecked());
+    });
+
+    // LOD 手动层级选择（仅 Manual 模式生效）
+    connect(m_lodLevelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+        m_viewport->setLodManualLevel(index);
+    });
+
+    // LOD 层级状态：构建完成（多级就绪）与距离切换时更新
+    connect(m_viewport, &ViewportWidget::lodLevelChanged,
+            this, &RenderingPanel::onLodLevelChanged);
 
     // 渲染统计显示：已渲染点数 / 全量点数
     connect(m_viewport, &ViewportWidget::pointCloudStatsChanged,
@@ -81,6 +110,62 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_pointBudgetCountLabel->setText(
             tr("Rendered: %1 / %2 points").arg(rendered).arg(total));
     });
+
+    // 初始化 LOD 可用性（默认预算 500 万 → LOD 禁用）
+    updateLodAvailability();
+}
+
+/**
+ * @brief 根据点预算档位/LOD 开关联动控件可用性
+ *
+ * LOD 仅在"全量"模式下有意义（预算模式已固定点数上限）。
+ * 预算模式（>0）下禁用并自动取消勾选 LOD；
+ * LOD 未启用时禁用模式/层级下拉，Manual 模式才启用层级下拉。
+ */
+void RenderingPanel::updateLodAvailability() {
+    bool fullMode = m_pointBudgetCombo->currentData().toInt() <= 0;
+    m_lodCb->setEnabled(fullMode);
+    if (!fullMode) {
+        m_lodCb->setChecked(false);
+    }
+    bool lodActive = fullMode && m_lodCb->isChecked();
+    m_lodModeCombo->setEnabled(lodActive);
+    m_lodLevelCombo->setEnabled(lodActive &&
+                                m_lodModeCombo->currentIndex() == 1);
+}
+
+/**
+ * @brief LOD 状态更新：刷新层级下拉（构建完成后填充 0..N-1）与状态标签
+ */
+void RenderingPanel::onLodLevelChanged(int level, int levelCount) {
+    // 重建层级下拉（保持当前选择，clamp 到有效范围）
+    int prev = m_lodLevelCombo->currentIndex();
+    m_lodLevelCombo->blockSignals(true);
+    m_lodLevelCombo->clear();
+    for (int i = 0; i < levelCount; ++i) {
+        m_lodLevelCombo->addItem(
+            i == 0 ? tr("Level 0 (full)") : tr("Level %1").arg(i));
+    }
+    m_lodLevelCombo->setCurrentIndex(qBound(0, prev, levelCount - 1));
+    m_lodLevelCombo->blockSignals(false);
+
+    updateLodLabel(level, levelCount);
+}
+
+/**
+ * @brief 更新 LOD 状态标签（含切换模式）
+ */
+void RenderingPanel::updateLodLabel(int level, int levelCount) {
+    if (levelCount <= 1 || !m_lodCb->isChecked()) {
+        m_lodLevelLabel->setText(tr("LOD: off"));
+        return;
+    }
+    bool manual = m_lodModeCombo->currentIndex() == 1;
+    m_lodLevelLabel->setText(
+        tr("LOD: L%1/%2 (%3)")
+            .arg(level)
+            .arg(levelCount)
+            .arg(manual ? tr("manual") : tr("auto")));
 }
 
 /**
@@ -171,6 +256,33 @@ void RenderingPanel::setupUi() {
     m_pointBudgetCountLabel = new QLabel(tr("Rendered: -"));
     renderLayout->addWidget(m_pointBudgetCombo);
     renderLayout->addWidget(m_pointBudgetCountLabel);
+
+    // LOD 多级渲染（仅全量模式可用，预算模式自动灰显）
+    m_lodCb = new QCheckBox(tr("LOD (full mode)"));
+    m_lodCb->setToolTip(
+        tr("Distance-based level switching: full detail when close, fewer points when far. Only available in Full mode."));
+    renderLayout->addWidget(m_lodCb);
+    m_lodLevelLabel = new QLabel(tr("LOD: off"));
+    renderLayout->addWidget(m_lodLevelLabel);
+
+    // LOD 切换模式与手动层级
+    auto* lodModeRow = new QHBoxLayout;
+    lodModeRow->addWidget(new QLabel(tr("LOD Mode:")));
+    m_lodModeCombo = new QComboBox;
+    m_lodModeCombo->addItem(tr("Auto (distance)"));
+    m_lodModeCombo->addItem(tr("Manual"));
+    m_lodModeCombo->setToolTip(
+        tr("Auto: switch level by camera distance. Manual: fix a level of your choice."));
+    lodModeRow->addWidget(m_lodModeCombo);
+    renderLayout->addLayout(lodModeRow);
+
+    auto* lodLevelRow = new QHBoxLayout;
+    lodLevelRow->addWidget(new QLabel(tr("LOD Level:")));
+    m_lodLevelCombo = new QComboBox;
+    m_lodLevelCombo->addItem(tr("Level 0 (full)"));
+    m_lodLevelCombo->setToolTip(tr("Select the LOD level in Manual mode."));
+    lodLevelRow->addWidget(m_lodLevelCombo);
+    renderLayout->addLayout(lodLevelRow);
 
     // 采样步长 SpinBox（1-100，默认 1）
     renderLayout->addWidget(new QLabel(tr("Sample Stride:")));

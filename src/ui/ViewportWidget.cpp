@@ -19,6 +19,7 @@
 #include <QResizeEvent>
 #include <QtConcurrent/QtConcurrent>
 #include <chrono>
+#include <cmath>
 
 #include <osg/Notify>
 #include <osg/Math>
@@ -374,6 +375,43 @@ void ViewportWidget::setPointBudget(int maxPoints) {
     }
 }
 
+void ViewportWidget::setLodEnabled(bool enabled) {
+    m_flags.lod_enabled = enabled;
+    m_sceneViz->setLodEnabled(enabled);
+    // 已有点云数据时触发后台异步重建（生成/移除多级 LOD）
+    if (m_graph && m_sceneViz->hasPointCloud()) {
+        requestCloudBuild();
+    }
+}
+
+void ViewportWidget::setLodMode(bool manual) {
+    m_lodManualMode = manual;
+    if (manual) {
+        // 立即应用当前手动层级（clamp 到有效范围）
+        int maxLevel = m_sceneViz->lodLevelCount() - 1;
+        int level = qBound(0, m_lodManualLevel, maxLevel);
+        m_lodManualLevel = level;
+        m_sceneViz->setLodLevel(level);
+        emit lodLevelChanged(level, m_sceneViz->lodLevelCount());
+    } else {
+        // 恢复自动距离切换：立即按当前距离重新评估
+        emit lodLevelChanged(m_sceneViz->currentLodLevel(),
+                             m_sceneViz->lodLevelCount());
+    }
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setLodManualLevel(int level) {
+    m_lodManualLevel = level;
+    if (m_lodManualMode && m_sceneViz->hasPointCloud()) {
+        int maxLevel = m_sceneViz->lodLevelCount() - 1;
+        int clamped = qBound(0, level, maxLevel);
+        m_sceneViz->setLodLevel(clamped);
+        emit lodLevelChanged(clamped, m_sceneViz->lodLevelCount());
+        m_osgWidget->update();
+    }
+}
+
 void ViewportWidget::setZClipping(bool enabled) {
     m_sceneViz->setZClipping(enabled);
     m_osgWidget->update();
@@ -469,9 +507,11 @@ void ViewportWidget::startCloudBuild() {
     m_cloudBuildActiveSeq = m_cloudBuildSeq;
 
     auto graph = m_graph;
-    int budget = m_sceneViz->pointBudget();
-    m_cloudBuildWatcher->setFuture(QtConcurrent::run([graph, budget]() {
-        return hdl_graph_slam::PointCloudBuilder::build(graph, budget);
+    hdl_graph_slam::BuildOptions options;
+    options.maxRenderPoints = m_sceneViz->pointBudget();
+    options.lodEnabled = m_sceneViz->lodEnabled();
+    m_cloudBuildWatcher->setFuture(QtConcurrent::run([graph, options]() {
+        return hdl_graph_slam::PointCloudBuilder::build(graph, options);
     }));
 }
 
@@ -493,6 +533,18 @@ void ViewportWidget::onCloudBuildFinished() {
         emit pointCloudStatsChanged(
             static_cast<qint64>(m_sceneViz->renderPointCount()),
             static_cast<qint64>(m_sceneViz->totalPointCount()));
+
+        // LOD 状态提示：手动模式恢复用户选择的层级；自动模式从 level 0 起步
+        if (m_sceneViz->lodEnabled()) {
+            if (m_lodManualMode && m_sceneViz->lodLevelCount() > 1) {
+                int level = qBound(0, m_lodManualLevel,
+                                   m_sceneViz->lodLevelCount() - 1);
+                m_sceneViz->setLodLevel(level);
+                emit lodLevelChanged(level, m_sceneViz->lodLevelCount());
+            } else {
+                emit lodLevelChanged(0, m_sceneViz->lodLevelCount());
+            }
+        }
         m_osgWidget->update();
     }
 
@@ -552,6 +604,38 @@ void ViewportWidget::updateScene() {
     }
 
     if (!m_graph) return;
+
+    // LOD 级别切换：手动模式固定层级，否则按相机到点云包围球的距离
+    // 自动选择级别（带迟滞防抖）。级别 0 = 全量（最近），级别越高点数越少。
+    // 级间比例 2×：升级阈值 dist > R×2×2^k，降级阈值 dist < R×1.5×2^(k-1)，
+    // 两阈值之间存在死区，避免相机在边界来回导致频繁切换。
+    if (!m_lodManualMode && m_sceneViz->lodEnabled() &&
+        m_sceneViz->lodLevelCount() > 1) {
+        osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+        if (viewer) {
+            osg::Vec3d eye, center, up;
+            viewer->getCamera()->getViewMatrixAsLookAt(eye, center, up);
+            Eigen::Vector3d c = m_sceneViz->boundsCenter();
+            double R = m_sceneViz->boundsRadius();
+            if (R > 1e-6) {
+                double dist = (eye - osg::Vec3d(c.x(), c.y(), c.z())).length();
+                int cur = m_sceneViz->currentLodLevel();
+                int maxLevel = m_sceneViz->lodLevelCount() - 1;
+                int target = cur;
+                if (cur < maxLevel && dist > R * 2.0 * std::pow(2.0, cur)) {
+                    target = cur + 1;  // 拉远 → 低分辨率
+                } else if (cur > 0 && dist < R * 1.5 * std::pow(2.0, cur - 1)) {
+                    target = cur - 1;  // 拉近 → 高分辨率
+                }
+                if (target != cur) {
+                    m_sceneViz->setLodLevel(target);
+                    // 提示层级切换（渲染面板持续显示 + 状态栏临时提示）
+                    emit lodLevelChanged(target, m_sceneViz->lodLevelCount());
+                    m_osgWidget->update();
+                }
+            }
+        }
+    }
 
     // FPS 跟踪（滚动 1 秒平均）
     m_frameCount++;
