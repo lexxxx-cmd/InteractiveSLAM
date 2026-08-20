@@ -78,6 +78,34 @@ public:
 
         m_geode = new osg::Geode;
         m_geode->addDrawable(m_geom);
+
+        // 高亮几何体：选中帧的全量点云（纯白），与 LOD 主几何体叠加。
+        // 它始终使用全量数据渲染，不受 LOD 级别切换影响。
+        m_highlightGeom = new osg::Geometry;
+        m_highlightGeom->setUseDisplayList(false);
+        m_highlightGeom->setUseVertexBufferObjects(true);
+        m_highlightGeom->setUseVertexArrayObject(true);
+        m_highlightGeom->setDataVariance(osg::Object::DYNAMIC);
+
+        m_highlightVertices = new osg::Vec3Array;
+        m_highlightColors   = new osg::Vec4Array;
+
+        m_highlightGeom->setVertexArray(m_highlightVertices);
+        m_highlightGeom->setColorArray(m_highlightColors, osg::Array::BIND_PER_VERTEX);
+        m_highlightGeom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, 0));
+
+        // 高亮点云着色器（支持点大小；Z 裁剪与主几何体同步）
+        auto* hss = m_highlightGeom->getOrCreateStateSet();
+        m_highlightPointSizeUniform = applyPointCloudShader(hss, m_pointSize);
+        m_highlightZClipUniform  = hss->getUniform("z_clipping");
+        m_highlightZRangeUniform = hss->getUniform("z_range");
+        hss->setAttributeAndModes(
+            new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
+            osg::StateAttribute::ON);
+
+        // 默认隐藏，选中时才显示
+        m_highlightGeom->setNodeMask(0);
+        m_geode->addDrawable(m_highlightGeom);
     }
 
     /**
@@ -138,6 +166,12 @@ public:
 
         // 换绑当前渲染数组到 level 0（ref_ptr 指向同一数组，零拷贝）
         bindLevel(0);
+
+        // 全量数据已更新：若存在高亮，重建高亮几何体（全量白色）并重着色主几何体
+        if (!m_highlightIds.empty()) {
+            applyHighlight();
+            rebuildHighlightGeometry();
+        }
     }
 
     /**
@@ -145,7 +179,8 @@ public:
      *
      * 将渲染顶点/颜色数组换绑到目标级别（ref_ptr 指向级别数据，零拷贝），
      * 拷贝该级渲染索引/范围，然后重新着色并标记上传。
-     * 级别 0 = 主级别（全量或预算降采样），级别越远点数越少。
+     * 级别 0 = 主级别（全量），级别越远点数越少。
+     * 高亮几何体使用全量数据，不受级别切换影响，无需重建。
      *
      * @param level 目标级别（0 .. lodLevelCount()-1）
      */
@@ -174,26 +209,30 @@ public:
     /**
      * @brief 清除高亮状态并恢复默认着色
      *
-     * 用于无选中/无播放高亮时恢复所有点云为 Turbo 高程着色 + 当前透明度。
+     * 用于无选中/无播放高亮时恢复所有点云为 Turbo 高程着色 + 当前透明度，
+     * 并隐藏/清空高亮几何体。
      */
     void clearHighlight() {
         m_highlightIds.clear();
         recolorAll();
+        m_highlightVertices->clear();
+        m_highlightColors->clear();
+        m_highlightGeom->setNodeMask(0);
     }
 
     /**
-     * @brief 对指定关键帧集合的点云差异化透明度
+     * @brief 对指定关键帧集合的点云高亮
      *
-     * 在 commitBuild() 之后调用。选中/高亮帧保持当前透明度 m_opacity，
-     * 非选中帧透明度变为 m_opacity × 0.5，形成视觉层次。
-     * 传入空集合时所有帧降为半透明（"暗淡"效果，恢复完整透明度
-     * 请调用 setOpacity）。
+     * 选中/高亮帧的点云以**全量数据**单独渲染为白色（独立高亮几何体，
+     * 不受 LOD 级别影响），主几何体中的选中帧淡化、非选中帧半透明，
+     * 形成"全量白色点云突出"的视觉层次。
      *
-     * @param highlightIds 需要保持完全可见的顶点 ID 集合。
+     * @param highlightIds 需要高亮的顶点 ID 集合（空集合 = 取消高亮）
      */
     void recolorHighlight(const std::set<long>& highlightIds) {
         m_highlightIds = highlightIds;
-        applyHighlight();
+        applyHighlight();          // 主几何体：选中帧淡化，非选中帧半透明
+        rebuildHighlightGeometry(); // 高亮几何体：选中帧全量白色点云
     }
 
     /**
@@ -210,6 +249,9 @@ public:
         m_activeLodLevel = 0;
         m_vertices->clear();
         m_colors->clear();
+        m_highlightVertices->clear();
+        m_highlightColors->clear();
+        m_highlightGeom->setNodeMask(0);
         m_zMin =  std::numeric_limits<float>::max();
         m_zMax = -std::numeric_limits<float>::max();
         m_bMin = Eigen::Vector3d( std::numeric_limits<double>::max(),
@@ -222,22 +264,29 @@ public:
         m_clipRangeInitialized = false;
     }
 
-    /** @brief 设置点的大小（像素单位） */
+    /** @brief 设置点的大小（像素单位，主几何体与高亮几何体同步） */
     void setPointSize(float size) {
         m_pointSize = size;
         if (m_pointSizeUniform)
             m_pointSizeUniform->set(size);
+        if (m_highlightPointSizeUniform)
+            m_highlightPointSizeUniform->set(size);
     }
 
     /** @brief 设置点云透明度 */
     void setOpacity(float opacity) {
         m_opacity = opacity;
-        // 透明度变化需更新所有顶点的 alpha 通道
-        recolorAll();
+        if (!m_highlightIds.empty()) {
+            // 高亮存在时同步更新主几何体着色与高亮几何体的 alpha
+            applyHighlight();
+            rebuildHighlightGeometry();
+        } else {
+            recolorAll();
+        }
     }
 
     // ========================================================================
-    // Z 轴裁剪控制（着色器级别，无需重建 VBO）
+    // Z 轴裁剪控制（着色器级别，无需重建 VBO；高亮几何体同步）
     // ========================================================================
 
     /** @brief 启用/禁用 Z 轴裁剪 */
@@ -245,6 +294,8 @@ public:
         m_zClipping = enabled;
         if (m_zClipUniform)
             m_zClipUniform->set(enabled ? 1 : 0);
+        if (m_highlightZClipUniform)
+            m_highlightZClipUniform->set(enabled ? 1 : 0);
     }
 
     /** @brief 设置 Z 轴裁剪范围 */
@@ -253,6 +304,8 @@ public:
         m_zClipMax = maxZ;
         if (m_zRangeUniform)
             m_zRangeUniform->set(osg::Vec2(minZ, maxZ));
+        if (m_highlightZRangeUniform)
+            m_highlightZRangeUniform->set(osg::Vec2(minZ, maxZ));
     }
 
     /** @brief 查询 Z 裁剪状态 */
@@ -344,10 +397,11 @@ private:
     }
 
     /**
-     * @brief 应用当前高亮集合（选中帧白色，其余帧半透明）
+     * @brief 应用当前高亮集合到主几何体
      *
-     * 遍历渲染范围而非全量范围，索引经 m_renderIndices 映射回全量点
-     * 以获取正确的 Z 值。降采样后逐帧范围仍保持完整。
+     * 选中帧在主几何体中淡化（白色低 alpha，作为高亮几何体的底色），
+     * 其余帧半透明。遍历渲染范围而非全量范围，索引经 m_renderIndices
+     * 映射回全量点以获取正确的 Z 值。
      */
     void applyHighlight() {
         if (!m_colors || m_renderRanges.empty()) return;
@@ -355,21 +409,70 @@ private:
         const osg::Vec4 white(1.0f, 1.0f, 1.0f, 1.0f);
         // 遍历每个关键帧的渲染顶点范围
         for (const auto& range : m_renderRanges) {
-            float alpha = m_highlightIds.count(range.vertexId)
-                              ? m_opacity          // 选中帧：保持当前透明度
-                              : m_opacity * 0.5f;  // 非选中帧：半透明度
+            bool highlighted = m_highlightIds.count(range.vertexId) > 0;
+            // 选中帧：淡化（全量白色由高亮几何体承担）；非选中帧：半透明
+            float alpha = highlighted ? m_opacity * 0.35f : m_opacity * 0.5f;
             for (size_t i = range.startVertex;
                  i < range.startVertex + range.vertexCount; ++i) {
                 size_t fi = m_renderFullRes ? i : m_renderIndices[i];
                 float wz = static_cast<float>(m_allWorldPoints[fi].z());
-                if (alpha == m_opacity) (*m_colors)[i] = white;
-                else {
+                if (highlighted) {
+                    (*m_colors)[i] = white;
+                    (*m_colors)[i].a() = alpha;
+                } else {
                     (*m_colors)[i] = turboColor(wz, m_colorZMin, m_colorZMax);
                     (*m_colors)[i].a() = alpha;
                 }
             }
         }
         m_colors->dirty();
+    }
+
+    /**
+     * @brief 重建高亮几何体：选中帧的全量点云（纯白色，独立 VBO）
+     *
+     * 从全量数据（m_allWorldPoints + m_cloudRanges）提取高亮帧的全部点，
+     * 不经过任何 LOD 降采样，因此与主几何体的当前级别无关——LOD 切换时
+     * 高亮帧始终以全量白色渲染。空高亮集合时隐藏几何体。
+     */
+    void rebuildHighlightGeometry() {
+        m_highlightVertices->clear();
+        m_highlightColors->clear();
+
+        if (m_highlightIds.empty() || m_allWorldPoints.empty()) {
+            m_highlightGeom->setNodeMask(0);
+            return;
+        }
+
+        // 统计选中帧的全量点数并预留
+        size_t total = 0;
+        for (const auto& range : m_cloudRanges) {
+            if (m_highlightIds.count(range.vertexId)) total += range.vertexCount;
+        }
+        m_highlightVertices->reserve(total);
+        m_highlightColors->reserve(total);
+
+        // 提取选中帧全量点，颜色纯白 + 当前透明度
+        for (const auto& range : m_cloudRanges) {
+            if (!m_highlightIds.count(range.vertexId)) continue;
+            for (size_t j = range.startVertex;
+                 j < range.startVertex + range.vertexCount; ++j) {
+                const Eigen::Vector3d& p = m_allWorldPoints[j];
+                m_highlightVertices->push_back(osg::Vec3(
+                    static_cast<float>(p.x()),
+                    static_cast<float>(p.y()),
+                    static_cast<float>(p.z())));
+                m_highlightColors->push_back(osg::Vec4(1.0f, 1.0f, 1.0f, m_opacity));
+            }
+        }
+
+        m_highlightVertices->dirty();
+        m_highlightColors->dirty();
+        auto* prim = static_cast<osg::DrawArrays*>(
+            m_highlightGeom->getPrimitiveSet(0));
+        if (prim) prim->setCount(m_highlightVertices->size());
+        m_highlightGeom->dirtyBound();
+        m_highlightGeom->setNodeMask(~0u);
     }
 
     /**
@@ -392,13 +495,21 @@ private:
 
     // —— OSG 对象 ——
     osg::ref_ptr<osg::Geode>     m_geode;         ///< 叶节点
-    osg::ref_ptr<osg::Geometry>  m_geom;          ///< 点云几何体
-    osg::ref_ptr<osg::Vec3Array> m_vertices;      ///< 渲染顶点数组（降采样后）
-    osg::ref_ptr<osg::Vec4Array> m_colors;        ///< 渲染颜色数组（降采样后）
+    osg::ref_ptr<osg::Geometry>  m_geom;          ///< 点云几何体（LOD 主几何体）
+    osg::ref_ptr<osg::Vec3Array> m_vertices;      ///< 渲染顶点数组（当前 LOD 级别）
+    osg::ref_ptr<osg::Vec4Array> m_colors;        ///< 渲染颜色数组（当前 LOD 级别）
     // BlendColor 已移除，透明度通过 per-vertex alpha 控制
     osg::ref_ptr<osg::Uniform>    m_pointSizeUniform; ///< 点大小 uniform
     osg::ref_ptr<osg::Uniform>    m_zClipUniform;     ///< Z 轴裁剪开关 uniform
     osg::ref_ptr<osg::Uniform>    m_zRangeUniform;    ///< Z 轴裁剪范围 uniform
+
+    // —— 高亮几何体（选中帧全量白色，不受 LOD 影响） ——
+    osg::ref_ptr<osg::Geometry>  m_highlightGeom;         ///< 高亮点云几何体
+    osg::ref_ptr<osg::Vec3Array> m_highlightVertices;     ///< 高亮顶点数组（全量）
+    osg::ref_ptr<osg::Vec4Array> m_highlightColors;       ///< 高亮颜色数组（纯白）
+    osg::ref_ptr<osg::Uniform>   m_highlightPointSizeUniform; ///< 高亮点大小 uniform
+    osg::ref_ptr<osg::Uniform>   m_highlightZClipUniform;     ///< 高亮 Z 裁剪开关 uniform
+    osg::ref_ptr<osg::Uniform>   m_highlightZRangeUniform;    ///< 高亮 Z 裁剪范围 uniform
 
     // —— 世界坐标系点数据（全量保留，供着色、高亮、统计使用） ——
     std::vector<Eigen::Vector3d,
