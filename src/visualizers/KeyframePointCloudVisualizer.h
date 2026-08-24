@@ -350,15 +350,7 @@ public:
     /** @brief 获取 OSG 节点 */
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
 
-    /** @brief 当前实际渲染的点数（降采样后） */
-    int renderPointCount() const {
-        return static_cast<int>(m_vertices->size());
-    }
-
-    /** @brief 全量点云总点数（降采样前） */
-    size_t totalPointCount() const { return m_allWorldPoints.size(); }
-
-    /** @brief 返回点云中的渲染点数（降采样后） */
+    /** @brief 返回点云中的渲染点数（当前 LOD 级别） */
     int pointCount() const {
         auto* prim = static_cast<osg::DrawArrays*>(m_geom->getPrimitiveSet(0));
         return prim ? prim->getCount() : 0;

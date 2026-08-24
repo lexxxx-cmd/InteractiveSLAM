@@ -20,7 +20,6 @@
 
 #include <regex>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 
 #include <Eigen/Dense>
@@ -64,14 +63,14 @@ enum class EdgeSource {
  * 核心能力：
  *   - 地图数据加载：加载 graph.g2o、关键帧序列和特殊节点
  *   - 边（Edge）管理：添加各种类型的边、按 ID 删除边
- *   - 图优化：支持前台同步优化和后台异步优化
+ *   - 图优化：前台同步优化（异步由上层以独立线程 + optimization_mutex 实现）
  *   - 数据导出：保存为标准格式或 LVBA 格式
  *   - 参数管理：通过 ParameterServer 配置优化器和信息矩阵参数
  *
  * 线程安全性：
  *   - 使用 optimization_mutex 保护优化过程中的数据访问
- *   - optimization_thread 用于后台优化
  *   - add_edge() 等写操作需要外部加锁
+ *   - removeEdge() 使用 try_lock 避免阻塞 UI
  *
  * 继承关系：
  *   继承自 GraphSLAM，通过 using 声明暴露了基类的 graph、num_edges、
@@ -157,15 +156,6 @@ public:
     void optimize(int num_iterations = -1);
 
     /**
-     * @brief 在后台线程中执行图优化（异步）
-     * @param num_iterations 优化迭代次数
-     *
-     * 在独立线程中运行优化，不阻塞 UI。使用 optimization_mutex
-     * 保护优化过程中的数据一致性。
-     */
-    void optimize_background(int num_iterations = -1);
-
-    /**
      * @brief 获取图的统计信息
      * @param update 是否强制更新缓存
      * @return 统计信息字符串（包含顶点数、边数、耗时、chi2 等）
@@ -245,8 +235,6 @@ private:
     g2o::VertexSE3* anchor_node;  ///< 锚点节点（固定节点，防止图优化漂移）
     g2o::EdgeSE3* anchor_edge;    ///< 锚点与首个关键帧之间的约束边
     long edge_id_gen;             ///< 边 ID 自动生成器（自增计数器）
-
-    std::thread optimization_thread;  ///< 后台优化线程
 
 public:
     mutable std::mutex optimization_mutex;  ///< 优化互斥锁（用于线程间同步）

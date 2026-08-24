@@ -160,16 +160,6 @@ public:
         return m_cloudViz ? m_cloudViz->boundsRadius() : 0.0;
     }
 
-    /** @brief 当前实际渲染的点数（降采样后） */
-    int renderPointCount() const {
-        return m_cloudViz ? m_cloudViz->renderPointCount() : 0;
-    }
-
-    /** @brief 全量点云总点数（降采样前） */
-    size_t totalPointCount() const {
-        return m_cloudViz ? m_cloudViz->totalPointCount() : 0;
-    }
-
     // ========================================================================
     // Z 轴裁剪控制
     // ========================================================================

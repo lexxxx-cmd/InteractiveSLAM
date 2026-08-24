@@ -23,7 +23,6 @@ struct DrawFlags {
     bool draw_edges            = true;   ///< 是否绘制所有边（连线）
     bool draw_keyframe_vertices = true;  ///< 是否绘制关键帧点云
     bool draw_se3_edges        = true;   ///< 是否绘制 SE3 约束边
-    bool z_clipping            = false;  ///< 是否启用 Z 轴裁剪
     int  sample_stride         = 1;     ///< 渲染采样步长（1=全部渲染, N=每N帧渲染1个球体）
     bool lod_enabled           = true;  ///< 点云 LOD 多级渲染开关（渲染固定为全量 + LOD）
 };
