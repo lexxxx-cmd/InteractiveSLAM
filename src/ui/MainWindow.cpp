@@ -687,8 +687,12 @@ void MainWindow::onOptimize() {
         return;
     }
 
-    // 在分离线程中运行 g2o 优化，完成后通过 invokeMethod 回到主线程刷新
+    // 在分离线程中运行 g2o 优化，完成后通过 invokeMethod 回到主线程刷新。
+    // 必须持有 optimization_mutex：与自动回环检测线程的优化互斥，避免并发
+    // 修改图数据导致的数据竞争（自动回环在 automatic_loop_closure.cpp 中
+    // 同样以该锁保护 optimize）。
     std::thread([this, graph]() {
+        std::lock_guard<std::mutex> lock(graph->optimization_mutex);
         graph->optimize();
         QMetaObject::invokeMethod(this, [this]() {
             m_optimizePending = false;
