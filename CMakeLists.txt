@@ -95,13 +95,14 @@ set(BACKEND_SOURCES
 set(UI_SOURCES
     src/ui/MainWindow.cpp                                 # 主窗口
     src/ui/BagOpenDialog.cpp                              # 打开 Bag 对话框（topic 选择）
+    src/ui/AutoLoopClosureDialog.cpp                       # 高级设置：自动回环对话框
+    src/ui/RenderingAdvancedDialogs.cpp                    # 高级设置：渲染相关对话框（LOD/Z裁剪/颜色范围）
     src/ui/ViewportWidget.cpp                             # 3D 视口控件
     src/ui/GraphStatsPanel.cpp                            # 图统计面板
     src/ui/RenderingPanel.cpp                             # 渲染设置面板
-    src/ui/PointCloudFiltersPanel.cpp                        # 点云过滤面板（Z裁剪 + 颜色范围）
     src/ui/MiniViewportWidget.cpp                         # 缩略图视口
     src/ui/LoopClosureDialog.cpp                          # 回环闭合对话框
-    src/ui/AutoLoopClosurePanel.cpp                       # 自动回环面板
+    src/ui/AutoLoopClosurePanel.cpp                       # 自动回环面板（精简）
     src/ui/EdgeListPanel.cpp                              # 边列表面板
     src/ui/PlaybackPanel.cpp                              # 播放轴面板
     src/ui/OverlayPanelWidget.cpp                         # 叠加面板控件

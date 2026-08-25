@@ -62,13 +62,4 @@ private:
 
     QSpinBox* m_sampleStrideSpin;   ///< 采样步长输入框
     QLabel*   m_sampleStrideLabel;  ///< 采样步长标签
-
-    QCheckBox* m_lodCb;                 ///< LOD 多级渲染复选框（默认开启）
-    QLabel*    m_lodLevelLabel;         ///< 当前 LOD 层级状态显示（如 "LOD: L2/6 (auto)"）
-    QComboBox* m_lodModeCombo;          ///< LOD 切换模式（Auto / Manual）
-    QComboBox* m_lodLevelCombo;         ///< LOD 手动层级选择（构建完成后填充 0..N-1）
-
-    void updateLodAvailability();       ///< 根据 LOD 开关联动控件可用性
-    void onLodLevelChanged(int level, int levelCount);  ///< LOD 状态更新（label + 层级下拉）
-    void updateLodLabel(int level, int levelCount);     ///< 更新 LOD 状态标签
 };

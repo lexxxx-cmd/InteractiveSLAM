@@ -1,27 +1,18 @@
 /**
  * @file AutoLoopClosurePanel.h
- * @brief 自动闭环检测控制面板头文件
+ * @brief 自动闭环检测控制面板（精简版）头文件
  *
- * AutoLoopClosurePanel 是用于配置和控制自动闭环检测的浮动面板。
- * 它拥有一个 AutomaticLoopClosure 实例（数据层），提供 Qt 控件用于
- * 参数配置和状态监控。使用 100ms 定时器轮询数据层的状态快照。
+ * 界面简洁化后，面板只保留"开始/停止 + 实时状态"，所有参数
+ * （搜索/配准/鲁棒核/评分/优化选项）收敛到 LoopClosureParams 结构，
+ * 由「高级设置 → 优化相关…」对话框读写（getParams/setParams）。
  *
- * 功能：
- * - 闭环搜索参数配置（搜索方法、距离阈值）
- * - 点云配准参数配置（方法、迭代次数、精度等）
- * - 鲁棒核函数配置
- * - 匹配质量阈值（适应度分数）
- * - 启动/停止检测
- * - 实时状态显示（当前源顶点、候选顶点数、已插入边数、最后匹配）
+ * 面板拥有一个 AutomaticLoopClosure 实例（数据层），使用 100ms
+ * 定时器轮询数据层的线程安全状态快照。
  */
 
 #pragma once
 
 #include <QWidget>
-#include <QComboBox>
-#include <QDoubleSpinBox>
-#include <QSpinBox>
-#include <QCheckBox>
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
@@ -31,18 +22,33 @@ class GraphManager;
 
 namespace hdl_graph_slam {
 class AutomaticLoopClosure;
+class InteractiveGraph;
 }  // namespace hdl_graph_slam
 
 /**
- * @brief 自动闭环检测控制面板
- *
- * 拥有一个 AutomaticLoopClosure 实例（数据层），提供 Qt 控件
- * 用于参数配置和状态监控。使用 100ms QTimer 定时从数据层轮询
- * 线程安全的状态快照。
- *
- * 信号：
- * - loopEdgeInserted: 新闭环边插入时触发，MainWindow 用于刷新视口
- * - loopDetectionStatus: 每次轮询（~10Hz），包含源和候选顶点 ID
+ * @brief 自动回环检测参数（UI 无关，供高级设置对话框读写）
+ */
+struct LoopClosureParams {
+    int    searchMethod        = 0;      ///< 搜索方法（0=SEQUENTIAL, 1=RANDOM）
+    double distanceThresh      = 10.0;   ///< 搜索距离阈值（米）
+    double accumDistanceThresh = 15.0;   ///< 累计距离阈值（米）
+
+    int    registrationMethod  = 1;      ///< 配准方法索引（0=ICP, 1=GICP, ...）
+    int    maxIterations       = 64;     ///< 配准最大迭代次数
+    double epsilon             = 1e-4;   ///< 变换收敛精度
+    double resolution          = 2.0;    ///< NDT 分辨率
+
+    int    robustKernel        = 0;      ///< 鲁棒核类型（0=NONE, ...）
+    double kernelDelta         = 0.01;   ///< 核函数 delta
+
+    double fitnessThresh       = 0.30;   ///< 配准评分阈值
+    double fitnessMaxRange     = 2.00;   ///< 评分最大对应点距离
+
+    bool   optimizeAfterInsert = true;   ///< 插入边后自动优化
+};
+
+/**
+ * @brief 自动闭环检测控制面板（精简版：开始/停止 + 状态）
  */
 class AutoLoopClosurePanel : public QWidget {
     Q_OBJECT
@@ -53,6 +59,11 @@ public:
 
     /// 停止检测线程（MainWindow 在关闭地图时调用）
     void stopDetection();
+
+    /** @brief 读取当前参数（高级设置对话框用） */
+    LoopClosureParams getParams() const;
+    /** @brief 写入参数（高级设置对话框确定时调用；未运行时生效） */
+    void setParams(const LoopClosureParams& params);
 
 signals:
     /// 新闭环边插入时发出 — MainWindow 刷新视口
@@ -65,49 +76,30 @@ private slots:
     void onPollStatus();  ///< 定时轮询状态快照
 
 private:
-    void setupUi();                        ///< 创建 UI 控件
-    void syncParamsToLoop();               ///< 将 UI 控件的值推送到数据层
-    void syncParamsFromLoop();             ///< 将数据层默认值拉到 UI 控件（创建时）
+    void setupUi();                        ///< 创建 UI 控件（仅开始/停止+状态）
+    void syncParamsToLoop();               ///< 将 params 推送到数据层
     void updateStatusStyle(bool running);  ///< 根据运行状态更新状态标签样式
 
     GraphManager* m_manager;  ///< 图数据管理器（非拥有指针）
 
     // ---- 数据层（首次启动时延迟创建） ----
     std::unique_ptr<hdl_graph_slam::AutomaticLoopClosure> m_autoLoop;
+    hdl_graph_slam::InteractiveGraph* m_loopGraph = nullptr;  ///< 数据层绑定的图指针（检测图变化）
 
-    // ---- 搜索参数 ----
-    QComboBox*      m_searchMethodCombo;      ///< 搜索方法（SEQUENTIAL / RANDOM）
-    QDoubleSpinBox* m_distanceThreshSpin;      ///< 搜索距离阈值
-    QDoubleSpinBox* m_accumDistThreshSpin;     ///< 累积距离阈值
-
-    // ---- 配准参数 ----
-    QComboBox*      m_methodCombo;             ///< 配准方法（GICP/NDT 等）
-    QSpinBox*       m_maxIterSpin;             ///< 最大迭代次数
-    QDoubleSpinBox* m_epsSpin;                 ///< 变换精度阈值
-    QDoubleSpinBox* m_resolutionSpin;          ///< NDT 分辨率
-
-    // ---- 鲁棒核函数 ----
-    QComboBox*      m_kernelCombo;             ///< 鲁棒核类型
-    QDoubleSpinBox* m_kernelDeltaSpin;          ///< 核函数 delta 参数
-
-    // ---- 适应度阈值 ----
-    QDoubleSpinBox* m_fitnessThreshSpin;        ///< 适应度分数阈值
-    QDoubleSpinBox* m_fitnessMaxRangeSpin;      ///< 适应度计算最大范围
-
-    // ---- 选项 ----
-    QCheckBox* m_optimizeCb;                    ///< 插入边后是否执行优化
+    // ---- 参数（由高级设置对话框读写） ----
+    LoopClosureParams m_params;
 
     // ---- 动作按钮 ----
-    QPushButton* m_startStopBtn;                ///< 开始/停止按钮
+    QPushButton* m_startStopBtn = nullptr;  ///< 开始/停止按钮
 
     // ---- 状态显示 ----
-    QLabel* m_statusLabel;           ///< 运行状态标签
-    QLabel* m_sourceLabel;           ///< 当前源顶点标签
-    QLabel* m_candidatesLabel;       ///< 候选顶点数标签
-    QLabel* m_edgesInsertedLabel;    ///< 已插入边数标签
-    QLabel* m_lastMatchLabel;        ///< 最后匹配信息标签
+    QLabel* m_statusLabel = nullptr;       ///< 运行状态标签
+    QLabel* m_sourceLabel = nullptr;       ///< 当前源顶点标签
+    QLabel* m_candidatesLabel = nullptr;   ///< 候选顶点数标签
+    QLabel* m_edgesInsertedLabel = nullptr;///< 已插入边数标签
+    QLabel* m_lastMatchLabel = nullptr;    ///< 最后匹配信息标签
 
     // ---- 轮询 ----
-    QTimer* m_pollTimer;                ///< 状态轮询定时器（100ms）
-    int m_lastKnownEdgesInserted = 0;  ///< 上次已知的边插入数（用于检测新边）
+    QTimer* m_pollTimer = nullptr;                ///< 状态轮询定时器（100ms）
+    int m_lastKnownEdgesInserted = 0;             ///< 上次已知的边插入数（检测新边）
 };

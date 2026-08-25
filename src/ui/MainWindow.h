@@ -19,7 +19,6 @@ class GraphManager;
 class ViewportWidget;
 class GraphStatsPanel;
 class RenderingPanel;
-class PointCloudFiltersPanel;
 class AutoLoopClosurePanel;
 class EdgeListPanel;
 class OverlayPanelWidget;
@@ -72,30 +71,32 @@ private:
     // === 叠加面板（内容部件 + 包装器） ===
     GraphStatsPanel*    m_statsPanel    = nullptr;  ///< 图统计信息面板
     RenderingPanel*     m_renderPanel   = nullptr;  ///< 渲染控制面板
-    PointCloudFiltersPanel* m_filtersPanel = nullptr;  ///< 点云过滤面板（Z裁剪 + 颜色范围）
 
-    AutoLoopClosurePanel* m_autoLoopPanel = nullptr;  ///< 自动闭环检测面板
     EdgeListPanel* m_edgeListPanel = nullptr;         ///< 闭环边列表面板
     PlaybackPanel* m_playbackPanel = nullptr;         ///< 播放轴面板
 
     // === 视图菜单动作（用于与叠加面板的显示状态同步） ===
     QAction* m_statsViewAction  = nullptr;  ///< "图统计信息"视图切换动作
     QAction* m_renderViewAction = nullptr;  ///< "渲染"视图切换动作
-    QAction* m_filtersViewAction  = nullptr;  ///< "点云过滤"视图切换动作
-    QAction* m_autoLoopViewAction = nullptr;  ///< "自动闭环"视图切换动作
-    QAction* m_edgeListViewAction = nullptr;  ///< "闭环边"视图切换动作
     QAction* m_playbackViewAction = nullptr;  ///< "播放轴"视图切换动作
 
     // === 叠加面板包装器（浮动于视口之上） ===
     OverlayPanelWidget* m_statsOverlay  = nullptr;  ///< 图统计悬浮面板
     OverlayPanelWidget* m_renderOverlay = nullptr;  ///< 渲染悬浮面板
-    OverlayPanelWidget* m_filtersOverlay  = nullptr;  ///< 点云过滤悬浮面板
-    OverlayPanelWidget* m_autoLoopOverlay = nullptr;  ///< 自动闭环悬浮面板
     OverlayPanelWidget* m_edgeListOverlay = nullptr;  ///< 闭环边悬浮面板
     OverlayPanelWidget* m_playbackOverlay = nullptr;  ///< 播放轴悬浮面板
 
+    // === 高级设置对话框（懒创建） ===
+    class AutoLoopClosureDialog;
+    class LodSettingsDialog;
+    class ZClipSettingsDialog;
+    class ColorRangeSettingsDialog;
+    AutoLoopClosureDialog*    m_autoLoopDialog = nullptr;   ///< 自动回环检测对话框
+    LodSettingsDialog*        m_lodDialog = nullptr;        ///< 多级渲染(LOD)对话框
+    ZClipSettingsDialog*      m_zClipDialog = nullptr;      ///< Z 轴裁剪对话框
+    ColorRangeSettingsDialog* m_colorRangeDialog = nullptr; ///< 高程颜色范围对话框
+
     long m_loopBeginVertexId = -1;   ///< 手动闭环起点顶点 ID，-1 表示未选择
-    QAction* m_orthoViewAction = nullptr;  ///< 正交视图切换动作
     int m_submapWindowHalfSize = 7;  ///< 闭环匹配时合并的相邻关键帧数（±N 帧）
     QAction* m_optimizeAction = nullptr;  ///< 图优化动作（用于启用/禁用状态同步）
     bool m_optimizePending = false;  ///< 优化是否正在进行中（防止重复触发）

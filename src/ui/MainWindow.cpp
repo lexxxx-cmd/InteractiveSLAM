@@ -15,17 +15,18 @@
 #include "ui/ViewportWidget.h"
 #include "ui/GraphStatsPanel.h"
 #include "ui/RenderingPanel.h"
-#include "ui/PointCloudFiltersPanel.h"
-#include "ui/AutoLoopClosurePanel.h"
 #include "ui/EdgeListPanel.h"
 #include "ui/OverlayPanelWidget.h"
 #include "ui/PlaybackPanel.h"
 #include "ui/LoopClosureDialog.h"
 #include "ui/BagOpenDialog.h"
+#include "ui/AutoLoopClosureDialog.h"
+#include "ui/RenderingAdvancedDialogs.h"
 #include "backend/graph_manager.hpp"
 #include "data/hdl_graph_slam/bag_importer.hpp"
 
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QMenu>
 #include <QDialog>
@@ -232,22 +233,18 @@ void MainWindow::setupUi() {
     // 创建面板的内容部件
     m_statsPanel   = new GraphStatsPanel(m_manager, m_viewport, nullptr);
     m_renderPanel  = new RenderingPanel(m_viewport, nullptr);
-    m_filtersPanel = new PointCloudFiltersPanel(m_viewport, nullptr);
 
     // 将内容部件包装到可拖动的悬浮面板中
     m_statsOverlay    = new OverlayPanelWidget(tr("Graph Statistics"), m_statsPanel);
     m_renderOverlay   = new OverlayPanelWidget(tr("Rendering"), m_renderPanel);
-    m_filtersOverlay  = new OverlayPanelWidget(tr("Point Cloud Filters"), m_filtersPanel);
 
     // 注册到视口（重新设置父级、定位、显示）
     m_viewport->registerOverlay(m_statsOverlay);
     m_viewport->registerOverlay(m_renderOverlay);
-    m_viewport->registerOverlay(m_filtersOverlay);
 
-    // 图统计和渲染面板默认可见，过滤面板默认隐藏
+    // 图统计和渲染面板默认可见
     m_statsOverlay->show();
     m_renderOverlay->show();
-    m_filtersOverlay->hide();
     m_viewport->updateOverlayPositions();
 
     // 面板关闭按钮 → 隐藏面板 + 同步菜单勾选状态
@@ -267,46 +264,25 @@ void MainWindow::setupUi() {
             if (m_renderViewAction) m_renderViewAction->setChecked(false);
         }
     });
-    connect(m_filtersOverlay, &OverlayPanelWidget::closeRequested,
-            this, [this]() {
-        if (m_filtersOverlay) {
-            m_filtersOverlay->hide();
-            m_viewport->updateOverlayPositions();
-            if (m_filtersViewAction) m_filtersViewAction->setChecked(false);
-        }
-    });
 
     // ---- 已有的浮动叠加面板 ----
-    m_autoLoopPanel = new AutoLoopClosurePanel(m_manager, nullptr);
+    // （自动回环已内嵌到"优化相关"设置对话框，不再作为独立浮动面板）
     m_edgeListPanel = new EdgeListPanel(m_manager, nullptr);
 
-    m_autoLoopOverlay = new OverlayPanelWidget(tr("Auto Loop Closure"), m_autoLoopPanel);
-    m_autoLoopOverlay->setMaximumHeight(560);
     m_edgeListOverlay = new OverlayPanelWidget(tr("Loop Edges"), m_edgeListPanel);
 
-    m_viewport->registerOverlay(m_autoLoopOverlay);
     m_viewport->registerOverlay(m_edgeListOverlay);
 
-    // 默认隐藏（通过视图菜单切换）
-    m_autoLoopOverlay->hide();
+    // 默认隐藏（显示开关在"优化相关"设置对话框）
     m_edgeListOverlay->hide();
     m_viewport->updateOverlayPositions();
 
-    // 面板关闭按钮 → 同步菜单状态
-    connect(m_autoLoopOverlay, &OverlayPanelWidget::closeRequested,
-            this, [this]() {
-        if (m_autoLoopOverlay) {
-            m_autoLoopOverlay->hide();
-            m_viewport->updateOverlayPositions();
-            if (m_autoLoopViewAction) m_autoLoopViewAction->setChecked(false);
-        }
-    });
+    // 面板关闭按钮 → 隐藏面板（显示开关状态由"优化相关"对话框打开时同步）
     connect(m_edgeListOverlay, &OverlayPanelWidget::closeRequested,
             this, [this]() {
         if (m_edgeListOverlay) {
             m_edgeListOverlay->hide();
             m_viewport->updateOverlayPositions();
-            if (m_edgeListViewAction) m_edgeListViewAction->setChecked(false);
         }
     });
 
@@ -331,23 +307,6 @@ void MainWindow::setupUi() {
     // 采样步长变化 → 通知 PlaybackPanel 重建帧列表
     connect(m_viewport, &ViewportWidget::sampleStrideChanged,
             m_playbackPanel, &PlaybackPanel::onSampleStrideChanged);
-
-    // 自动检测到闭环边时刷新视口
-    connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopEdgeInserted,
-            this, [this]() {
-        m_viewport->refreshScene();
-        m_viewport->rebuildPointClouds();
-        m_edgeListPanel->refreshList();
-        statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
-    });
-
-    // 自动闭环搜索时的高亮显示：蓝色=源顶点，绿色=候选顶点
-    connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopDetectionStatus,
-            this, [this](long sourceId, QVector<long> candidateIds) {
-        std::vector<long> vec(candidateIds.begin(), candidateIds.end());
-        m_viewport->setLoopHighlight(sourceId, vec);
-        m_viewport->refreshScene();
-    });
 
     // 隐藏边变化时刷新视口
     connect(m_edgeListPanel, &EdgeListPanel::hiddenEdgesChanged,
@@ -418,14 +377,6 @@ void MainWindow::setupMenus() {
     resetCamAction->setShortcut(QKeySequence(Qt::Key_R));
     connect(resetCamAction, &QAction::triggered, this, &MainWindow::onResetCamera);
 
-    // 正交/透视视图切换
-    m_orthoViewAction = viewMenu->addAction(tr("Orthographic View"));
-    m_orthoViewAction->setCheckable(true);
-    m_orthoViewAction->setChecked(false);  // 默认：透视投影
-    connect(m_orthoViewAction, &QAction::toggled, this, [this](bool checked) {
-        m_viewport->setUseOrthographic(checked);
-    });
-
     viewMenu->addSeparator();
 
     // 图统计面板显示切换
@@ -450,31 +401,7 @@ void MainWindow::setupMenus() {
         }
     });
 
-    // 点云过滤面板显示切换
-    m_filtersViewAction = viewMenu->addAction(tr("Point Cloud Filters"));
-    m_filtersViewAction->setCheckable(true);
-    m_filtersViewAction->setChecked(false);
-    connect(m_filtersViewAction, &QAction::toggled, this, [this](bool checked) {
-        if (m_filtersOverlay) {
-            m_filtersOverlay->setVisible(checked);
-            m_viewport->updateOverlayPositions();
-        }
-    });
-
-    viewMenu->addSeparator();
-
-    // 自动闭环面板显示切换
-    m_autoLoopViewAction = viewMenu->addAction(tr("Auto Loop Closure Panel"));
-    m_autoLoopViewAction->setCheckable(true);
-    m_autoLoopViewAction->setChecked(false);
-    connect(m_autoLoopViewAction, &QAction::toggled, this, [this](bool checked) {
-        if (m_autoLoopOverlay) {
-            m_autoLoopOverlay->setVisible(checked);
-            m_viewport->updateOverlayPositions();
-        }
-    });
-
-    // 播放轴面板显示切换
+    // 播放轴面板显示切换（回环起点搜索常用入口）
     m_playbackViewAction = viewMenu->addAction(tr("Playback"));
     m_playbackViewAction->setCheckable(true);
     m_playbackViewAction->setChecked(false);
@@ -485,64 +412,103 @@ void MainWindow::setupMenus() {
         }
     });
 
-    // 闭环边列表面板显示切换
-    m_edgeListViewAction = viewMenu->addAction(tr("Loop Edges Panel"));
-    m_edgeListViewAction->setCheckable(true);
-    m_edgeListViewAction->setChecked(false);
-    connect(m_edgeListViewAction, &QAction::toggled, this, [this](bool checked) {
+    // ---- 高级设置菜单（收纳不常用功能） ----
+    auto* settingsMenu = menuBar()->addMenu(tr("Ad&vanced"));
+
+    // ==================== 优化相关（子菜单） ====================
+    auto* optMenu = settingsMenu->addMenu(tr("Optimization"));
+
+    // 图优化（Ctrl+Shift+O）
+    auto* optimizeAction = optMenu->addAction(tr("&Optimize"));
+    optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    m_optimizeAction = optimizeAction;
+    connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
+
+    optMenu->addSeparator();
+
+    // 子图窗口大小（小弹窗，即时应用）
+    auto* submapAction = optMenu->addAction(tr("Submap Window Size..."));
+    connect(submapAction, &QAction::triggered, this, [this]() {
+        bool ok = false;
+        int half = QInputDialog::getInt(
+            this, tr("Submap Merge Window"),
+            tr("Merge ±N adjacent keyframes around the selected vertex\n"
+               "for loop-closure matching (N=1 merges 3 frames):"),
+            m_submapWindowHalfSize, 0, 10, 1, &ok);
+        if (ok) {
+            m_submapWindowHalfSize = half;
+            m_viewport->setHighlightWindowHalf(half);
+        }
+    });
+
+    // 自动回环检测（对话框：内嵌面板 + 参数）
+    auto* autoLoopAction = optMenu->addAction(tr("Auto Loop Closure..."));
+    connect(autoLoopAction, &QAction::triggered, this, [this]() {
+        if (!m_autoLoopDialog) {
+            m_autoLoopDialog = new AutoLoopClosureDialog(m_manager, this);
+            // 自动回环信号（内嵌面板转发）→ 刷新视口 / 高亮
+            connect(m_autoLoopDialog,
+                    &AutoLoopClosureDialog::loopEdgeInserted,
+                    this, [this]() {
+                m_viewport->refreshScene();
+                m_viewport->rebuildPointClouds();
+                m_edgeListPanel->refreshList();
+                statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
+            });
+            connect(m_autoLoopDialog,
+                    &AutoLoopClosureDialog::loopDetectionStatus,
+                    this, [this](long sourceId, QVector<long> candidateIds) {
+                std::vector<long> vec(candidateIds.begin(), candidateIds.end());
+                m_viewport->setLoopHighlight(sourceId, vec);
+                m_viewport->refreshScene();
+            });
+        }
+        m_autoLoopDialog->show();
+        m_autoLoopDialog->raise();
+        m_autoLoopDialog->activateWindow();
+    });
+
+    // 回环边列表面板显示开关
+    auto* edgeListAction = optMenu->addAction(tr("Show Loop Edges Panel"));
+    edgeListAction->setCheckable(true);
+    edgeListAction->setChecked(false);
+    connect(edgeListAction, &QAction::toggled, this, [this](bool checked) {
         if (m_edgeListOverlay) {
             m_edgeListOverlay->setVisible(checked);
             m_viewport->updateOverlayPositions();
         }
     });
 
-    // ---- 图菜单 ----
-    auto* graphMenu = menuBar()->addMenu(tr("&Graph"));
+    settingsMenu->addSeparator();
 
-    // 图优化（Ctrl+Shift+O）
-    auto* optimizeAction = graphMenu->addAction(tr("&Optimize"));
-    optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
-    m_optimizeAction = optimizeAction;
-    connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
+    // ==================== 渲染相关（子菜单） ====================
+    auto* renderMenu = settingsMenu->addMenu(tr("Rendering"));
 
-    // 子图合并窗口大小配置
-    graphMenu->addSeparator();
-    auto* submapWindowAction = graphMenu->addAction(tr("Submap Window Size..."));
-    connect(submapWindowAction, &QAction::triggered, this, [this]() {
-        // 弹出对话框配置子图窗口半宽大小
-        QDialog dlg(this);
-        dlg.setWindowTitle(tr("Submap Merge Window"));
-        dlg.setModal(true);
+    // 多级渲染（LOD）模式/层级
+    auto* lodAction = renderMenu->addAction(tr("Multi-level Rendering (LOD)..."));
+    connect(lodAction, &QAction::triggered, this, [this]() {
+        if (!m_lodDialog) m_lodDialog = new LodSettingsDialog(m_viewport, this);
+        m_lodDialog->show();
+        m_lodDialog->raise();
+        m_lodDialog->activateWindow();
+    });
 
-        auto* layout = new QFormLayout(&dlg);
+    // Z 轴裁剪
+    auto* zClipAction = renderMenu->addAction(tr("Z-Clipping..."));
+    connect(zClipAction, &QAction::triggered, this, [this]() {
+        if (!m_zClipDialog) m_zClipDialog = new ZClipSettingsDialog(m_viewport, this);
+        m_zClipDialog->show();
+        m_zClipDialog->raise();
+        m_zClipDialog->activateWindow();
+    });
 
-        auto* label = new QLabel(
-            tr("Number of adjacent keyframes to merge on each side\n"
-               "of the selected vertex for loop closure matching.\n"
-               "N = 1 (default) merges 3 keyframes: center-1, center, center+1.\n"
-               "N = 0 merges only the selected keyframe itself."));
-        label->setWordWrap(true);
-        layout->addRow(label);
-
-        auto* spinBox = new QSpinBox;
-        spinBox->setRange(0, 10);
-        spinBox->setValue(m_submapWindowHalfSize);
-        spinBox->setSuffix(tr(" keyframe(s) each side"));
-        layout->addRow(tr("Window half-size:"), spinBox);
-
-        auto* buttons = new QDialogButtonBox(
-            QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addRow(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-        if (dlg.exec() == QDialog::Accepted) {
-            m_submapWindowHalfSize = spinBox->value();
-            m_viewport->setHighlightWindowHalf(m_submapWindowHalfSize);
-            statusBar()->showMessage(
-                tr("Submap window size set to ±%1 keyframe(s)")
-                    .arg(m_submapWindowHalfSize), 3000);
-        }
+    // 高程颜色范围
+    auto* colorRangeAction = renderMenu->addAction(tr("Elevation Color Range..."));
+    connect(colorRangeAction, &QAction::triggered, this, [this]() {
+        if (!m_colorRangeDialog) m_colorRangeDialog = new ColorRangeSettingsDialog(m_viewport, this);
+        m_colorRangeDialog->show();
+        m_colorRangeDialog->raise();
+        m_colorRangeDialog->activateWindow();
     });
 }
 
@@ -624,8 +590,9 @@ void MainWindow::onOpenBag() {
  * 停止自动闭环检测，关闭地图数据，清空视口和闭环高亮，重置闭环起点。
  */
 void MainWindow::onCloseMap() {
-    if (m_autoLoopPanel) {
-        m_autoLoopPanel->stopDetection();
+    // 停止自动闭环检测（内嵌于"自动回环检测"对话框）
+    if (m_autoLoopDialog) {
+        m_autoLoopDialog->stopAutoLoop();
     }
 
     m_manager->closeMap();
