@@ -378,10 +378,9 @@ void ViewportWidget::setLodEnabled(bool enabled) {
 void ViewportWidget::setLodMode(bool manual) {
     m_lodManualMode = manual;
     if (manual) {
-        // 立即应用当前手动层级（clamp 到有效范围）
-        int maxLevel = m_sceneViz->lodLevelCount() - 1;
-        int level = qBound(0, m_lodManualLevel, maxLevel);
-        m_lodManualLevel = level;
+        // 立即应用当前手动层级（应用时 clamp 到有效范围，不覆盖用户设定值，
+        // 保证数据重建后能恢复到用户选择的层级）
+        int level = qBound(0, m_lodManualLevel, m_sceneViz->lodLevelCount() - 1);
         m_sceneViz->setLodLevel(level);
         emit lodLevelChanged(level, m_sceneViz->lodLevelCount());
     } else {

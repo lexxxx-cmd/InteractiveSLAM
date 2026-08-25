@@ -69,13 +69,13 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->setSampleStride(val);
     });
 
-    // LOD 多级渲染开关（默认开启）
+    // 多级渲染开关（默认开启）
     connect(m_lodCb, &QCheckBox::toggled, this, [this](bool checked) {
         m_viewport->setLodEnabled(checked);
         if (!checked) {
-            m_lodLevelLabel->setText(tr("LOD: off"));
+            m_lodLevelLabel->setText(tr("多级渲染: 关"));
         } else {
-            m_lodLevelLabel->setText(tr("LOD: building..."));
+            m_lodLevelLabel->setText(tr("多级渲染: 构建中..."));
         }
         updateLodAvailability();
     });
@@ -114,37 +114,36 @@ void RenderingPanel::updateLodAvailability() {
 }
 
 /**
- * @brief LOD 状态更新：刷新层级下拉（构建完成后填充 0..N-1）与状态标签
+ * @brief 多级渲染状态更新：刷新层级下拉（构建完成后填充 0..N-1）与状态标签
  */
 void RenderingPanel::onLodLevelChanged(int level, int levelCount) {
-    // 重建层级下拉（保持当前选择，clamp 到有效范围）
-    int prev = m_lodLevelCombo->currentIndex();
+    // 重建层级下拉，并选中当前实际层级（手动模式下即用户选择的层级）
     m_lodLevelCombo->blockSignals(true);
     m_lodLevelCombo->clear();
     for (int i = 0; i < levelCount; ++i) {
         m_lodLevelCombo->addItem(
-            i == 0 ? tr("Level 0 (full)") : tr("Level %1").arg(i));
+            i == 0 ? tr("层级 0（全量）") : tr("层级 %1").arg(i));
     }
-    m_lodLevelCombo->setCurrentIndex(qBound(0, prev, levelCount - 1));
+    m_lodLevelCombo->setCurrentIndex(qBound(0, level, levelCount - 1));
     m_lodLevelCombo->blockSignals(false);
 
     updateLodLabel(level, levelCount);
 }
 
 /**
- * @brief 更新 LOD 状态标签（含切换模式）
+ * @brief 更新多级渲染状态标签（含切换模式）
  */
 void RenderingPanel::updateLodLabel(int level, int levelCount) {
     if (levelCount <= 1 || !m_lodCb->isChecked()) {
-        m_lodLevelLabel->setText(tr("LOD: off"));
+        m_lodLevelLabel->setText(tr("多级渲染: 关"));
         return;
     }
     bool manual = m_lodModeCombo->currentIndex() == 1;
     m_lodLevelLabel->setText(
-        tr("LOD: L%1/%2 (%3)")
+        tr("多级渲染: 层级 %1/%2（%3）")
             .arg(level)
             .arg(levelCount)
-            .arg(manual ? tr("manual") : tr("auto")));
+            .arg(manual ? tr("手动") : tr("自动")));
 }
 
 /**
@@ -218,31 +217,32 @@ void RenderingPanel::setupUi() {
     opacityRow->addWidget(m_pointOpacityLabel);
     renderLayout->addLayout(opacityRow);
 
-    // LOD 多级渲染（默认开启；渲染固定为全量 + LOD）
-    m_lodCb = new QCheckBox(tr("LOD (full mode)"));
+    // 多级渲染（默认开启；渲染固定为全量 + 多级降采样）
+    m_lodCb = new QCheckBox(tr("多级渲染 (LOD)"));
     m_lodCb->setChecked(true);
     m_lodCb->setToolTip(
-        tr("Multi-level rendering: full detail when close, fewer points when far."));
+        tr("按相机距离切换渲染层级：近处全量细节，远处低分辨率。"));
     renderLayout->addWidget(m_lodCb);
-    m_lodLevelLabel = new QLabel(tr("LOD: off"));
+    m_lodLevelLabel = new QLabel(tr("多级渲染: 关"));
     renderLayout->addWidget(m_lodLevelLabel);
 
-    // LOD 切换模式与手动层级
+    // 切换模式与手动层级
     auto* lodModeRow = new QHBoxLayout;
-    lodModeRow->addWidget(new QLabel(tr("LOD Mode:")));
+    lodModeRow->addWidget(new QLabel(tr("层级模式:")));
     m_lodModeCombo = new QComboBox;
-    m_lodModeCombo->addItem(tr("Auto (distance)"));
-    m_lodModeCombo->addItem(tr("Manual"));
+    m_lodModeCombo->addItem(tr("自动（按距离）"));
+    m_lodModeCombo->addItem(tr("手动"));
+    m_lodModeCombo->setCurrentIndex(1);  // 默认手动模式
     m_lodModeCombo->setToolTip(
-        tr("Auto: switch level by camera distance. Manual: fix a level of your choice."));
+        tr("自动：按相机距离切换层级；手动：固定选择某一层级。"));
     lodModeRow->addWidget(m_lodModeCombo);
     renderLayout->addLayout(lodModeRow);
 
     auto* lodLevelRow = new QHBoxLayout;
-    lodLevelRow->addWidget(new QLabel(tr("LOD Level:")));
+    lodLevelRow->addWidget(new QLabel(tr("渲染层级:")));
     m_lodLevelCombo = new QComboBox;
-    m_lodLevelCombo->addItem(tr("Level 0 (full)"));
-    m_lodLevelCombo->setToolTip(tr("Select the LOD level in Manual mode."));
+    m_lodLevelCombo->addItem(tr("层级 0（全量）"));
+    m_lodLevelCombo->setToolTip(tr("手动模式下选择渲染层级。"));
     lodLevelRow->addWidget(m_lodLevelCombo);
     renderLayout->addLayout(lodLevelRow);
 

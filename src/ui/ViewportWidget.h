@@ -248,6 +248,6 @@ private:
     bool m_cloudBuildPending = false; ///< 构建期间是否收到新的构建请求（合并用）
 
     // LOD 模式状态
-    bool m_lodManualMode = false;  ///< true = 手动固定层级（不随距离自动切换）
-    int  m_lodManualLevel = 0;     ///< 手动模式下固定的目标层级
+    bool m_lodManualMode = true;  ///< true = 手动固定层级（默认手动，不随距离自动切换）
+    int  m_lodManualLevel = 1;    ///< 手动模式下固定的目标层级（默认 level 1 = 1/2 点数）
 };
