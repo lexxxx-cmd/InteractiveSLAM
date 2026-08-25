@@ -27,11 +27,12 @@
 | `g2o` | 2024-12-28 | 图优化框架（自动安装 SuiteSparse 依赖） |
 | `boost-filesystem` | 1.90.0#1 | 文件系统操作 |
 | `osg` | 3.6.5#27 | OpenSceneGraph 3D 渲染引擎 |
+| `yaml-cpp` | — | YAML 配置解析（打开 Bag 导入配置） |
 
 安装命令：
 
 ```sh
-vcpkg install eigen3 pcl g2o boost-filesystem osg --triplet x64-windows
+vcpkg install eigen3 pcl g2o boost-filesystem osg yaml-cpp --triplet x64-windows
 ```
 
 ### Qt6（官方安装）

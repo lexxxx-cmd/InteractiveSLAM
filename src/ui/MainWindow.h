@@ -51,6 +51,7 @@ public:
 
 private slots:
     void onOpenMap();              ///< 打开地图目录（文件菜单）
+    void onOpenBag();              ///< 打开 ROS1 bag 文件并解析为地图（文件菜单）
     void onCloseMap();             ///< 关闭当前地图（文件菜单）
     void onSavePoseGraph();        ///< 保存位姿图为 .g2o 文件（文件菜单）
     void onSaveMap();              ///< 保存地图（含 LVBA 格式输出）（文件菜单）

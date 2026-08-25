@@ -1,0 +1,34 @@
+# ============================================================
+# bag_import.yaml —— "打开 Bag 文件"导入配置
+# 对齐 SCPGO 的 default.yaml（仅保留位姿图数据流相关部分：
+# 输入 topic / 外参 / 关键帧抽稀 / 输出），不含回环检测与优化。
+# ============================================================
+
+# -------------------- Bag 输入 Topic --------------------
+# 位姿 topic（nav_msgs/Odometry 兼容，如 /odom、/odometry）
+# 注意：按 SCPGO 语义，该位姿视为 T_WL（Lidar 在世界系）。
+odom_topic: "/aft_mapped_to_init"
+# 点云 topic（sensor_msgs/PointCloud2，如 /velodyne_points、/cloud_registered、/livox/lidar）
+cloud_topic: "/cloud_registered"
+
+# -------------------- Lidar↔IMU 外参（calib T_IL） --------------------
+# P_IMU = R_IL * P_Lidar + t_IL
+# calib_r: R_IL 行主序 9 个元素；calib_t: t_IL 3 个元素（米）
+# 单位阵 = 不转换（位姿/点云同系时用）
+calib_r: [0, -1, 0, 0.5, 0, -0.866025, 0.866025, 0, 0.5]   # Lidar->IMU 旋转 R_IL (行主序 9 个)
+calib_t: [0, -0.0684313328845596, -0.008221943675581425]   # Lidar->IMU 平移 t_IL (3 个, 米)
+
+
+# -------------------- 关键帧抽稀 --------------------
+# 累计平移超过 meter_gap（米）或累计旋转超过 deg_gap（度）时取一帧
+# passthrough_mode: true 时逐帧全部作为关键帧（忽略 meter/deg gap）
+passthrough_mode: true
+meter_gap: 1.0
+deg_gap: 30.0
+
+# -------------------- 输出 --------------------
+# 生成的标准地图目录（含 keyframes/graph.g2o 与 keyframes/NNNNNN/）
+# 留空 = 使用系统临时目录（加载后可用"保存地图"另存）
+output_dir: "E:/bag_out"
+# 是否保存全分辨率点云 raw.pcd（false 时仅 cloud.pcd）
+save_full_cloud: true

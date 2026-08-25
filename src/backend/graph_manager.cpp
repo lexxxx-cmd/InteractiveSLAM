@@ -4,6 +4,7 @@
 //
 // 本文件实现了 GraphManager 类的所有功能，包括：
 //   - 图数据的异步加载与关闭
+//   - ROS1 bag 的异步解析导入（打开 Bag 文件路径）
 //   - 进度报告与日志输出
 //   - 图统计信息的查询接口
 //   - 多线程安全的数据访问控制
@@ -12,6 +13,7 @@
 #include "backend/graph_manager.hpp"
 #include <QtConcurrent/QtConcurrent>
 #include <QDateTime>
+#include <QDir>
 
 // ============================================================================
 // 构造函数
@@ -24,11 +26,16 @@
 GraphManager::GraphManager(QObject* parent)
     : QObject(parent),
       m_progress(new ProgressReporter(this)),           // 创建进度报告器实例
-      m_loadWatcher(new QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>(this)) {
+      m_loadWatcher(new QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>(this)),
+      m_bagWatcher(new QFutureWatcher<hdl_graph_slam::BagImportResult>(this)) {
     // 连接 QFutureWatcher 的 finished 信号到 onLoadFinished 槽函数
     // 当工作线程完成加载后，自动在主线程中处理加载结果
     connect(m_loadWatcher, &QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>::finished,
             this, &GraphManager::onLoadFinished);
+
+    // bag 导入完成 → 主线程处理（成功则自动加载生成的地图目录）
+    connect(m_bagWatcher, &QFutureWatcher<hdl_graph_slam::BagImportResult>::finished,
+            this, &GraphManager::onBagImportFinished);
 }
 
 // ============================================================================
@@ -183,6 +190,86 @@ void GraphManager::openMapData(const QUrl& folderUrl) {
 
     // 将 future 设置到监视器中，当工作线程完成时会触发 onLoadFinished
     m_loadWatcher->setFuture(future);
+}
+
+/**
+ * @brief 打开 ROS1 bag 并解析为标准地图（异步，配置由 YAML 控制）
+ *
+ * 后台线程运行 BagImporter::import（SCPGO 数据流：解析 topic、时间同步、
+ * 关键帧抽稀、外参变换、导出 graph.g2o + keyframes），完成后自动调用
+ * openMapData() 加载生成的地图，复用现有加载/渲染链路。
+ *
+ * @param bagUrl   bag 文件 URL
+ * @param yamlPath 导入配置文件路径（config/bag_import.yaml；空则用默认参数）
+ */
+void GraphManager::openBagFile(const QUrl& bagUrl, const QString& yamlPath,
+                               const QString& odomTopic, const QString& cloudTopic) {
+    if (m_isImportingBag || m_isLoading) {
+        logWarning("Already loading/importing, ignoring bag request");
+        return;
+    }
+
+    QString bagPath = bagUrl.toLocalFile();
+    if (bagPath.isEmpty()) {
+        logError("Invalid bag path");
+        emit loadingFailed("Invalid bag path");
+        return;
+    }
+
+    // 加载新数据前自动关闭已有地图
+    if (m_isLoaded) {
+        logInfo("Closing previous map before importing bag");
+        m_graph.reset();
+        m_isLoaded = false;
+        m_graphVersion.ref();
+        emit isLoadedChanged();
+        emit statsChanged();
+    }
+
+    // 读取配置；用户对话框选择的 topic 覆盖 yaml；输出目录为空时使用临时目录
+    auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
+    cfg.bagPath = bagPath.toStdString();
+    if (!odomTopic.isEmpty())  cfg.odomTopic = odomTopic.toStdString();
+    if (!cloudTopic.isEmpty()) cfg.cloudTopic = cloudTopic.toStdString();
+    if (cfg.outputDir.empty()) {
+        cfg.outputDir = QDir::temp()
+                            .filePath(QString("InteractiveSLAM_bag_%1").arg(
+                                QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss")))
+                            .toStdString();
+    }
+
+    m_isImportingBag = true;
+    logInfo(QString("Importing bag: %1").arg(bagPath));
+    emit loadingStarted();
+
+    auto future = QtConcurrent::run(
+        [cfg, progress = m_progress]() {
+            return hdl_graph_slam::BagImporter::import(cfg, *progress);
+        });
+    m_bagWatcher->setFuture(future);
+}
+
+/**
+ * @brief bag 导入完成（主线程回调）
+ *
+ * 成功：日志提示并自动 openMapData() 加载生成的地图目录；
+ * 失败：记录错误并发射 loadingFailed。
+ */
+void GraphManager::onBagImportFinished() {
+    m_isImportingBag = false;
+    emit isLoadingChanged();
+
+    auto result = m_bagWatcher->result();
+    if (result.success) {
+        logInfo(QString("Bag imported: %1 keyframes → %2")
+                    .arg(result.keyframeCount)
+                    .arg(QString::fromStdString(result.mapDirectory)));
+        openMapData(QUrl::fromLocalFile(QString::fromStdString(result.mapDirectory)));
+    } else {
+        logError(QString("Bag import failed: %1")
+                     .arg(QString::fromStdString(result.error)));
+        emit loadingFailed(QString::fromStdString(result.error));
+    }
 }
 
 /**

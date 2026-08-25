@@ -21,7 +21,9 @@
 #include "ui/OverlayPanelWidget.h"
 #include "ui/PlaybackPanel.h"
 #include "ui/LoopClosureDialog.h"
+#include "ui/BagOpenDialog.h"
 #include "backend/graph_manager.hpp"
+#include "data/hdl_graph_slam/bag_importer.hpp"
 
 #include <QFileDialog>
 #include <QMessageBox>
@@ -32,6 +34,10 @@
 #include <QLabel>
 #include <QDialogButtonBox>
 #include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QDateTime>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -73,12 +79,12 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             statusBar()->clearMessage();
     });
 
-    // LOD 层级状态提示：多级构建完成与相机距离切换时在状态栏临时显示
+    // 多级渲染层级状态提示：构建完成与相机距离切换时在状态栏临时显示
     connect(m_viewport, &ViewportWidget::lodLevelChanged,
             this, [this](int level, int levelCount) {
         if (levelCount > 1) {
             statusBar()->showMessage(
-                tr("LOD level: %1/%2").arg(level).arg(levelCount), 2500);
+                tr("渲染层级: %1/%2").arg(level).arg(levelCount), 2500);
         }
     });
 
@@ -375,6 +381,11 @@ void MainWindow::setupMenus() {
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenMap);
 
+    // 打开 ROS1 bag 文件（解析为地图后自动加载）
+    auto* openBagAction = fileMenu->addAction(tr("Open &Bag File..."));
+    openBagAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_O));
+    connect(openBagAction, &QAction::triggered, this, &MainWindow::onOpenBag);
+
     // 关闭当前地图
     auto* closeAction = fileMenu->addAction(tr("&Close Map"));
     closeAction->setShortcut(QKeySequence::Close);
@@ -552,6 +563,59 @@ void MainWindow::onOpenMap() {
     if (dir.isEmpty()) return;
 
     m_manager->openMapData(QUrl::fromLocalFile(dir));
+}
+
+/**
+ * @brief 打开 ROS1 bag 文件（按 SCPGO 数据流解析）
+ *
+ * 流程：选择 .bag → 读取 bag 索引列出 topic → 弹对话框选择位姿/点云 topic
+ *       （以 config/bag_import.yaml 为默认预填）→ GraphManager::openBagFile()
+ *       后台解析（外参/抽稀/输出仍由 yaml 配置）→ 自动加载生成的地图。
+ */
+void MainWindow::onOpenBag() {
+    QString bagPath = QFileDialog::getOpenFileName(
+        this, tr("Open ROS Bag File"), QString(),
+        tr("ROS Bag (*.bag);;All Files (*)"));
+    if (bagPath.isEmpty()) return;
+
+    // 定位导入配置文件：优先可执行文件旁，其次当前工作目录，再其次用默认参数
+    QString yamlPath;
+    const QStringList candidates = {
+        QCoreApplication::applicationDirPath() + "/config/bag_import.yaml",
+        QDir::currentPath() + "/config/bag_import.yaml",
+    };
+    for (const auto& p : candidates) {
+        if (QFileInfo::exists(p)) {
+            yamlPath = p;
+            break;
+        }
+    }
+    if (yamlPath.isEmpty()) {
+        QMessageBox::information(
+            this, tr("Open Bag"),
+            tr("Config file config/bag_import.yaml not found — using default parameters.\n"
+               "Place it next to the executable or in the working directory to customize."));
+    }
+
+    // 读取 bag 索引（只读头部，速度快），列出可用 topic
+    auto topicsStd = hdl_graph_slam::BagImporter::listTopics(bagPath.toStdString());
+    if (topicsStd.empty()) {
+        QMessageBox::warning(this, tr("Open Bag"),
+                             tr("Failed to read bag or no topics found:\n%1").arg(bagPath));
+        return;
+    }
+    QStringList topics;
+    for (auto& t : topicsStd) topics << QString::fromStdString(t);
+
+    // 对话框：yaml 配置的 topic 作为默认值预填，用户可改
+    auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
+    BagOpenDialog dlg(topics,
+                      QString::fromStdString(cfg.odomTopic),
+                      QString::fromStdString(cfg.cloudTopic), this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    m_manager->openBagFile(QUrl::fromLocalFile(bagPath), yamlPath,
+                           dlg.odomTopic(), dlg.cloudTopic());
 }
 
 /**
