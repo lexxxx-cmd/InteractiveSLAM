@@ -604,7 +604,7 @@ void MainWindow::onOpenBag() {
         if (clicked == box.button(QMessageBox::Cancel)) return;
         if (clicked == clearBtn) {
             // 清空目录下所有内容（保留目录本身），失败则中止导入
-            if (!clearDirectory(cfg.outputDir)) {
+            if (!hdl_graph_slam::BagImporter::clearDirectory(cfg.outputDir)) {
                 QMessageBox::warning(
                     this, tr("Open Bag"),
                     tr("Failed to clear output directory:\n%1").arg(dir));
