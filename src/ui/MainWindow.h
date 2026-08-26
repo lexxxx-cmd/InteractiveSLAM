@@ -23,6 +23,12 @@ class AutoLoopClosurePanel;
 class EdgeListPanel;
 class OverlayPanelWidget;
 class PlaybackPanel;
+// 高级设置对话框（前向声明必须位于命名空间作用域，不能写在类体内，
+// 否则会变成 MainWindow 的嵌套类声明，导致不完整类型报错）
+class AutoLoopClosureDialog;
+class LodSettingsDialog;
+class ZClipSettingsDialog;
+class ColorRangeSettingsDialog;
 
 /**
  * @brief 主应用程序窗口
@@ -87,10 +93,6 @@ private:
     OverlayPanelWidget* m_playbackOverlay = nullptr;  ///< 播放轴悬浮面板
 
     // === 高级设置对话框（懒创建） ===
-    class AutoLoopClosureDialog;
-    class LodSettingsDialog;
-    class ZClipSettingsDialog;
-    class ColorRangeSettingsDialog;
     AutoLoopClosureDialog*    m_autoLoopDialog = nullptr;   ///< 自动回环检测对话框
     LodSettingsDialog*        m_lodDialog = nullptr;        ///< 多级渲染(LOD)对话框
     ZClipSettingsDialog*      m_zClipDialog = nullptr;      ///< Z 轴裁剪对话框
