@@ -45,6 +45,11 @@ void AutoLoopClosureDialog::stopAutoLoop() {
     if (m_autoLoopPanel) m_autoLoopPanel->stopDetection();
 }
 
+bool AutoLoopClosureDialog::optimizeAfterInsert() const {
+    if (!m_autoLoopPanel) return true;  // 保守默认：视为会优化
+    return m_autoLoopPanel->getParams().optimizeAfterInsert;
+}
+
 void AutoLoopClosureDialog::setupUi() {
     // 内容放入滚动区域，避免内容过多时撑满整个屏幕
     auto* mainLayout = new QVBoxLayout(this);

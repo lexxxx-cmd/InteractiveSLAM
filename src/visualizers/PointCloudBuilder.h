@@ -45,6 +45,7 @@
 #include <g2o/types/slam3d/vertex_se3.h>
 
 #include "data/hdl_graph_slam/interactive_graph.hpp"
+#include "visualizers/TurboColormap.h"
 
 namespace hdl_graph_slam {
 
@@ -65,11 +66,14 @@ struct CloudRange {
  *
  * 每级渲染数据都映射回同一个全量点数组（renderIndices / renderRanges），
  * 因此选中高亮、Z 统计等在任意级别均正确。
- * colors 数组由 KeyframePointCloudVisualizer 生成（本类不产生颜色）。
+ * 顶点/颜色按固定块大小拆分（分块上传，避免单次超大 VBO 上传卡顿），
+ * 逻辑索引连续：第 i 个渲染点位于 chunk = i / chunkSize，
+ * 块内偏移 = i % chunkSize（chunkSize 由 builder 常量决定）。
+ * colors 由 builder 按高程 Turbo 着色 + 透明度生成（后台线程完成）。
  */
 struct LodLevel {
-    osg::ref_ptr<osg::Vec3Array> vertices;      ///< 该级渲染顶点数组
-    osg::ref_ptr<osg::Vec4Array> colors;        ///< 该级渲染颜色数组（由可视化器生成）
+    std::vector<osg::ref_ptr<osg::Vec3Array>> vertexChunks;  ///< 分块顶点数组
+    std::vector<osg::ref_ptr<osg::Vec4Array>> colorChunks;   ///< 分块颜色数组
     std::vector<size_t>     renderIndices;      ///< 渲染索引 -> 全量索引（level0 全量时为空）
     std::vector<CloudRange> renderRanges;       ///< 每个关键帧在该级渲染数组中的范围
     bool renderFullRes = true;                  ///< true = 渲染索引与全量索引一致
@@ -80,6 +84,12 @@ struct LodLevel {
  */
 struct BuildOptions {
     bool lodEnabled = false;    ///< 是否生成多级 LOD（渲染固定为全量 + LOD）
+
+    // —— 颜色生成参数（构建时直接生成颜色，主线程 commit 时零遍历） ——
+    bool  useAutoColorRange = true;  ///< true = 用构建统计的 zMin/zMax 映射颜色
+    float colorZMin = 0.0f;          ///< 手动颜色范围下限（useAutoColorRange=false 时生效）
+    float colorZMax = 1.0f;          ///< 手动颜色范围上限（useAutoColorRange=false 时生效）
+    float opacity   = 1.0f;          ///< 点云透明度（per-vertex alpha）
 };
 
 /**
@@ -96,7 +106,8 @@ struct PointCloudBuildResult {
     std::vector<CloudRange> renderRanges;   ///< 主级别逐帧渲染范围
     bool renderFullRes = true;              ///< 主级别是否全量
 
-    osg::ref_ptr<osg::Vec3Array> vertices;  ///< 主级别渲染顶点数组
+    std::vector<osg::ref_ptr<osg::Vec3Array>> vertexChunks;  ///< 主级别分块顶点数组
+    std::vector<osg::ref_ptr<osg::Vec4Array>> colorChunks;   ///< 主级别分块颜色数组
 
     std::vector<LodLevel> lodLevels;        ///< LOD 级别（不含主级别，仅全量模式生成）
 
@@ -104,6 +115,12 @@ struct PointCloudBuildResult {
     float zMax = -std::numeric_limits<float>::max();  ///< 数据 Z 最大值
     Eigen::Vector3d bMin;  ///< 世界包围盒最小值
     Eigen::Vector3d bMax;  ///< 世界包围盒最大值
+
+    // —— 构建时所用的颜色参数（commit 后用于判断是否需要重新着色） ——
+    bool  colorUsedAuto = true;  ///< 构建时是否使用自动颜色范围
+    float colorZMinUsed = 0.0f;  ///< 构建时的颜色映射 Z 下限
+    float colorZMaxUsed = 1.0f;  ///< 构建时的颜色映射 Z 上限
+    float opacityUsed   = 1.0f;  ///< 构建时的透明度
 };
 
 /**
@@ -115,6 +132,14 @@ struct PointCloudBuildResult {
 class PointCloudBuilder {
 public:
     using PointT = pcl::PointXYZI;  ///< 点类型（XYZ + 强度）
+
+    /**
+     * @brief 分块大小（渲染点数/块）
+     *
+     * 每块约 64 万点（顶点 12B + 颜色 16B ≈ 18MB），提交后逐帧上传，
+     * 避免单次超大 VBO 上传造成的一帧卡顿。块间逻辑索引连续。
+     */
+    static constexpr size_t kChunkPoints = 640000;
 
     /**
      * @brief 构建点云渲染数据（可在后台线程调用）
@@ -173,7 +198,8 @@ public:
         }
 
         if (r.allWorldPoints.empty()) {
-            r.vertices = new osg::Vec3Array;  // 空结果也提供空数组，避免 commit 时解引用空指针
+            r.vertexChunks.emplace_back(new osg::Vec3Array);  // 空结果也提供空块
+            r.colorChunks.emplace_back(new osg::Vec4Array);
             return r;
         }
 
@@ -188,8 +214,18 @@ public:
         r.renderRanges = r.cloudRanges;
         r.renderFullRes = true;
 
-        // ---- 阶段 4：构建主级别顶点数组 ----
-        buildVertices(r.allWorldPoints, r.renderIndices, r.renderFullRes, r.vertices);
+        // ---- 阶段 4：构建主级别分块顶点/颜色数组 ----
+        {
+            const float czMin = options.useAutoColorRange ? r.zMin : options.colorZMin;
+            const float czMax = options.useAutoColorRange ? r.zMax : options.colorZMax;
+            buildChunkedArrays(r.allWorldPoints, r.renderIndices, r.renderFullRes,
+                               czMin, czMax, options.opacity,
+                               r.vertexChunks, r.colorChunks);
+        }
+        r.colorUsedAuto = options.useAutoColorRange;
+        r.colorZMinUsed = options.useAutoColorRange ? r.zMin : options.colorZMin;
+        r.colorZMaxUsed = options.useAutoColorRange ? r.zMax : options.colorZMax;
+        r.opacityUsed   = options.opacity;
 
         // ---- 阶段 5：多级 LOD ----
         // 目标点数 N/2、N/4、…、N/32（级间 2×，最多 5 级；每级不低于 minLodPoints）
@@ -200,7 +236,8 @@ public:
             size_t target = n / 2;
             while (target >= minLodPoints && (int)r.lodLevels.size() < maxLodLevels) {
                 r.lodLevels.push_back(
-                    buildLodLevel(r.allWorldPoints, r.cloudRanges, r.bMin, r.bMax, target));
+                    buildLodLevel(r.allWorldPoints, r.cloudRanges, r.bMin, r.bMax,
+                                  target, options, r.zMin, r.zMax));
                 target /= 2;
             }
         }
@@ -292,23 +329,51 @@ private:
     }
 
     /**
-     * @brief 构建顶点数组（从全量点按渲染索引取值）
+     * @brief 构建分块顶点/颜色数组（从全量点按渲染索引取值）
+     *
+     * 将渲染点数按 kChunkPoints 拆成若干块，每块一个独立的顶点数组与
+     * 颜色数组（Turbo 高程着色 + 透明度）。逻辑索引连续：
+     * 第 i 个渲染点位于块 i / kChunkPoints、块内偏移 i % kChunkPoints。
+     * 全部在后台线程完成，主线程提交时零遍历。
      */
-    static void buildVertices(
+    static void buildChunkedArrays(
         const std::vector<Eigen::Vector3d,
                           Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
         const std::vector<size_t>& renderIndices,
         bool renderFullRes,
-        osg::ref_ptr<osg::Vec3Array>& outVertices) {
+        float colorZMin,
+        float colorZMax,
+        float opacity,
+        std::vector<osg::ref_ptr<osg::Vec3Array>>& outVertices,
+        std::vector<osg::ref_ptr<osg::Vec4Array>>& outColors) {
         const size_t count = renderFullRes ? pts.size() : renderIndices.size();
-        outVertices = new osg::Vec3Array;
-        outVertices->reserve(count);
-        for (size_t i = 0; i < count; ++i) {
-            const Eigen::Vector3d& wp = pts[renderFullRes ? i : renderIndices[i]];
-            outVertices->push_back(osg::Vec3(
-                static_cast<float>(wp.x()),
-                static_cast<float>(wp.y()),
-                static_cast<float>(wp.z())));
+        outVertices.clear();
+        outColors.clear();
+        if (count == 0) return;
+
+        const size_t chunkCount = (count + kChunkPoints - 1) / kChunkPoints;
+        outVertices.reserve(chunkCount);
+        outColors.reserve(chunkCount);
+
+        for (size_t c = 0; c < chunkCount; ++c) {
+            const size_t begin = c * kChunkPoints;
+            const size_t end   = std::min(count, begin + kChunkPoints);
+            auto* varr = new osg::Vec3Array;
+            auto* carr = new osg::Vec4Array;
+            varr->reserve(end - begin);
+            carr->reserve(end - begin);
+            for (size_t i = begin; i < end; ++i) {
+                const Eigen::Vector3d& wp = pts[renderFullRes ? i : renderIndices[i]];
+                varr->push_back(osg::Vec3(static_cast<float>(wp.x()),
+                                          static_cast<float>(wp.y()),
+                                          static_cast<float>(wp.z())));
+                osg::Vec4 col = turboColor(static_cast<float>(wp.z()),
+                                           colorZMin, colorZMax);
+                col.a() = opacity;
+                carr->push_back(col);
+            }
+            outVertices.push_back(varr);
+            outColors.push_back(carr);
         }
     }
 
@@ -321,7 +386,10 @@ private:
         const std::vector<CloudRange>& cloudRanges,
         const Eigen::Vector3d& bMin,
         const Eigen::Vector3d& bMax,
-        size_t targetCount) {
+        size_t targetCount,
+        const BuildOptions& options,
+        float dataZMin,
+        float dataZMax) {
         LodLevel lod;
         if (pts.size() <= targetCount) {
             lod.renderFullRes = true;
@@ -337,7 +405,13 @@ private:
             decimateTo(pts, cloudRanges, leaf, lod.renderIndices, lod.renderRanges);
             lod.renderFullRes = false;
         }
-        buildVertices(pts, lod.renderIndices, lod.renderFullRes, lod.vertices);
+        {
+            const float czMin = options.useAutoColorRange ? dataZMin : options.colorZMin;
+            const float czMax = options.useAutoColorRange ? dataZMax : options.colorZMax;
+            buildChunkedArrays(pts, lod.renderIndices, lod.renderFullRes,
+                               czMin, czMax, options.opacity,
+                               lod.vertexChunks, lod.colorChunks);
+        }
         return lod;
     }
 

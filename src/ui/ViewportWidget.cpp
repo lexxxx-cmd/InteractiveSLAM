@@ -499,6 +499,12 @@ void ViewportWidget::startCloudBuild() {
     auto graph = m_graph;
     hdl_graph_slam::BuildOptions options;
     options.lodEnabled = m_sceneViz->lodEnabled();
+    // 传入当前颜色参数：builder 在后台生成与当前设置一致的颜色，
+    // 主线程 commit 时零遍历（避免全量重着色卡顿）
+    options.useAutoColorRange = m_sceneViz->isAutoColorRange();
+    options.colorZMin = m_sceneViz->getColorZMin();
+    options.colorZMax = m_sceneViz->getColorZMax();
+    options.opacity   = m_sceneViz->getPointOpacity();
     m_cloudBuildWatcher->setFuture(QtConcurrent::run([graph, options]() {
         return hdl_graph_slam::PointCloudBuilder::build(graph, options);
     }));
@@ -563,6 +569,9 @@ void ViewportWidget::rebuildPointClouds() {
  * 因此这里只跟踪 FPS，不执行逐帧几何体重建。
  */
 void ViewportWidget::updateScene() {
+    // 分块点云渐进上传推进（每帧一块，摊平大 VBO 上传的 GPU 卡顿）
+    m_sceneViz->advanceChunkUpload();
+
     // 正交投影模式下，动态跟踪摄像机距离
     if (m_useOrthographic) {
         osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();

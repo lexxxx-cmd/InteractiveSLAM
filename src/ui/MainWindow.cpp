@@ -451,7 +451,11 @@ void MainWindow::setupMenus() {
                     &AutoLoopClosureDialog::loopEdgeInserted,
                     this, [this]() {
                 m_viewport->refreshScene();
-                m_viewport->rebuildPointClouds();
+                // 仅在"插入边后优化"（位姿变化）时才重建点云；
+                // 否则点云世界坐标不变，重建纯属浪费（全量 VBO 上传卡顿）
+                if (m_autoLoopDialog->optimizeAfterInsert()) {
+                    m_viewport->rebuildPointClouds();
+                }
                 m_edgeListPanel->refreshList();
                 statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
             });

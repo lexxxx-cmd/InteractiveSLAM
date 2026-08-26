@@ -32,6 +32,15 @@ public:
     /** @brief 停止自动回环检测（MainWindow 关闭地图时调用） */
     void stopAutoLoop();
 
+    /**
+     * @brief 查询"插入回环边后是否执行优化"
+     *
+     * MainWindow 据此决定自动回环插边后是否需要重建点云：
+     * 优化会改变位姿（点云世界坐标随之变化，需重建）；
+     * 未优化时点云不变，仅刷新边线即可（避免无谓的全量重建卡顿）。
+     */
+    bool optimizeAfterInsert() const;
+
 signals:
     // —— 转发自内嵌 AutoLoopClosurePanel ——
     /** @brief 自动回环插入新边（MainWindow 刷新视口） */

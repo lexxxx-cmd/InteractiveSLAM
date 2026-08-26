@@ -120,6 +120,9 @@ public:
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
     }
 
+    /** @brief 当前点云透明度（供后台构建时生成一致的颜色） */
+    float getPointOpacity() const { return m_pointOpacity; }
+
     /**
      * @brief 设置 LOD 多级渲染开关
      *
@@ -138,6 +141,16 @@ public:
     /** @brief 按距离切换点云 LOD 级别（转发到可视化器） */
     void setLodLevel(int level) {
         if (m_cloudViz) m_cloudViz->setLodLevel(level);
+    }
+
+    /**
+     * @brief 渐进上传推进（每帧由 ViewportWidget::updateScene 调用）
+     *
+     * 分块点云提交后逐帧显示一块，把一次超大 VBO 上传摊成多次小块上传，
+     * 避免"后台构建完成换回主线程那一帧"的 GPU 卡顿。
+     */
+    void advanceChunkUpload() {
+        if (m_cloudViz) m_cloudViz->advanceChunkUpload();
     }
 
     /** @brief 当前激活的 LOD 级别 */
