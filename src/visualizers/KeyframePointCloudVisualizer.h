@@ -222,6 +222,15 @@ public:
     }
 
     /**
+     * @brief 是否仍有分块在渐进上传中
+     *
+     * true = 点云尚未全部显示（还有块待上传）；
+     * false = 已全部显示（或未开始/无分块）。
+     * 供 ViewportWidget 判断"点云渲染是否完成"。
+     */
+    bool chunkUploadPending() const { return m_uploadLevel >= 0; }
+
+    /**
      * @brief 按相机距离切换到指定 LOD 级别（主线程调用）
      *
      * 目标级别的块若已上传过则全部直接显示；否则从第一块开始渐进上传。

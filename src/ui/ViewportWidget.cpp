@@ -538,6 +538,16 @@ void ViewportWidget::onCloudBuildFinished() {
             }
         }
         m_osgWidget->update();
+
+        // 点云渲染完成判定：分块渐进上传开始前标记"待检测"；
+        // 若本次构建无分块（空点云）则立即通知完成，避免加载指示卡死
+        m_chunkUploadWasPending = m_sceneViz->chunkUploadPending();
+        if (!m_chunkUploadWasPending) {
+            emit cloudRenderFinished();
+        }
+    } else {
+        // 构建被丢弃（图已更换/关闭）：没有新点云要渲染，立即通知完成
+        emit cloudRenderFinished();
     }
 
     // 构建期间有新请求（预算变化/优化完成等）→ 用最新状态再构建一次
@@ -571,6 +581,16 @@ void ViewportWidget::rebuildPointClouds() {
 void ViewportWidget::updateScene() {
     // 分块点云渐进上传推进（每帧一块，摊平大 VBO 上传的 GPU 卡顿）
     m_sceneViz->advanceChunkUpload();
+
+    // 点云渲染完成检测：渐进上传从"进行中"变为"完成"时通知 UI
+    // （MainWindow 据此停止加载动画，保证 spinner 持续到点云全部渲染出来）
+    {
+        const bool pending = m_sceneViz->chunkUploadPending();
+        if (m_chunkUploadWasPending && !pending) {
+            emit cloudRenderFinished();
+        }
+        m_chunkUploadWasPending = pending;
+    }
 
     // 正交投影模式下，动态跟踪摄像机距离
     if (m_useOrthographic) {

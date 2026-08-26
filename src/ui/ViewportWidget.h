@@ -164,6 +164,14 @@ signals:
     void vertexSelected(long vertexId);                   ///< 顶点选中信号
 
     /**
+     * @brief 点云全部渲染完成信号
+     *
+     * 在点云分块渐进上传全部完成时发射（含"无点云/构建被丢弃"的兜底，
+     * 保证 UI 的加载指示一定能结束）。MainWindow 据此停止加载动画。
+     */
+    void cloudRenderFinished();
+
+    /**
      * @brief LOD 层级状态信号
      *
      * 在以下时机发射：
@@ -246,6 +254,7 @@ private:
     int m_cloudBuildActiveSeq = -1;  ///< 当前在途构建对应的版本号
     bool m_cloudBuildRunning = false; ///< 是否有构建任务正在运行
     bool m_cloudBuildPending = false; ///< 构建期间是否收到新的构建请求（合并用）
+    bool m_chunkUploadWasPending = false; ///< 上一帧是否有点云分块在渐进上传（完成检测用）
 
     // LOD 模式状态
     bool m_lodManualMode = true;  ///< true = 手动固定层级（默认手动，不随距离自动切换）

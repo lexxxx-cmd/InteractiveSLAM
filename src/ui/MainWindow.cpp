@@ -73,6 +73,11 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
     connect(m_manager, &GraphManager::lastMessageChanged,
             this, &MainWindow::onLogMessage);
 
+    // 点云全部渲染完成后停止加载动画（spinner 持续到 LOD 分块上传完毕，
+    // 而非数据加载完成就消失）
+    connect(m_viewport, &ViewportWidget::cloudRenderFinished,
+            this, &MainWindow::stopLoadingSpinner);
+
     // 选中顶点的反馈：在状态栏显示顶点 ID
     connect(m_viewport, &ViewportWidget::vertexSelected,
             this, [this](long vertexId) {
@@ -832,7 +837,8 @@ void MainWindow::stopLoadingSpinner() {
  * 设置子图高亮窗口半宽，刷新闭环边列表。
  */
 void MainWindow::onLoadingSucceeded() {
-    stopLoadingSpinner();
+    // 注意：此处不停止加载动画——点云（含 LOD 分块）仍在后台构建/渐进上传，
+    // spinner 由 cloudRenderFinished 信号在点云全部渲染完成后停止
     m_loopBeginVertexId = -1;
     statusBar()->showMessage(
         tr("Map loaded — %1 vertices, %2 edges, %3 keyframes")

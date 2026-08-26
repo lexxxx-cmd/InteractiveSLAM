@@ -153,6 +153,11 @@ public:
         if (m_cloudViz) m_cloudViz->advanceChunkUpload();
     }
 
+    /** @brief 是否仍有分块在渐进上传中（点云渲染是否完成） */
+    bool chunkUploadPending() const {
+        return m_cloudViz ? m_cloudViz->chunkUploadPending() : false;
+    }
+
     /** @brief 当前激活的 LOD 级别 */
     int currentLodLevel() const {
         return m_cloudViz ? m_cloudViz->currentLodLevel() : 0;
