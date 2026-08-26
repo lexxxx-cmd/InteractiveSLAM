@@ -34,6 +34,7 @@
 #include <QFormLayout>
 #include <QSpinBox>
 #include <QLabel>
+#include <QTimer>
 #include <QDialogButtonBox>
 #include <QApplication>
 #include <QCoreApplication>
@@ -318,6 +319,22 @@ void MainWindow::setupUi() {
 
     // 状态栏初始消息
     statusBar()->showMessage(tr("Ready — open a map folder to begin"));
+
+    // 加载动画：状态栏右侧的旋转字符指示器（加载地图/bag 时显示）
+    m_loadingSpinner = new QLabel(this);
+    m_loadingSpinner->hide();
+    statusBar()->addPermanentWidget(m_loadingSpinner);
+
+    m_loadingTimer = new QTimer(this);
+    m_loadingTimer->setInterval(120);  // ~8.3 fps，旋转平滑
+    connect(m_loadingTimer, &QTimer::timeout, this, [this]() {
+        // 旋转字符序列：| / - \ 循环
+        static const char kFrames[] = {'|', '/', '-', '\\'};
+        m_loadingSpinner->setText(
+            QString(" %1 %2").arg(QChar(kFrames[m_loadingFrame]))
+                             .arg(m_loadingText));
+        m_loadingFrame = (m_loadingFrame + 1) % 4;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +806,28 @@ void MainWindow::onResetCamera() {
  */
 void MainWindow::onLoadingStarted() {
     statusBar()->showMessage(tr("Loading map..."));
+    // 通用加载文案（地图加载与 bag 导入共用）
+    startLoadingSpinner(tr("Loading..."));
+}
+
+/**
+ * @brief 启动状态栏加载动画（旋转字符 | / - \）
+ *
+ * 在状态栏右侧显示"字符 + 文案"，由 120ms 定时器驱动字符旋转，
+ * 直到加载成功/失败回调停止。
+ */
+void MainWindow::startLoadingSpinner(const QString& text) {
+    m_loadingText = text;
+    m_loadingFrame = 0;
+    m_loadingSpinner->setText(QString(" | %1").arg(text));
+    m_loadingSpinner->show();
+    m_loadingTimer->start();
+}
+
+/** @brief 停止并隐藏加载动画 */
+void MainWindow::stopLoadingSpinner() {
+    m_loadingTimer->stop();
+    m_loadingSpinner->hide();
 }
 
 /**
@@ -798,6 +837,7 @@ void MainWindow::onLoadingStarted() {
  * 设置子图高亮窗口半宽，刷新闭环边列表。
  */
 void MainWindow::onLoadingSucceeded() {
+    stopLoadingSpinner();
     m_loopBeginVertexId = -1;
     statusBar()->showMessage(
         tr("Map loaded — %1 vertices, %2 edges, %3 keyframes")
@@ -831,6 +871,7 @@ void MainWindow::onLoadingSucceeded() {
  * 在状态栏和消息框中显示错误信息。
  */
 void MainWindow::onLoadingFailed(const QString& error) {
+    stopLoadingSpinner();
     statusBar()->showMessage(tr("Loading failed: %1").arg(error));
     QMessageBox::warning(this, tr("Load Error"), error);
 }

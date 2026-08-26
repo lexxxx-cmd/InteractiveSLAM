@@ -15,6 +15,8 @@
 #include <QMenuBar>
 
 class QAction;
+class QLabel;
+class QTimer;
 class GraphManager;
 class ViewportWidget;
 class GraphStatsPanel;
@@ -70,6 +72,8 @@ private slots:
 private:
     void setupMenus();  ///< 初始化菜单栏（文件、视图、图菜单）
     void setupUi();     ///< 初始化界面组件（视口、叠加面板）
+    void startLoadingSpinner(const QString& text);  ///< 启动状态栏加载动画
+    void stopLoadingSpinner();                      ///< 停止并隐藏加载动画
 
     GraphManager* m_manager;    ///< 图数据管理器，非拥有指针
     ViewportWidget* m_viewport; ///< 中央 3D 视口部件
@@ -102,4 +106,10 @@ private:
     int m_submapWindowHalfSize = 7;  ///< 闭环匹配时合并的相邻关键帧数（±N 帧）
     QAction* m_optimizeAction = nullptr;  ///< 图优化动作（用于启用/禁用状态同步）
     bool m_optimizePending = false;  ///< 优化是否正在进行中（防止重复触发）
+
+    // === 加载动画（状态栏旋转字符 -\|/ ） ===
+    QLabel* m_loadingSpinner = nullptr;   ///< 旋转动画标签（位于状态栏）
+    QTimer* m_loadingTimer = nullptr;     ///< 旋转动画定时器
+    int     m_loadingFrame = 0;           ///< 当前动画帧（0..3）
+    QString m_loadingText;                ///< 加载中的基础文案（如"Loading map..."）
 };
