@@ -28,6 +28,7 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QAbstractButton>
 #include <QMenu>
 #include <QDialog>
 #include <QFormLayout>
@@ -582,8 +583,39 @@ void MainWindow::onOpenBag() {
     auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
     BagOpenDialog dlg(topics, cfg, this);
     if (dlg.exec() != QDialog::Accepted) return;
+    cfg = dlg.config();
 
-    m_manager->openBagFile(QUrl::fromLocalFile(bagPath), dlg.config());
+    // 输出目录非空：残留旧地图文件会与新数据混合（如 000003/ 等残留子目录
+    // 不会自动清除），导入前让用户明确选择处理方式
+    if (!cfg.outputDir.empty() &&
+        hdl_graph_slam::BagImporter::isOutputDirNonEmpty(cfg.outputDir)) {
+        const QString dir = QString::fromStdString(cfg.outputDir);
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(tr("Output Directory Not Empty"));
+        box.setText(tr("The output directory is not empty:\n%1\n\n"
+                       "Old map files may mix with the new import. "
+                       "What should be done?").arg(dir));
+        auto* overwriteBtn = box.addButton(tr("Overwrite (mix)"), QMessageBox::AcceptRole);
+        auto* clearBtn    = box.addButton(tr("Clear & Import"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        QAbstractButton* clicked = box.clickedButton();
+        if (clicked == box.button(QMessageBox::Cancel)) return;
+        if (clicked == clearBtn) {
+            // 清空目录下所有内容（保留目录本身），失败则中止导入
+            if (!clearDirectory(cfg.outputDir)) {
+                QMessageBox::warning(
+                    this, tr("Open Bag"),
+                    tr("Failed to clear output directory:\n%1").arg(dir));
+                return;
+            }
+        }
+        // Overwrite（混合写入）：不做额外处理，直接导入
+        Q_UNUSED(overwriteBtn);
+    }
+
+    m_manager->openBagFile(QUrl::fromLocalFile(bagPath), cfg);
 }
 
 /**

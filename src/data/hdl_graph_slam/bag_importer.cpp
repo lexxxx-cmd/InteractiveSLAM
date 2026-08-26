@@ -299,8 +299,55 @@ std::vector<std::string> BagImporter::listTopics(const std::string& bagPath) {
     }
 }
 
+bool BagImporter::isOutputDirNonEmpty(const std::string& path) {
+    try {
+        boost::filesystem::path dir(path);
+        if (!boost::filesystem::exists(dir)) return false;
+        return !boost::filesystem::is_empty(dir);
+    } catch (const std::exception&) {
+        return false;  // 无法判断时按"可写入"处理
+    }
+}
+
+bool BagImporter::clearDirectory(const std::string& path) {
+    try {
+        boost::filesystem::path dir(path);
+        if (!boost::filesystem::exists(dir)) return true;  // 不存在视为已清空
+        // 删除目录内全部内容，保留目录本身
+        for (boost::filesystem::directory_iterator it(dir), end; it != end; ++it) {
+            boost::filesystem::remove_all(it->path());
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[BagImporter] clearDirectory failed: " << e.what() << std::endl;
+        return false;
+    }
+}
+
 BagImportResult BagImporter::import(const BagImportConfig& cfg,
                                     ProgressInterface& progress) {
+    try {
+        return importImpl(cfg, progress);
+    } catch (const boost::filesystem::filesystem_error& e) {
+        BagImportResult r;
+        r.error = std::string("filesystem error: ") + e.what();
+        return r;
+    } catch (const std::exception& e) {
+        BagImportResult r;
+        r.error = std::string("import error: ") + e.what();
+        return r;
+    } catch (...) {
+        BagImportResult r;
+        r.error = "unknown import error";
+        return r;
+    }
+}
+
+/**
+ * @brief 导入主体（可能抛出异常，由 import() 捕获并转为错误结果）
+ */
+BagImportResult BagImporter::importImpl(const BagImportConfig& cfg,
+                                        ProgressInterface& progress) {
     BagImportResult result;
     progress.set_title("Opening " + cfg.bagPath);
 
@@ -444,10 +491,13 @@ BagImportResult BagImporter::import(const BagImportConfig& cfg,
         PointCloud::Ptr localCloud(new PointCloud());
         pcl::transformPointCloud(*m.pcd.cloud, *localCloud, calib.T_IW.cast<float>());
 
-        // data 文件（与 KeyFrame::load 兼容）
+        // data 文件（与 KeyFrame::load 兼容）；写入失败即中止（避免残缺地图）
         {
             std::ofstream ofs(kfDir + "/data");
-            if (!ofs) continue;
+            if (!ofs) {
+                result.error = "cannot create data file in " + kfDir;
+                return result;
+            }
             uint64_t sec = m.odom.timestamp / 1000000000ULL;
             uint64_t nsec = m.odom.timestamp % 1000000000ULL;
             ofs << "stamp " << sec << " " << nsec << "\n";

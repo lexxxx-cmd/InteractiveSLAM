@@ -77,9 +77,31 @@ public:
      * @param cfg      导入配置（含 bagPath / topics / 外参 / 抽稀 / 输出目录）
      * @param progress 进度回调
      * @return 导入结果
+     *
+     * 线程安全：内部包 try/catch，任何异常（如输出目录不可写）都会转为
+     * 失败的 BagImportResult，不会让异常逃逸到调用线程。
      */
     static BagImportResult import(const BagImportConfig& cfg,
                                   ProgressInterface& progress);
+
+    /**
+     * @brief 判断输出目录是否非空（供 UI 层导入前确认）
+     * @param path 输出目录路径
+     * @return true = 目录已存在且包含内容（写入会与旧文件混合）
+     */
+    static bool isOutputDirNonEmpty(const std::string& path);
+
+    /**
+     * @brief 清空目录下所有内容（保留目录本身）
+     * @param path 目录路径
+     * @return true = 成功（或目录不存在）；false = 清空失败（权限/IO 错误）
+     */
+    static bool clearDirectory(const std::string& path);
+
+private:
+    /** @brief 导入主体（可抛异常，由 import() 捕获转为错误结果） */
+    static BagImportResult importImpl(const BagImportConfig& cfg,
+                                      ProgressInterface& progress);
 };
 
 }  // namespace hdl_graph_slam
