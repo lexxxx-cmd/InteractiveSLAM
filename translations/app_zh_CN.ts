@@ -9,7 +9,7 @@
         <translation>自动回环闭合</translation>
     </message>
     <message>
-        <location line="+28"/>
+        <location line="+33"/>
         <source>Automatic Loop Closure</source>
         <translation>自动回环闭合</translation>
     </message>
@@ -204,14 +204,14 @@
 <context>
     <name>BagOpenDialog</name>
     <message>
-        <location filename="../src/ui/BagOpenDialog.cpp" line="+18"/>
+        <location filename="../src/ui/BagOpenDialog.cpp" line="+28"/>
         <source>Import ROS Bag</source>
         <translation>导入 ROS Bag</translation>
     </message>
     <message>
-        <location line="+45"/>
-        <source>Select topics from the bag:</source>
-        <translation>请从 Bag 中选择话题：</translation>
+        <location line="+83"/>
+        <source>Topics</source>
+        <translation>话题</translation>
     </message>
     <message>
         <location line="+8"/>
@@ -219,9 +219,79 @@
         <translation>位姿话题：</translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+7"/>
         <source>Point cloud topic:</source>
         <translation>点云话题：</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Lidar↔IMU Extrinsic (calib T_IL)</source>
+        <translation>Lidar↔IMU 外参（T_IL）</translation>
+    </message>
+    <message>
+        <location line="+16"/>
+        <source>R row %1:</source>
+        <translation>旋转矩阵第 %1 行：</translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Translation t:</source>
+        <translation>平移 t：</translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>Reset to Identity</source>
+        <translation>重置为单位阵</translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>Keyframe Thinning</source>
+        <translation>关键帧抽稀</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Passthrough (all frames as keyframes)</source>
+        <translation>透传（所有帧作为关键帧）</translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Meter gap (m):</source>
+        <translation>平移阈值（米）：</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Degree gap (deg):</source>
+        <translation>旋转阈值（度）：</translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Output</source>
+        <translation>输出</translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>(empty = temporary directory)</source>
+        <translation>（留空 = 临时目录）</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Browse...</source>
+        <translation>浏览...</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Choose Output Directory</source>
+        <translation>选择输出目录</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Output directory:</source>
+        <translation>输出目录：</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Save full-resolution raw.pcd</source>
+        <translation>保存全分辨率 raw.pcd</translation>
     </message>
 </context>
 <context>
@@ -585,7 +655,7 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="+78"/>
+        <location filename="../src/ui/MainWindow.cpp" line="+85"/>
         <source>Selected vertex: %1</source>
         <translation>已选择顶点：%1</translation>
     </message>
@@ -636,14 +706,14 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+477"/>
+        <location line="+521"/>
         <location line="+30"/>
         <location line="+55"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
     <message>
-        <location line="-555"/>
+        <location line="-599"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -719,14 +789,14 @@
     </message>
     <message>
         <location line="+31"/>
-        <location line="+145"/>
+        <location line="+161"/>
         <source>Graph Statistics</source>
         <translation>图统计</translation>
     </message>
     <message>
-        <location line="-144"/>
-        <location line="+155"/>
-        <location line="+91"/>
+        <location line="-160"/>
+        <location line="+171"/>
+        <location line="+95"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
@@ -751,18 +821,18 @@
         <translation>高程颜色范围...</translation>
     </message>
     <message>
-        <location line="-215"/>
-        <location line="+114"/>
+        <location line="-235"/>
+        <location line="+130"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-133"/>
+        <location line="-149"/>
         <source>Loop Edges</source>
         <translation>回环边</translation>
     </message>
     <message>
-        <location line="+144"/>
+        <location line="+160"/>
         <source>Ad&amp;vanced</source>
         <translation>高级(&amp;A)</translation>
     </message>
@@ -784,17 +854,17 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>自动回环闭合...</translation>
     </message>
     <message>
-        <location line="+11"/>
+        <location line="+15"/>
         <source>Loop edge inserted by auto detection</source>
         <translation>由自动检测插入的回环边</translation>
     </message>
     <message>
-        <location line="-137"/>
+        <location line="-157"/>
         <source>Ready — open a map folder to begin</source>
         <translation>就绪 — 打开地图文件夹开始</translation>
     </message>
     <message>
-        <location line="+17"/>
+        <location line="+33"/>
         <source>&amp;File</source>
         <translation>文件(&amp;F)</translation>
     </message>
@@ -854,7 +924,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>子图合并窗口</translation>
     </message>
     <message>
-        <location line="+92"/>
+        <location line="+96"/>
         <source>Open Map Directory</source>
         <translation>打开地图目录</translation>
     </message>
@@ -871,11 +941,12 @@ for loop-closure matching (N=1 merges 3 frames):</source>
     <message>
         <location line="+17"/>
         <location line="+8"/>
+        <location line="+33"/>
         <source>Open Bag</source>
         <translation>打开 Bag</translation>
     </message>
     <message>
-        <location line="-7"/>
+        <location line="-40"/>
         <source>Config file config/bag_import.yaml not found — using default parameters.
 Place it next to the executable or in the working directory to customize.</source>
         <translation>未找到配置文件 config/bag_import.yaml — 使用默认参数。
@@ -889,7 +960,35 @@ Place it next to the executable or in the working directory to customize.</sourc
 %1</translation>
     </message>
     <message>
-        <location line="+38"/>
+        <location line="+20"/>
+        <source>Output Directory Not Empty</source>
+        <translation>输出目录非空</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The output directory is not empty:
+%1
+
+Importing will permanently delete all existing content in this directory (cannot be undone).</source>
+        <translation>输出目录非空：
+%1
+
+导入将永久删除该目录中的所有现有内容（无法撤销）。</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Clear &amp; Import</source>
+        <translation>清空并导入</translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Failed to clear output directory:
+%1</source>
+        <translation>清空输出目录失败：
+%1</translation>
+    </message>
+    <message>
+        <location line="+29"/>
         <source>Map closed</source>
         <translation>地图已关闭</translation>
     </message>
@@ -945,12 +1044,17 @@ Place it next to the executable or in the working directory to customize.</sourc
         <translation>正在加载地图...</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+2"/>
+        <source>Loading...</source>
+        <translation>加载中...</translation>
+    </message>
+    <message>
+        <location line="+34"/>
         <source>Map loaded — %1 vertices, %2 edges, %3 keyframes</source>
         <translation>地图加载完成 — %1 个顶点，%2 条边，%3 个关键帧</translation>
     </message>
     <message>
-        <location line="+31"/>
+        <location line="+32"/>
         <source>Loading failed: %1</source>
         <translation>加载失败：%1</translation>
     </message>
