@@ -538,9 +538,9 @@ void MainWindow::onOpenMap() {
 /**
  * @brief 打开 ROS1 bag 文件（按 SCPGO 数据流解析）
  *
- * 流程：选择 .bag → 读取 bag 索引列出 topic → 弹对话框选择位姿/点云 topic
- *       （以 config/bag_import.yaml 为默认预填）→ GraphManager::openBagFile()
- *       后台解析（外参/抽稀/输出仍由 yaml 配置）→ 自动加载生成的地图。
+ * 流程：选择 .bag → 读取 bag 索引列出 topic → 弹配置对话框（topic/外参/
+ * 抽稀/输出，以 config/bag_import.yaml 为默认预填）→ GraphManager::
+ * openBagFile() 用弹窗返回的完整配置后台解析 → 自动加载生成的地图。
  */
 void MainWindow::onOpenBag() {
     QString bagPath = QFileDialog::getOpenFileName(
@@ -577,15 +577,13 @@ void MainWindow::onOpenBag() {
     QStringList topics;
     for (auto& t : topicsStd) topics << QString::fromStdString(t);
 
-    // 对话框：yaml 配置的 topic 作为默认值预填，用户可改
+    // 对话框：以 yaml 配置为默认值预填（topic + 外参 + 抽稀 + 输出），
+    // 用户可编辑全部导入参数；确认后返回完整配置供后台导入
     auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
-    BagOpenDialog dlg(topics,
-                      QString::fromStdString(cfg.odomTopic),
-                      QString::fromStdString(cfg.cloudTopic), this);
+    BagOpenDialog dlg(topics, cfg, this);
     if (dlg.exec() != QDialog::Accepted) return;
 
-    m_manager->openBagFile(QUrl::fromLocalFile(bagPath), yamlPath,
-                           dlg.odomTopic(), dlg.cloudTopic());
+    m_manager->openBagFile(QUrl::fromLocalFile(bagPath), dlg.config());
 }
 
 /**

@@ -204,6 +204,21 @@ void GraphManager::openMapData(const QUrl& folderUrl) {
  */
 void GraphManager::openBagFile(const QUrl& bagUrl, const QString& yamlPath,
                                const QString& odomTopic, const QString& cloudTopic) {
+    // 读取配置；用户对话框选择的 topic 覆盖 yaml
+    auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
+    if (!odomTopic.isEmpty())  cfg.odomTopic = odomTopic.toStdString();
+    if (!cloudTopic.isEmpty()) cfg.cloudTopic = cloudTopic.toStdString();
+    openBagFile(bagUrl, cfg);
+}
+
+/**
+ * @brief 打开 ROS1 bag 并解析为标准地图（异步，配置由调用方提供）
+ *
+ * 与 yaml 版本等价，但直接使用调用方传入的完整配置（UI 弹窗编辑结果）。
+ * 输出目录为空时使用临时目录。
+ */
+void GraphManager::openBagFile(const QUrl& bagUrl,
+                               const hdl_graph_slam::BagImportConfig& cfgIn) {
     if (m_isImportingBag || m_isLoading) {
         logWarning("Already loading/importing, ignoring bag request");
         return;
@@ -226,11 +241,9 @@ void GraphManager::openBagFile(const QUrl& bagUrl, const QString& yamlPath,
         emit statsChanged();
     }
 
-    // 读取配置；用户对话框选择的 topic 覆盖 yaml；输出目录为空时使用临时目录
-    auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
+    // 使用调用方传入的配置（UI 弹窗编辑结果）；输出目录为空时使用临时目录
+    auto cfg = cfgIn;
     cfg.bagPath = bagPath.toStdString();
-    if (!odomTopic.isEmpty())  cfg.odomTopic = odomTopic.toStdString();
-    if (!cloudTopic.isEmpty()) cfg.cloudTopic = cloudTopic.toStdString();
     if (cfg.outputDir.empty()) {
         cfg.outputDir = QDir::temp()
                             .filePath(QString("InteractiveSLAM_bag_%1").arg(

@@ -111,6 +111,17 @@ public slots:
                      const QString& cloudTopic = QString());
 
     /**
+     * @brief 打开 ROS1 bag 并解析为标准地图（异步，配置由调用方提供）
+     * @param bagUrl bag 文件 URL
+     * @param cfg    完整导入配置（由 UI 弹窗编辑后的 BagImportConfig）
+     *
+     * 与 openBagFile(bagUrl, yamlPath, ...) 等价，但直接使用调用方传入的
+     * 完整配置（topic/外参/抽稀/输出），不再从 yaml 读取。输出目录为空时
+     * 使用临时目录。
+     */
+    void openBagFile(const QUrl& bagUrl, const hdl_graph_slam::BagImportConfig& cfg);
+
+    /**
      * @brief 关闭当前已加载的地图
      *
      * 重置图数据指针，更新状态并发出相应信号。
