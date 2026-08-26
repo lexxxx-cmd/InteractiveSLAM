@@ -480,6 +480,11 @@ private:
             m_chunkColorPool[m_chunkGlobalIndex].valid()) {
             m_chunkVertexPool[m_chunkGlobalIndex]->swap(*v);
             m_chunkColorPool[m_chunkGlobalIndex]->swap(*col);
+            // 关键：swap 只交换了数据，必须 dirty() 递增 OSG 的
+            // _modifiedCount，否则 BufferObject 认为数据未变、
+            // 不重新上传 → 重建后仍显示旧点云
+            m_chunkVertexPool[m_chunkGlobalIndex]->dirty();
+            m_chunkColorPool[m_chunkGlobalIndex]->dirty();
             v   = m_chunkVertexPool[m_chunkGlobalIndex];
             col = m_chunkColorPool[m_chunkGlobalIndex];
         } else {
