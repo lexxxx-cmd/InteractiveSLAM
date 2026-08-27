@@ -585,11 +585,6 @@ private:
                 customRadius = m_sphereRadius * 2.0f;
             }
             m_sphereViz->appendSphere(center, color, id, customRadius);
-
-            // 调试坐标轴：三色 XYZ（X=红/Y=绿/Z=蓝），长度 = 3× 球体半径，
-            // 跟随位姿姿态，用于对照世界坐标轴验证朝向
-            m_sphereViz->appendAxis(center, pose.rotation(),
-                                    static_cast<double>(m_sphereRadius) * 3.0);
         }
         m_sphereViz->finish();
     }
