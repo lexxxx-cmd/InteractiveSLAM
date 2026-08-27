@@ -561,7 +561,8 @@ private:
                               m_loopCandidateIds.count(id));
             if (m_sampleStride > 1 && !isSpecial && (id % m_sampleStride != 0)) continue;
 
-            Eigen::Vector3d pos = v->estimate().translation();
+            Eigen::Isometry3d pose = v->estimate();
+            Eigen::Vector3d pos = pose.translation();
             osg::Vec3d center(pos.x(), pos.y(), pos.z());
 
             // 缓存球心位置（用于鼠标拾取）—— 仅采样后的球体
@@ -584,6 +585,11 @@ private:
                 customRadius = m_sphereRadius * 2.0f;
             }
             m_sphereViz->appendSphere(center, color, id, customRadius);
+
+            // 调试坐标轴：三色 XYZ（X=红/Y=绿/Z=蓝），长度 = 3× 球体半径，
+            // 跟随位姿姿态，用于对照世界坐标轴验证朝向
+            m_sphereViz->appendAxis(center, pose.rotation(),
+                                    static_cast<double>(m_sphereRadius) * 3.0);
         }
         m_sphereViz->finish();
     }

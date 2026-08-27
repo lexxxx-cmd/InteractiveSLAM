@@ -22,6 +22,8 @@
 #include <unordered_map>
 #include <cstdint>
 
+#include <Eigen/Core>
+
 #include "visualizers/CoreShaders.h"
 
 /**
@@ -72,6 +74,20 @@ public:
 
         m_geode = new osg::Geode;
         m_geode->addDrawable(m_geom);
+
+        // 调试坐标轴几何体（GL_LINES，每个位姿一个三色 XYZ 轴）
+        m_axisGeom = new osg::Geometry;
+        m_axisGeom->setUseDisplayList(false);
+        m_axisGeom->setUseVertexBufferObjects(true);
+        m_axisGeom->setUseVertexArrayObject(true);
+        m_axisGeom->setDataVariance(osg::Object::DYNAMIC);
+        m_axisVerts  = new osg::Vec3Array;
+        m_axisColors = new osg::Vec4Array;
+        m_axisGeom->setVertexArray(m_axisVerts);
+        m_axisGeom->setColorArray(m_axisColors, osg::Array::BIND_PER_VERTEX);
+        m_axisGeom->addPrimitiveSet(new osg::DrawArrays(GL_LINES, 0, 0));
+        applySimpleColorShader(m_axisGeom->getOrCreateStateSet());
+        m_geode->addDrawable(m_axisGeom);
     }
 
     /**
@@ -145,6 +161,45 @@ public:
     }
 
     /**
+     * @brief 在世界坐标系中添加一个三色调试坐标轴（GL_LINES）
+     *
+     * 轴从中心出发，沿位姿姿态的三个局部轴方向延伸，长度 length。
+     * 经典 RGB 约定：X=红、Y=绿、Z=蓝，用于对照世界坐标轴
+     * 直观验证位姿朝向。
+     *
+     * @param center   轴原点（世界坐标，通常为球心）
+     * @param rotation 位姿旋转矩阵（3×3，列 = 局部轴的世界方向）
+     * @param length   轴长度（> 球体半径即可，建议 3× 半径）
+     */
+    void appendAxis(const osg::Vec3d& center,
+                    const Eigen::Matrix3d& rotation,
+                    double length) {
+        // 三轴端点方向：局部 X/Y/Z 轴的世界方向
+        Eigen::Vector3d dirs[3] = {
+            rotation.col(0),  // X
+            rotation.col(1),  // Y
+            rotation.col(2),  // Z
+        };
+        // 经典 RGB 颜色：X=红, Y=绿, Z=蓝
+        const osg::Vec4 axisColor[3] = {
+            osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f),
+            osg::Vec4(0.0f, 1.0f, 0.0f, 1.0f),
+            osg::Vec4(0.0f, 0.0f, 1.0f, 1.0f),
+        };
+
+        for (int i = 0; i < 3; ++i) {
+            osg::Vec3d end(center.x() + dirs[i].x() * length,
+                           center.y() + dirs[i].y() * length,
+                           center.z() + dirs[i].z() * length);
+            // 线段两端点
+            m_axisVerts->push_back(osg::Vec3(center.x(), center.y(), center.z()));
+            m_axisVerts->push_back(osg::Vec3(end.x(), end.y(), end.z()));
+            m_axisColors->push_back(axisColor[i]);
+            m_axisColors->push_back(axisColor[i]);
+        }
+    }
+
+    /**
      * @brief 按顶点 ID 更新单个球体的颜色（不重建几何体）
      *
      * 从 m_sphereRanges 中查找该顶点对应的颜色数组范围，仅更新该范围的颜色值。
@@ -179,10 +234,22 @@ public:
         m_colors->dirty();
         m_indices->dirty();
         m_geom->dirtyBound();
+
+        // 调试坐标轴数据标记上传
+        m_axisVerts->dirty();
+        m_axisColors->dirty();
+        auto* prim = static_cast<osg::DrawArrays*>(m_axisGeom->getPrimitiveSet(0));
+        if (prim) prim->setCount(m_axisVerts->size());
+        m_axisGeom->dirtyBound();
     }
 
     /** @brief 获取包含球体的 OSG 节点 */
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
+
+    /** @brief 设置是否显示调试坐标轴（默认开启） */
+    void setAxisVisible(bool visible) {
+        m_axisGeom->setNodeMask(visible ? ~0u : 0u);
+    }
 
     /**
      * @brief 清除所有数据（用于重建）
@@ -192,6 +259,10 @@ public:
         m_colors->clear();
         m_indices->clear();
         m_sphereRanges.clear();
+        m_axisVerts->clear();
+        m_axisColors->clear();
+        auto* prim = static_cast<osg::DrawArrays*>(m_axisGeom->getPrimitiveSet(0));
+        if (prim) prim->setCount(0);
     }
 
 private:
@@ -211,10 +282,15 @@ private:
     int m_sectors;   ///< 经线段数
 
     osg::ref_ptr<osg::Geode> m_geode;              ///< 叶节点
-    osg::ref_ptr<osg::Geometry> m_geom;            ///< 几何体
-    osg::ref_ptr<osg::Vec3Array> m_verts;          ///< 顶点数组
-    osg::ref_ptr<osg::Vec4Array> m_colors;         ///< 颜色数组
-    osg::ref_ptr<osg::DrawElementsUInt> m_indices; ///< 索引数组
+    osg::ref_ptr<osg::Geometry> m_geom;            ///< 球体几何体
+    osg::ref_ptr<osg::Vec3Array> m_verts;          ///< 球体顶点数组
+    osg::ref_ptr<osg::Vec4Array> m_colors;         ///< 球体颜色数组
+    osg::ref_ptr<osg::DrawElementsUInt> m_indices; ///< 球体索引数组
+
+    // —— 调试坐标轴（三色 XYZ，跟随位姿姿态） ——
+    osg::ref_ptr<osg::Geometry>  m_axisGeom;   ///< 坐标轴几何体（GL_LINES）
+    osg::ref_ptr<osg::Vec3Array> m_axisVerts;  ///< 轴顶点数组
+    osg::ref_ptr<osg::Vec4Array> m_axisColors; ///< 轴颜色数组
 
     /** @brief 顶点 ID → 颜色数组范围的映射（用于增量颜色更新）
      *         由 appendSphere() 在添加球体时填充 */
