@@ -492,8 +492,8 @@ void ViewportWidget::focusOnVertex(long vertexId) {
     osg::Vec3d forward(dirX.x(), dirX.y(), dirX.z());
     forward.normalize();
 
-    // 相机距离：以场景包围球半径的比例（无场景数据时用固定兜底）
-    double radius = m_sceneViz->boundsRadius();
+    // 相机距离：以位姿球体半径的比例（聚焦到单个位姿，近距离观察球体）
+    double radius = m_sceneViz->sphereRadius();
     double dist = (radius > 1e-6) ? radius * 3.0 : 5.0;
     osg::Vec3d eye = center - forward * dist;   // 局部 x 轴负方向
 
