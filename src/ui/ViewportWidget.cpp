@@ -474,11 +474,12 @@ void ViewportWidget::resetCamera() {
 /**
  * @brief 双击聚焦：相机飞到指定位姿球体局部 x 轴负方向，看向球心
  *
- * 位姿朝向 = 关键帧位姿旋转矩阵 R 的 x 轴列（局部 x 轴的世界方向）。
- * 相机位置 = 球心 − 朝向 × D（局部 x 轴负方向），
- * up 取位姿局部 z 轴的世界方向——与朝向恒正交，避免 setTransformation
- * 内部 f^up 叉积退化（朝向接近世界 Z 时 up=(0,0,1) 会与视线平行，
- * 导致正交基 NaN、旋转中心错乱）。
+ * 相机坐标系与位姿坐标系按 xyz 对齐（OSG 相机约定 right=X/up=Y/前向=-Z）：
+ *   - 相机视线（前向）= 位姿局部 +X（朝向）
+ *   - 相机 up         = 位姿局部 +Y（画面"朝上"为位姿 Y 方向）
+ *   - 相机 right      = 位姿局部 +Z（由叉积 f^up 推出）
+ * 因此 setTransformation 的 up 参数传位姿局部 Y 轴。
+ * 若传位姿 Z，s=f^up 会把位姿 Y 映射成相机 right（且反向），画面侧倾 90°。
  */
 void ViewportWidget::focusOnVertex(long vertexId) {
     if (!m_graph) return;
@@ -486,20 +487,20 @@ void ViewportWidget::focusOnVertex(long vertexId) {
     if (it == m_graph->keyframes.end()) return;
     const auto& pose = it->second->estimate();   // Eigen::Isometry3d
 
-    // 球心（位姿平移）、朝向（局部 x 轴世界方向）、up（局部 z 轴世界方向）
+    // 球心（位姿平移）、前向（局部 x 轴世界方向）、up（局部 y 轴世界方向）
     osg::Vec3d center(pose.translation().x(),
                       pose.translation().y(),
                       pose.translation().z());
     Eigen::Vector3d dirX = pose.rotation() * Eigen::Vector3d::UnitX();
-    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
     osg::Vec3d forward(dirX.x(), dirX.y(), dirX.z());
-    osg::Vec3d up(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(dirY.x(), dirY.y(), dirY.z());
     forward.normalize();
     up.normalize();
 
     // 相机距离：以位姿球体半径的比例（聚焦到单个位姿，近距离观察球体）
     double radius = m_sceneViz->sphereRadius();
-    double dist = (radius > 1e-6) ? radius * 3.0 : 5.0;
+    double dist = (radius > 1e-6) ? radius * 10.0 : 5.0;
     osg::Vec3d eye = center - forward * dist;   // 局部 x 轴负方向
 
     // 设置轨迹球相机：eye / center / up，球心居中、朝向球心。
