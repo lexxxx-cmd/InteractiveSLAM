@@ -127,6 +127,13 @@ public slots:
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);  ///< 闭环高亮
     void resetCamera();                      ///< 重置摄像机
 
+    /**
+     * @brief 双击聚焦：相机移动到指定位姿球体局部 x 轴负方向，
+     *        视线沿位姿朝向（局部 x 轴）看向球心，球心位于视角中心
+     * @param vertexId 目标顶点 ID
+     */
+    void focusOnVertex(long vertexId);
+
     // === Z 裁剪 + 高程颜色范围 ===
     void setZClipping(bool enabled);          ///< 启用/禁用 Z 裁剪
     void setZClipMin(double minZ);            ///< 设置 Z 裁剪最小值

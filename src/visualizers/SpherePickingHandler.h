@@ -57,6 +57,7 @@ class SpherePickingHandler : public osgGA::GUIEventHandler {
 public:
     using SelectionCallback   = std::function<void(long)>;           ///< 选择回调（参数为顶点 ID）
     using ContextMenuCallback = std::function<void(const PickingHit&)>; ///< 右键菜单回调
+    using DoubleClickCallback = std::function<void(long)>;           ///< 双击回调（参数为顶点 ID，未命中为 -1）
 
     /// 球心数据提供者：返回当前球心数据向量指针（可能为空）
     using SphereProvider = std::function<const std::vector<std::pair<osg::Vec3d, long>>*()>;
@@ -71,17 +72,20 @@ public:
      * @param sphereRadius    球体半径（用于拾取距离阈值判断）
      * @param onSelect        选中顶点时的回调函数
      * @param onContextMenu   右键上下文菜单回调函数
+     * @param onDoubleClick   双击球体时的回调函数（参数为顶点 ID，未命中为 -1）
      */
     SpherePickingHandler(SphereProvider sphereProvider,
                          EdgeProvider   edgeProvider,
                          float sphereRadius,
                          SelectionCallback onSelect,
-                         ContextMenuCallback onContextMenu)
+                         ContextMenuCallback onContextMenu,
+                         DoubleClickCallback onDoubleClick = DoubleClickCallback())
         : m_sphereProvider(std::move(sphereProvider))
         , m_edgeProvider(std::move(edgeProvider))
         , m_sphereRadius(sphereRadius)
         , m_onSelect(std::move(onSelect))
         , m_onContextMenu(std::move(onContextMenu))
+        , m_onDoubleClick(std::move(onDoubleClick))
     {}
 
     /**
@@ -114,6 +118,23 @@ public:
             auto hit = raycast(ea.getX(), ea.getY(), viewer);
             if (!hit) { m_onSelect(-1); return true; }
             m_onSelect(nearestCenter(*hit, *centers, m_sphereRadius));
+            return true;
+        }
+
+        // ---- 左键双击：聚焦到球体 ----
+        if (ea.getEventType() == osgGA::GUIEventAdapter::DOUBLECLICK &&
+            ea.getButton() == osgGA::GUIEventAdapter::LEFT_MOUSE_BUTTON &&
+            m_onDoubleClick) {
+
+            auto* viewer = dynamic_cast<osgViewer::Viewer*>(&aa);
+            auto* centers = m_sphereProvider();
+            if (!viewer || !centers || centers->empty()) {
+                m_onDoubleClick(-1);
+                return true;
+            }
+            auto hit = raycast(ea.getX(), ea.getY(), viewer);
+            if (!hit) { m_onDoubleClick(-1); return true; }
+            m_onDoubleClick(nearestCenter(*hit, *centers, m_sphereRadius));
             return true;
         }
 
@@ -250,4 +271,5 @@ private:
     float               m_sphereRadius;     ///< 球体半径（拾取距离阈值）
     SelectionCallback   m_onSelect;         ///< 选择回调
     ContextMenuCallback m_onContextMenu;    ///< 右键菜单回调
+    DoubleClickCallback m_onDoubleClick;    ///< 双击回调
 };

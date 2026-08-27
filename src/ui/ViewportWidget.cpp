@@ -25,6 +25,8 @@
 #include <osg/Math>
 #include <osgGA/TrackballManipulator>
 
+#include <Eigen/Geometry>
+
 #include "osgQOpenGL/osgQOpenGLWidget.h"
 #include "osgQOpenGL/OSGRenderer.h"
 #include "backend/graph_manager.hpp"
@@ -263,6 +265,13 @@ void ViewportWidget::initOsg() {
                     enriched.vtxPosX, enriched.vtxPosY, enriched.vtxPosZ,
                     enriched.vtxAccumDist, enriched.vtxDegree);
             }, Qt::QueuedConnection);
+        },
+        // --- 双击回调（左键双击球体 → 聚焦相机） ---
+        [this](long vertexId) {
+            if (vertexId < 0) return;  // 未命中球体，忽略
+            QMetaObject::invokeMethod(this, [this, vertexId]() {
+                focusOnVertex(vertexId);
+            }, Qt::QueuedConnection);
         });
     viewer->addEventHandler(m_pickingHandler);
 
@@ -458,6 +467,46 @@ void ViewportWidget::resetCamera() {
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
         viewer->home();
+    }
+    m_osgWidget->update();
+}
+
+/**
+ * @brief 双击聚焦：相机飞到指定位姿球体局部 x 轴负方向，看向球心
+ *
+ * 位姿朝向 = 关键帧位姿旋转矩阵 R 的 x 轴列（局部 x 轴的世界方向）。
+ * 相机位置 = 球心 − 朝向 × D（局部 x 轴负方向），
+ * D 取场景包围球半径的比例，保证球体及周边可见。
+ */
+void ViewportWidget::focusOnVertex(long vertexId) {
+    if (!m_graph) return;
+    auto it = m_graph->keyframes.find(vertexId);
+    if (it == m_graph->keyframes.end()) return;
+    const auto& pose = it->second->estimate();   // Eigen::Isometry3d
+
+    // 球心（位姿平移）与朝向（局部 x 轴世界方向）
+    osg::Vec3d center(pose.translation().x(),
+                      pose.translation().y(),
+                      pose.translation().z());
+    Eigen::Vector3d dirX = pose.rotation() * Eigen::Vector3d::UnitX();
+    osg::Vec3d forward(dirX.x(), dirX.y(), dirX.z());
+    forward.normalize();
+
+    // 相机距离：以场景包围球半径的比例（无场景数据时用固定兜底）
+    double radius = m_sceneViz->boundsRadius();
+    double dist = (radius > 1e-6) ? radius * 3.0 : 5.0;
+    osg::Vec3d eye = center - forward * dist;   // 局部 x 轴负方向
+
+    // 设置轨迹球相机：eye / center / up，球心居中、朝向球心。
+    // 只需 setTransformation：TrackballManipulator 会据此更新内部状态，
+    // 每帧由 getInverseMatrix() 自动生成视图矩阵（手动 setViewMatrix
+    // 会与操作器每帧的矩阵计算冲突）
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (manip) {
+        manip->setTransformation(eye, center, osg::Vec3d(0.0, 0.0, 1.0));
     }
     m_osgWidget->update();
 }
