@@ -472,13 +472,15 @@ void ViewportWidget::resetCamera() {
 }
 
 /**
- * @brief 双击聚焦：相机飞到指定位姿球体后方，沿扫描方向看向球心
+ * @brief 双击聚焦：相机飞到指定位姿球体正后上方，沿扫描方向看向球心
  *
  * 位姿轴约定（由调试轴验证）：红X=右、绿Y=下、蓝Z=前方扫描方向。
  * 相机坐标系对齐：
  *   - 相机 right      = 位姿局部 +X（红，右）
  *   - 相机视线（前向）= 位姿局部 +Z（蓝，前方扫描方向）
  *   - 相机 up         = 位姿局部 −Y（绿轴向下，取反为实际上方）
+ * 相机位置 = 球心正后方（-Z）再沿 up 抬升 lift（正后上方），
+ * 距离 dist 稍远，兼顾观察球体与前方场景。
  * 数学：f=Z, up=−Y → s=Z^(−Y)=X（right）、u=X^Z=−Y（up）。
  */
 void ViewportWidget::focusOnVertex(long vertexId) {
@@ -500,8 +502,10 @@ void ViewportWidget::focusOnVertex(long vertexId) {
 
     // 相机距离：以位姿球体半径的比例（聚焦到单个位姿，近距离观察球体）
     double radius = m_sceneViz->sphereRadius();
-    double dist = (radius > 1e-6) ? radius * 10.0 : 5.0;
-    osg::Vec3d eye = center - forward * dist;   // 位姿局部 Z 轴负方向（扫描方向正后方）
+    double dist = (radius > 1e-6) ? radius * 12.0 : 6.0;   // 正后方距离（稍远）
+    double lift = (radius > 1e-6) ? radius * 4.0 : 2.0;    // 沿 up（实际上方）的抬升量
+    // 相机位于球心正后上方：正后方（-forward）再沿 up 抬升 lift
+    osg::Vec3d eye = center - forward * dist + up * lift;
 
     // 设置轨迹球相机：eye / center / up，球心居中、朝向球心。
     // 只需 setTransformation：TrackballManipulator 会据此更新内部状态，
