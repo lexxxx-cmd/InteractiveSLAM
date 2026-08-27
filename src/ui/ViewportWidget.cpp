@@ -472,15 +472,14 @@ void ViewportWidget::resetCamera() {
 }
 
 /**
- * @brief 双击聚焦：相机飞到指定位姿球体局部 Y 轴负方向，看向球心
+ * @brief 双击聚焦：相机飞到指定位姿球体后方，沿扫描方向看向球心
  *
- * 位姿轴约定：X=右、Y=前进、Z=上（常见 SLAM 约定）。
- * 相机坐标系与位姿按 xyz 正对齐：
- *   - 相机 right      = 位姿局部 +X（右）
- *   - 相机视线（前向）= 位姿局部 +Y（前进，正对方向）
- *   - 相机 up         = 位姿局部 +Z（上）
- * 因此 forward 取位姿 Y、setTransformation 的 up 参数取位姿 Z。
- * 数学：f=Y, up=Z → s=f^up=Y^Z=X（right）、u=s^f=X^Y=Z（up）。
+ * 位姿轴约定（由调试轴验证）：红X=右、绿Y=下、蓝Z=前方扫描方向。
+ * 相机坐标系对齐：
+ *   - 相机 right      = 位姿局部 +X（红，右）
+ *   - 相机视线（前向）= 位姿局部 +Z（蓝，前方扫描方向）
+ *   - 相机 up         = 位姿局部 −Y（绿轴向下，取反为实际上方）
+ * 数学：f=Z, up=−Y → s=Z^(−Y)=X（right）、u=X^Z=−Y（up）。
  */
 void ViewportWidget::focusOnVertex(long vertexId) {
     if (!m_graph) return;
@@ -488,21 +487,21 @@ void ViewportWidget::focusOnVertex(long vertexId) {
     if (it == m_graph->keyframes.end()) return;
     const auto& pose = it->second->estimate();   // Eigen::Isometry3d
 
-    // 球心（位姿平移）、前向（局部 y 轴=前进）、up（局部 z 轴=上）
+    // 球心（位姿平移）、前向（局部 z 轴=扫描方向）、up（局部 y 轴取反）
     osg::Vec3d center(pose.translation().x(),
                       pose.translation().y(),
                       pose.translation().z());
-    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
     Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
-    osg::Vec3d forward(dirY.x(), dirY.y(), dirY.z());
-    osg::Vec3d up(dirZ.x(), dirZ.y(), dirZ.z());
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
+    osg::Vec3d forward(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(-dirY.x(), -dirY.y(), -dirY.z());
     forward.normalize();
     up.normalize();
 
     // 相机距离：以位姿球体半径的比例（聚焦到单个位姿，近距离观察球体）
     double radius = m_sceneViz->sphereRadius();
     double dist = (radius > 1e-6) ? radius * 10.0 : 5.0;
-    osg::Vec3d eye = center - forward * dist;   // 位姿局部 Y 轴负方向（正后方）
+    osg::Vec3d eye = center - forward * dist;   // 位姿局部 Z 轴负方向（扫描方向正后方）
 
     // 设置轨迹球相机：eye / center / up，球心居中、朝向球心。
     // 只需 setTransformation：TrackballManipulator 会据此更新内部状态，
