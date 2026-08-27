@@ -23,6 +23,7 @@
 
 #include <osg/Notify>
 #include <osg/Math>
+#include <osgGA/TrackballManipulator>
 
 #include "osgQOpenGL/osgQOpenGLWidget.h"
 #include "osgQOpenGL/OSGRenderer.h"
@@ -204,7 +205,11 @@ void ViewportWidget::initOsg() {
     viewer->setSceneData(m_sceneViz->getRootNode());
 
     // 轨迹球摄像机操作器
-    viewer->setCameraManipulator(new osgGA::TrackballManipulator);
+    // 关闭松手后的惯性甩动：OSG 的 StandardManipulator 默认 allowThrow=true，
+    // 拖拽旋转后松手会继续旋转（表现为"甩动"），此处显式关闭
+    auto* manipulator = new osgGA::TrackballManipulator;
+    manipulator->setAllowThrow(false);
+    viewer->setCameraManipulator(manipulator);
 
     // 正交投影（替换 OSG 默认的透视投影）
     applyProjection();
