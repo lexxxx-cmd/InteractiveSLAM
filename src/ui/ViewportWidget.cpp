@@ -476,7 +476,9 @@ void ViewportWidget::resetCamera() {
  *
  * 位姿朝向 = 关键帧位姿旋转矩阵 R 的 x 轴列（局部 x 轴的世界方向）。
  * 相机位置 = 球心 − 朝向 × D（局部 x 轴负方向），
- * D 取场景包围球半径的比例，保证球体及周边可见。
+ * up 取位姿局部 z 轴的世界方向——与朝向恒正交，避免 setTransformation
+ * 内部 f^up 叉积退化（朝向接近世界 Z 时 up=(0,0,1) 会与视线平行，
+ * 导致正交基 NaN、旋转中心错乱）。
  */
 void ViewportWidget::focusOnVertex(long vertexId) {
     if (!m_graph) return;
@@ -484,13 +486,16 @@ void ViewportWidget::focusOnVertex(long vertexId) {
     if (it == m_graph->keyframes.end()) return;
     const auto& pose = it->second->estimate();   // Eigen::Isometry3d
 
-    // 球心（位姿平移）与朝向（局部 x 轴世界方向）
+    // 球心（位姿平移）、朝向（局部 x 轴世界方向）、up（局部 z 轴世界方向）
     osg::Vec3d center(pose.translation().x(),
                       pose.translation().y(),
                       pose.translation().z());
     Eigen::Vector3d dirX = pose.rotation() * Eigen::Vector3d::UnitX();
+    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
     osg::Vec3d forward(dirX.x(), dirX.y(), dirX.z());
+    osg::Vec3d up(dirZ.x(), dirZ.y(), dirZ.z());
     forward.normalize();
+    up.normalize();
 
     // 相机距离：以位姿球体半径的比例（聚焦到单个位姿，近距离观察球体）
     double radius = m_sceneViz->sphereRadius();
@@ -506,7 +511,7 @@ void ViewportWidget::focusOnVertex(long vertexId) {
     auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
         viewer->getCameraManipulator());
     if (manip) {
-        manip->setTransformation(eye, center, osg::Vec3d(0.0, 0.0, 1.0));
+        manip->setTransformation(eye, center, up);
     }
     m_osgWidget->update();
 }
