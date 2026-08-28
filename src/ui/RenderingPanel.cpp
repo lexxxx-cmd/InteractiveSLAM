@@ -62,6 +62,12 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->setPointOpacity(val);
     });
 
+    // 顶点标记不透明度滑块
+    connect(m_vertexOpacitySlider, &QSlider::valueChanged, this, [this](int val) {
+        m_vertexOpacityLabel->setText(QString::number(val) + "%");
+        m_viewport->setVertexOpacity(val);
+    });
+
     // 采样步长 SpinBox
     connect(m_sampleStrideSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this](int val) {
@@ -140,6 +146,17 @@ void RenderingPanel::setupUi() {
     opacityRow->addWidget(m_pointOpacitySlider);
     opacityRow->addWidget(m_pointOpacityLabel);
     renderLayout->addLayout(opacityRow);
+
+    // 顶点标记不透明度滑块（10-100%，默认 100%）
+    renderLayout->addWidget(new QLabel(tr("Vertex Opacity:")));
+    m_vertexOpacitySlider = new QSlider(Qt::Horizontal);
+    m_vertexOpacitySlider->setRange(10, 100);
+    m_vertexOpacitySlider->setValue(100);
+    m_vertexOpacityLabel = new QLabel("100%");
+    auto* vertexOpacityRow = new QHBoxLayout;
+    vertexOpacityRow->addWidget(m_vertexOpacitySlider);
+    vertexOpacityRow->addWidget(m_vertexOpacityLabel);
+    renderLayout->addLayout(vertexOpacityRow);
 
     // 采样步长 SpinBox（1-100，默认 1）
     renderLayout->addWidget(new QLabel(tr("Sample Stride:")));

@@ -363,6 +363,11 @@ void ViewportWidget::setSphereRadius(float radius) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setVertexOpacity(int opacity) {
+    m_sceneViz->setVertexOpacity(opacity / 100.0f);
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setSampleStride(int stride) {
     m_flags.sample_stride = stride;
     m_sceneViz->setSampleStride(stride);

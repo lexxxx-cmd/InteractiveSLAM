@@ -1122,7 +1122,7 @@ Importing will permanently delete all existing content in this directory (cannot
 <context>
     <name>RenderingPanel</name>
     <message>
-        <location filename="../src/ui/RenderingPanel.cpp" line="+82"/>
+        <location filename="../src/ui/RenderingPanel.cpp" line="+88"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
@@ -1165,6 +1165,11 @@ Importing will permanently delete all existing content in this directory (cannot
         <location line="+11"/>
         <source>Point Opacity:</source>
         <translation>点透明度：</translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <source>Vertex Opacity:</source>
+        <translation>顶点透明度：</translation>
     </message>
     <message>
         <location line="+11"/>

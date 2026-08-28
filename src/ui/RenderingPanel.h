@@ -60,6 +60,9 @@ private:
     QSlider* m_pointOpacitySlider;  ///< 点不透明度滑块
     QLabel*  m_pointOpacityLabel;   ///< 点不透明度数值标签
 
+    QSlider* m_vertexOpacitySlider; ///< 顶点标记不透明度滑块
+    QLabel*  m_vertexOpacityLabel;  ///< 顶点标记不透明度数值标签
+
     QSpinBox* m_sampleStrideSpin;   ///< 采样步长输入框
     QLabel*   m_sampleStrideLabel;  ///< 采样步长标签
 };

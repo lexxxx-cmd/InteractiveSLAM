@@ -230,6 +230,14 @@ public:
         }
     }
 
+    /** @brief 设置顶点位姿标记的整体不透明度（0.0 全透明 ~ 1.0 不透明） */
+    void setVertexOpacity(float opacity) {
+        m_vertexOpacity = opacity;
+        if (m_sphereViz) {
+            m_sphereViz->setOpacity(opacity);
+        }
+    }
+
     /**
      * @brief 设置渲染采样步长
      *
@@ -538,6 +546,7 @@ private:
         }
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
+        m_sphereViz->setOpacity(m_vertexOpacity);
 
         // 清空并预标记中心缓存
         m_sphereCenters.clear();
@@ -688,6 +697,7 @@ private:
     bool m_hasGraph    = false;   ///< 是否有已加载的图数据
     bool m_drawClouds  = true;    ///< 是否绘制点云
     float m_sphereRadius  = 1.0f; ///< 球体半径
+    float m_vertexOpacity = 1.0f; ///< 顶点位姿标记不透明度（1.0 不透明）
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
     float m_pointSize     = 3.0f; ///< 点云点大小（像素）
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）

@@ -105,6 +105,7 @@ public slots:
     void setDrawSE3Edges(bool v);            ///< 是否绘制 SE3 约束边
     void setEdgeWidth(int width);            ///< 设置边线宽度
     void setSphereRadius(float radius);      ///< 设置顶点球体半径
+    void setVertexOpacity(int opacity);      ///< 设置顶点位姿标记不透明度（0-100）
     void setSampleStride(int stride);        ///< 设置渲染采样步长
     void setPointSize(int size);             ///< 设置点云点大小
     void setPointOpacity(int opacity);       ///< 设置点云不透明度（0-100）

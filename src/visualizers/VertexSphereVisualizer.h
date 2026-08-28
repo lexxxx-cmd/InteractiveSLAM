@@ -21,6 +21,7 @@
 #include <osg/Geode>
 #include <osg/Geometry>
 #include <osg/StateSet>
+#include <osg/BlendFunc>
 #include <osg/Vec3>
 #include <osg/Vec4>
 #include <cmath>
@@ -72,6 +73,14 @@ public:
 
         // 应用纯色着色器
         applySimpleColorShader(m_geom->getOrCreateStateSet());
+
+        // 启用 alpha 混合（顶点透明度调整）：OSG 会把开启 GL_BLEND 的
+        // StateSet 归入透明渲染队列，在不透明几何体之后绘制
+        auto* ss = m_geom->getOrCreateStateSet();
+        ss->setMode(GL_BLEND, osg::StateAttribute::ON);
+        ss->setAttributeAndModes(
+            new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
+            osg::StateAttribute::ON);
 
         m_geode = new osg::Geode;
         m_geode->addDrawable(m_geom);
@@ -215,8 +224,10 @@ public:
         auto it = m_sphereRanges.find(vertexId);
         if (it == m_sphereRanges.end()) return;
         const auto& range = it->second;
+        osg::Vec4 color = newColor;
+        color.a() = m_opacity;  // 颜色更新不破坏整体不透明度
         for (int i = 0; i < range.vertexCount; ++i)
-            (*m_colors)[range.startIndex + i] = newColor;
+            (*m_colors)[range.startIndex + i] = color;
         m_colors->dirty();
     }
 
@@ -225,6 +236,24 @@ public:
 
     /** @brief 获取当前标记特征尺寸 */
     float radius() const { return m_radius; }
+
+    /**
+     * @brief 设置顶点标记的整体不透明度
+     *
+     * 立即重写当前颜色数组中所有顶点的 alpha 值；后续 append*()
+     * 新增的标记也会使用该不透明度。
+     *
+     * @param opacity 不透明度（0.0 全透明 ~ 1.0 不透明）
+     */
+    void setOpacity(float opacity) {
+        m_opacity = opacity;
+        for (unsigned int i = 0; i < m_colors->size(); ++i)
+            (*m_colors)[i].a() = opacity;
+        m_colors->dirty();
+    }
+
+    /** @brief 获取当前不透明度 */
+    float opacity() const { return m_opacity; }
 
     /**
      * @brief 在所有标记添加完成后调用，完成构建
@@ -266,6 +295,7 @@ private:
     /** @brief append* 公共前置：记录颜色基准并注册追踪范围 */
     void beginAppend(const osg::Vec4& color, long vertexId) {
         m_pendingColor = color;
+        m_pendingColor.a() *= m_opacity;  // 应用全局不透明度
         m_colorBase = m_colors->size();
         if (vertexId >= 0) {
             m_sphereRanges[vertexId] = {static_cast<unsigned int>(m_colorBase), 0};
@@ -307,6 +337,7 @@ private:
 
     float m_radius;    ///< 标记特征尺寸（锥体底面半径 / 箭头总高一半）
     int m_segments;    ///< 旋转体圆周分段数
+    float m_opacity = 1.0f;  ///< 标记整体不透明度（1.0 不透明）
 
     osg::ref_ptr<osg::Geode> m_geode;              ///< 叶节点
     osg::ref_ptr<osg::Geometry> m_geom;            ///< 标记几何体
