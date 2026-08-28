@@ -81,6 +81,11 @@ public:
         ss->setAttributeAndModes(
             new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
             osg::StateAttribute::ON);
+        // 背面剔除：透明混合下若同时渲染内壁（背面）与正面，
+        // 同一像素会被混合两次形成深色杂斑；凸体每个像素只有一层
+        // 正面，剔除背面后混合结果干净。要求所有三角形按
+        // "从外部看逆时针"（外法线）的环绕方向生成。
+        ss->setMode(GL_CULL_FACE, osg::StateAttribute::ON);
 
         m_geode = new osg::Geode;
         m_geode->addDrawable(m_geom);
@@ -121,21 +126,21 @@ public:
         // 底面圆心
         int baseCenter = pushVertex(0.0f, 0.0f, -halfH, center, rot);
 
-        // 侧面三角形
+        // 侧面三角形（外法线：从外部看逆时针）
         for (int i = 0; i < n; ++i) {
             int a = ringStart + i;
             int b = ringStart + (i + 1) % n;
             m_indices->push_back(tipIdx);
-            m_indices->push_back(b);
             m_indices->push_back(a);
+            m_indices->push_back(b);
         }
-        // 底面扇形三角化
+        // 底面扇形三角化（外法线朝 -Z：从外部看逆时针）
         for (int i = 0; i < n; ++i) {
             int a = ringStart + i;
             int b = ringStart + (i + 1) % n;
             m_indices->push_back(baseCenter);
-            m_indices->push_back(a);
             m_indices->push_back(b);
+            m_indices->push_back(a);
         }
 
         endAppend(vertexId);
@@ -180,21 +185,21 @@ public:
             int t0 = topStart + i,  t1 = topStart + j;
             int b0 = baseStart + i, b1 = baseStart + j;
 
-            // 侧面四边形（两个三角形）
+            // 侧面四边形（两个三角形，外法线朝外）
             m_indices->push_back(b0);
             m_indices->push_back(b1);
             m_indices->push_back(t0);
             m_indices->push_back(b1);
             m_indices->push_back(t1);
             m_indices->push_back(t0);
-            // 顶面扇形
+            // 顶面扇形（外法线朝 +Z）
             m_indices->push_back(topCenter);
             m_indices->push_back(t0);
             m_indices->push_back(t1);
-            // 底面扇形
+            // 底面扇形（外法线朝 -Z）
             m_indices->push_back(baseCenter);
-            m_indices->push_back(b0);
             m_indices->push_back(b1);
+            m_indices->push_back(b0);
         }
 
         endAppend(vertexId);
