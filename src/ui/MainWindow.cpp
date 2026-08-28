@@ -30,6 +30,7 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QSettings>
 #include <QAbstractButton>
 #include <QMenu>
 #include <QDialog>
@@ -382,10 +383,15 @@ void MainWindow::setupMenus() {
 
     fileMenu->addSeparator();
 
-    // 保存地图（弹窗选择保存内容：位姿图/每帧点云/全局点云）（Ctrl+S）
-    auto* saveMapAction = fileMenu->addAction(tr("&Save Map..."));
-    saveMapAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
-    connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMap);
+    // 快速保存：直接写入项目数据目录/地图来源目录（Ctrl+S，不弹窗）
+    auto* saveAction = fileMenu->addAction(tr("&Save"));
+    saveAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
+    connect(saveAction, &QAction::triggered, this, &MainWindow::onSaveMap);
+
+    // 另存为：弹窗选择保存内容与目标目录
+    auto* saveMapAction = fileMenu->addAction(tr("Save Map &As..."));
+    saveMapAction->setShortcut(QKeySequence::SaveAs);
+    connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMapAs);
 
     fileMenu->addSeparator();
 
@@ -662,45 +668,73 @@ void MainWindow::onCloseMap() {
 }
 
 /**
- * @brief 保存地图（统一保存入口）
+ * @brief 默认保存目录
  *
- * 弹窗选择保存内容（SaveMapDialog）：
- *   - 保存位姿图：graph->save() → graph.g2o
- *   - 保存每帧点云及 data 文件：graph->dump() 标准地图目录（NNNNNN/{data, raw.pcd, cloud.pcd}）
- *     + 尽力尝试 LVBA 格式转换（失败仅记录日志）
- *   - 保存全局点云地图：graph->save_pointcloud() → accumulated_cloud.pcd
- * 每项按勾选独立执行；各附加导出失败不影响其他项。
+ * 项目模式下为项目数据目录（与加载来源一致，保存 = 写回）；
+ * 非项目模式为当前地图的来源目录。两者都为空（理论上不发生）返回空串。
  */
-void MainWindow::onSaveMap() {
-    if (!m_manager->isLoaded()) {
-        statusBar()->showMessage(tr("No graph loaded"), 3000);
-        return;
+QString MainWindow::defaultSaveDir() const {
+    if (!m_activeProjectDir.isEmpty()) {
+        auto info = ProjectManager::read(m_activeProjectDir);
+        if (info.valid) return info.resolvedDataDir();
     }
+    return m_manager->mapSourceDir();
+}
 
-    SaveMapDialog dlg(this);
-    if (dlg.exec() != QDialog::Accepted) return;
-
-    QString dir = dlg.outputDirectory();
+/**
+ * @brief 执行保存（统一入口）
+ *
+ * 1) 位姿图 → graph.g2o；2) 每帧点云及 data → 标准地图目录 + 尽力 LVBA；
+ * 3) 全局点云 → accumulated_cloud.pcd。各项按开关独立执行。
+ *
+ * 防御：目标目录既不是默认保存目录又非空时，弹窗确认"清空并保存"，
+ * 防止与旧地图文件混存（同 bag 导入的清空语义）。
+ *
+ * @return 是否执行了保存（用户取消或无内容时为 false）
+ */
+bool MainWindow::performSave(const QString& dir,
+                             bool savePoseGraph, bool saveKeyframes,
+                             bool saveGlobalCloud) {
     if (dir.isEmpty()) {
         statusBar()->showMessage(tr("No output directory selected"), 3000);
-        return;
+        return false;
     }
-    if (!dlg.savePoseGraph() && !dlg.saveKeyframes() && !dlg.saveGlobalCloud()) {
+    if (!savePoseGraph && !saveKeyframes && !saveGlobalCloud) {
         statusBar()->showMessage(tr("Nothing selected to save"), 3000);
-        return;
+        return false;
+    }
+
+    // 防御确认：非默认目录且非空 → 清空确认（避免新旧地图文件混杂）
+    if (dir != defaultSaveDir() &&
+        hdl_graph_slam::BagImporter::isOutputDirNonEmpty(dir.toStdString())) {
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(tr("Output Directory Not Empty"));
+        box.setText(tr("The output directory is not empty:\n%1\n\n"
+                       "Saving will permanently delete all existing content "
+                       "in this directory (cannot be undone).").arg(dir));
+        auto* clearBtn = box.addButton(tr("Clear & Save"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != clearBtn) return false;
+        if (!hdl_graph_slam::BagImporter::clearDirectory(dir.toStdString())) {
+            QMessageBox::warning(this, tr("Clear Failed"),
+                                 tr("Failed to clear the output directory:\n%1").arg(dir));
+            return false;
+        }
     }
 
     try {
         auto* graph = m_manager->graph();
 
-        // 1) 保存位姿图（graph.g2o）
-        if (dlg.savePoseGraph()) {
+        // 1) 保存位姿图（graph.g2o，固定位于地图目录根，与单帧目录同层）
+        if (savePoseGraph) {
             std::string g2oPath = dir.toStdString() + "/graph.g2o";
             graph->save(g2oPath);
         }
 
         // 2) 保存每帧点云及 data 文件（标准地图目录）+ 尽力 LVBA
-        if (dlg.saveKeyframes()) {
+        if (saveKeyframes) {
             graph->dump(dir.toStdString(), *m_manager->progress());
             try {
                 graph->saveLVBA(dir.toStdString(), *m_manager->progress());
@@ -711,7 +745,7 @@ void MainWindow::onSaveMap() {
         }
 
         // 3) 保存全局全量拼接点云地图（accumulated_cloud.pcd）
-        if (dlg.saveGlobalCloud()) {
+        if (saveGlobalCloud) {
             std::string cloudPath = dir.toStdString() + "/accumulated_cloud.pcd";
             if (!graph->save_pointcloud(cloudPath, *m_manager->progress())) {
                 std::cerr << "[MainWindow] save_pointcloud returned false"
@@ -719,10 +753,62 @@ void MainWindow::onSaveMap() {
             }
         }
 
+        // 记住本次内容勾选（下次快速保存/另存为复用）
+        QSettings settings("DAFTECH", "InteractiveSLAM");
+        settings.setValue("save_map/pose_graph", savePoseGraph);
+        settings.setValue("save_map/keyframes", saveKeyframes);
+        settings.setValue("save_map/global_cloud", saveGlobalCloud);
+
         statusBar()->showMessage(tr("Map saved: %1").arg(dir), 5000);
+        return true;
     } catch (const std::exception& e) {
         statusBar()->showMessage(tr("Save failed: %1").arg(e.what()), 5000);
+        return false;
     }
+}
+
+/**
+ * @brief 快速保存（Ctrl+S）
+ *
+ * 不弹窗：直接保存到默认保存目录（项目数据目录 / 地图来源目录），
+ * 内容勾选复用上次保存的配置（QSettings）。没有可用目录时退化为另存为。
+ */
+void MainWindow::onSaveMap() {
+    if (!m_manager->isLoaded()) {
+        statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+
+    QString dir = defaultSaveDir();
+    if (dir.isEmpty()) {
+        onSaveMapAs();
+        return;
+    }
+
+    QSettings settings("DAFTECH", "InteractiveSLAM");
+    performSave(dir,
+                settings.value("save_map/pose_graph", true).toBool(),
+                settings.value("save_map/keyframes", true).toBool(),
+                settings.value("save_map/global_cloud", true).toBool());
+}
+
+/**
+ * @brief 另存为（弹窗选择保存内容与目标目录）
+ *
+ * SaveMapDialog 预填默认保存目录并恢复上次勾选；用户可改目录
+ * （导出副本）或改勾选。
+ */
+void MainWindow::onSaveMapAs() {
+    if (!m_manager->isLoaded()) {
+        statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+
+    SaveMapDialog dlg(this);
+    dlg.setOutputDirectory(defaultSaveDir());
+    if (dlg.exec() != QDialog::Accepted) return;
+    performSave(dlg.outputDirectory(),
+                dlg.savePoseGraph(), dlg.saveKeyframes(), dlg.saveGlobalCloud());
 }
 
 // ---------------------------------------------------------------------------

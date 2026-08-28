@@ -72,7 +72,8 @@ private slots:
     void onOpenMap();              ///< 打开地图目录（文件菜单）
     void onOpenBag();              ///< 打开 ROS1 bag 文件并解析为地图（文件菜单）
     void onCloseMap();             ///< 关闭当前地图（文件菜单）
-    void onSaveMap();              ///< 保存地图（弹窗选择：位姿图/每帧点云/全局点云）
+    void onSaveMap();              ///< 快速保存（Ctrl+S，直接存到项目数据目录/来源目录）
+    void onSaveMapAs();            ///< 另存为（弹窗选择保存内容与目标目录）
     void onOptimize();             ///< 执行图优化（图菜单）
     void onResetCamera();          ///< 重置摄像机视角（视图菜单）
     void onLoadingStarted();       ///< 加载开始时的回调
@@ -85,6 +86,10 @@ private:
     void setupUi();     ///< 初始化界面组件（视口、叠加面板）
     void startLoadingSpinner(const QString& text);  ///< 启动状态栏加载动画
     void stopLoadingSpinner();                      ///< 停止并隐藏加载动画
+
+    QString defaultSaveDir() const;  ///< 默认保存目录（项目数据目录，否则地图来源目录）
+    bool performSave(const QString& dir,
+                     bool savePoseGraph, bool saveKeyframes, bool saveGlobalCloud); ///< 执行保存（含目录非空防御确认）
 
     GraphManager* m_manager;    ///< 图数据管理器，非拥有指针
     ViewportWidget* m_viewport; ///< 中央 3D 视口部件

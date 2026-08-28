@@ -648,7 +648,7 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="+87"/>
+        <location filename="../src/ui/MainWindow.cpp" line="+88"/>
         <source>Selected vertex: %1</source>
         <translation>已选择顶点：%1</translation>
     </message>
@@ -699,13 +699,14 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+528"/>
-        <location line="+65"/>
+        <location line="+629"/>
+        <location line="+25"/>
+        <location line="+24"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
     <message>
-        <location line="-586"/>
+        <location line="-671"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -781,29 +782,28 @@
     </message>
     <message>
         <location line="+31"/>
-        <location line="+161"/>
+        <location line="+166"/>
         <source>Graph Statistics</source>
         <translation>图统计</translation>
     </message>
     <message>
-        <location line="-160"/>
-        <location line="+171"/>
+        <location line="-165"/>
+        <location line="+176"/>
         <location line="+95"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
     <message>
-        <location line="-150"/>
+        <location line="-155"/>
         <source>Open &amp;Project...</source>
         <translation>打开项目(&amp;P)...</translation>
     </message>
     <message>
-        <location line="+22"/>
         <source>&amp;Save Map...</source>
-        <translation>保存地图(&amp;S)...</translation>
+        <translation type="vanished">保存地图(&amp;S)...</translation>
     </message>
     <message>
-        <location line="+115"/>
+        <location line="+142"/>
         <source>Show Loop Edges Panel</source>
         <translation>显示回环边面板</translation>
     </message>
@@ -823,7 +823,7 @@
         <translation>高程颜色范围...</translation>
     </message>
     <message>
-        <location line="+150"/>
+        <location line="+158"/>
         <source>No output directory selected</source>
         <translation>未选择输出目录</translation>
     </message>
@@ -833,7 +833,35 @@
         <translation>未选择任何要保存的内容</translation>
     </message>
     <message>
-        <location line="+217"/>
+        <location line="+10"/>
+        <source>The output directory is not empty:
+%1
+
+Saving will permanently delete all existing content in this directory (cannot be undone).</source>
+        <translation>输出目录非空：
+%1
+
+保存将永久删除该目录中的所有现有内容（无法撤销）。</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Clear &amp; Save</source>
+        <translation>清空并保存</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Clear Failed</source>
+        <translation>清空失败</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Failed to clear the output directory:
+%1</source>
+        <translation>清空输出目录失败：
+%1</translation>
+    </message>
+    <message>
+        <location line="+270"/>
         <source>Interactive SLAM — %1</source>
         <translation>Interactive SLAM — %1</translation>
     </message>
@@ -853,18 +881,28 @@
         <translation>项目「%1」已打开（空白项目，可稍后导入数据）</translation>
     </message>
     <message>
-        <location line="-621"/>
-        <location line="+130"/>
+        <location line="-706"/>
+        <location line="+135"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-149"/>
+        <location line="-154"/>
         <source>Loop Edges</source>
         <translation>回环边</translation>
     </message>
     <message>
-        <location line="+160"/>
+        <location line="+105"/>
+        <source>&amp;Save</source>
+        <translation>保存(&amp;S)</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Save Map &amp;As...</source>
+        <translation>地图另存为(&amp;A)...</translation>
+    </message>
+    <message>
+        <location line="+55"/>
         <source>Ad&amp;vanced</source>
         <translation>高级(&amp;A)</translation>
     </message>
@@ -891,7 +929,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>由自动检测插入的回环边</translation>
     </message>
     <message>
-        <location line="-157"/>
+        <location line="-162"/>
         <source>Ready — open a map folder to begin</source>
         <translation>就绪 — 打开地图文件夹开始</translation>
     </message>
@@ -924,7 +962,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation type="vanished">保存地图...</translation>
     </message>
     <message>
-        <location line="+14"/>
+        <location line="+19"/>
         <source>&amp;Quit</source>
         <translation>退出(&amp;Q)</translation>
     </message>
@@ -991,11 +1029,12 @@ Place it next to the executable or in the working directory to customize.</sourc
     </message>
     <message>
         <location line="+20"/>
+        <location line="+87"/>
         <source>Output Directory Not Empty</source>
         <translation>输出目录非空</translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="-86"/>
         <source>The output directory is not empty:
 %1
 
@@ -1035,7 +1074,7 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation type="vanished">位姿图已保存：%1</translation>
     </message>
     <message>
-        <location line="+63"/>
+        <location line="+98"/>
         <source>Save failed: %1</source>
         <translation>保存失败：%1</translation>
     </message>
@@ -1044,12 +1083,12 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation type="vanished">保存地图目录</translation>
     </message>
     <message>
-        <location line="-2"/>
+        <location line="-3"/>
         <source>Map saved: %1</source>
         <translation>地图已保存：%1</translation>
     </message>
     <message>
-        <location line="+24"/>
+        <location line="+70"/>
         <source>Optimization already in progress</source>
         <translation>优化正在进行中</translation>
     </message>
@@ -1520,7 +1559,7 @@ You can import data later in the main window.</source>
 <context>
     <name>SaveMapDialog</name>
     <message>
-        <location filename="../src/ui/SaveMapDialog.cpp" line="+19"/>
+        <location filename="../src/ui/SaveMapDialog.cpp" line="+21"/>
         <source>Save Map</source>
         <translation>保存地图</translation>
     </message>
@@ -1563,6 +1602,11 @@ You can import data later in the main window.</source>
         <location line="+5"/>
         <source>Output directory:</source>
         <translation>输出目录：</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>All contents are saved into the selected directory: graph.g2o at the root, per-frame data in NNNNNN/ subdirectories.</source>
+        <translation>所有内容保存到所选目录：graph.g2o 位于目录根，单帧数据在 NNNNNN/ 子目录中。</translation>
     </message>
 </context>
 <context>

@@ -178,6 +178,7 @@ void GraphManager::openMapData(const QUrl& folderUrl) {
 
     // 更新加载状态
     m_isLoading = true;
+    m_mapSourceDir = QDir::cleanPath(localPath);  // 记录来源目录（保存时预填）
     emit isLoadingChanged();
     emit loadingStarted();
     logInfo(QString("Loading map: %1").arg(localPath));

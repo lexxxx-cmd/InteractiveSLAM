@@ -10,21 +10,23 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSettings>
 #include <QVBoxLayout>
 
 SaveMapDialog::SaveMapDialog(QWidget* parent)
     : QDialog(parent) {
     setWindowTitle(tr("Save Map"));
-    resize(440, 240);
+    resize(440, 260);
 
     auto* layout = new QVBoxLayout(this);
 
     auto* group = new QGroupBox(tr("Select what to save"));
     auto* form = new QFormLayout(group);
 
-    // 保存内容复选框（默认全选）
+    // 保存内容复选框（默认全选；如上次保存过则恢复上次勾选）
     m_poseGraphCb = new QCheckBox(tr("Pose graph (graph.g2o)"));
     m_poseGraphCb->setChecked(true);
     form->addRow(m_poseGraphCb);
@@ -52,12 +54,28 @@ SaveMapDialog::SaveMapDialog(QWidget* parent)
     dirRow->addWidget(browseBtn);
     form->addRow(tr("Output directory:"), dirRow);
 
+    // 地图目录布局说明：graph.g2o 与单帧数据固定保存在同一目录
+    auto* hint = new QLabel(
+        tr("All contents are saved into the selected directory: graph.g2o "
+           "at the root, per-frame data in NNNNNN/ subdirectories."));
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: #888888; font-size: 11px;");
     layout->addWidget(group);
+    layout->addWidget(hint);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
+}
+
+void SaveMapDialog::setOutputDirectory(const QString& dir) {
+    m_dirEdit->setText(dir);
+    // 恢复上次保存的内容勾选（快速保存共用同一份配置）
+    QSettings settings("DAFTECH", "InteractiveSLAM");
+    m_poseGraphCb->setChecked(settings.value("save_map/pose_graph", true).toBool());
+    m_keyframesCb->setChecked(settings.value("save_map/keyframes", true).toBool());
+    m_globalCloudCb->setChecked(settings.value("save_map/global_cloud", true).toBool());
 }
 
 bool SaveMapDialog::savePoseGraph() const {

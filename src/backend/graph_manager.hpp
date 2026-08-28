@@ -95,6 +95,9 @@ public slots:
      */
     void openMapData(const QUrl& folderUrl);
 
+    /** @brief 当前地图的来源目录（openMapData 打开时的路径，保存时预填用） */
+    QString mapSourceDir() const { return m_mapSourceDir; }
+
     /**
      * @brief 打开 ROS1 bag 并解析为标准地图（异步，配置由 YAML 控制）
      * @param bagUrl      bag 文件 URL
@@ -190,6 +193,7 @@ private:
     bool m_isLoaded = false;         ///< 标记图数据是否已成功加载
     bool m_isLoading = false;        ///< 标记是否正在执行加载操作
     bool m_isImportingBag = false;   ///< 标记是否正在执行 bag 导入
+    QString m_mapSourceDir;          ///< 当前地图来源目录（openMapData 时记录）
     QAtomicInt m_graphVersion{0};    ///< 图数据版本号（每次加载/关闭时递增，用于渲染器同步检测）
     QString m_lastMessage;           ///< 缓存最后一条日志消息内容
     QString m_lastLogLevel = "INFO"; ///< 缓存最后一条日志消息的级别

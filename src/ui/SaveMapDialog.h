@@ -21,6 +21,14 @@ class SaveMapDialog : public QDialog {
 public:
     explicit SaveMapDialog(QWidget* parent = nullptr);
 
+    /**
+     * @brief 预填目标目录（项目数据目录 / 当前地图来源目录）
+     *
+     * 调用时机：exec() 之前。预填后用户仍可修改（保留"导出副本"能力）。
+     * 同时恢复上次保存的内容勾选（QSettings 持久化）。
+     */
+    void setOutputDirectory(const QString& dir);
+
     /** @brief 是否勾选"保存位姿图" */
     bool savePoseGraph() const;
     /** @brief 是否勾选"保存每帧点云及 data 文件" */
