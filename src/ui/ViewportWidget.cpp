@@ -266,10 +266,15 @@ void ViewportWidget::initOsg() {
                     enriched.vtxAccumDist, enriched.vtxDegree);
             }, Qt::QueuedConnection);
         },
-        // --- 双击回调（左键双击球体 → 聚焦相机） ---
+        // --- 双击回调（左键双击球体 → 聚焦相机 + 聚焦淡化） ---
         [this](long vertexId) {
-            if (vertexId < 0) return;  // 未命中球体，忽略
             QMetaObject::invokeMethod(this, [this, vertexId]() {
+                if (vertexId < 0) {
+                    // 双击空白处：取消聚焦淡化，恢复整体不透明度
+                    m_sceneViz->setFocusedVertex(-1);
+                    m_osgWidget->update();
+                    return;
+                }
                 focusOnVertex(vertexId);
             }, Qt::QueuedConnection);
         });
@@ -523,6 +528,8 @@ void ViewportWidget::focusOnVertex(long vertexId) {
     if (manip) {
         manip->setTransformation(eye, center, up);
     }
+    // 聚焦淡化：全体标记透明度压到最低，目标锥体保持稍高不透明度
+    m_sceneViz->setFocusedVertex(vertexId);
     m_osgWidget->update();
 }
 

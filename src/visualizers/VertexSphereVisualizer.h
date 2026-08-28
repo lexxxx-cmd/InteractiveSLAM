@@ -236,6 +236,24 @@ public:
         m_colors->dirty();
     }
 
+    /**
+     * @brief 按顶点 ID 更新单个标记的 alpha（不重建几何体）
+     *
+     * 用于双击聚焦等场景：整体压低透明度后单独抬升目标标记，
+     * 使其在淡化环境中仍可辨认。
+     *
+     * @param vertexId 顶点 ID（需已在 append* 中添加过）
+     * @param alpha    该标记的不透明度（0.0 ~ 1.0）
+     */
+    void updateSphereOpacity(long vertexId, float alpha) {
+        auto it = m_sphereRanges.find(vertexId);
+        if (it == m_sphereRanges.end()) return;
+        const auto& range = it->second;
+        for (int i = 0; i < range.vertexCount; ++i)
+            (*m_colors)[range.startIndex + i].a() = alpha;
+        m_colors->dirty();
+    }
+
     /** @brief 设置标记特征尺寸 */
     void setRadius(float r) { m_radius = r; }
 

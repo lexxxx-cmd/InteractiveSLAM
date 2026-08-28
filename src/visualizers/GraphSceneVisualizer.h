@@ -233,9 +233,31 @@ public:
     /** @brief 设置顶点位姿标记的整体不透明度（0.0 全透明 ~ 1.0 不透明） */
     void setVertexOpacity(float opacity) {
         m_vertexOpacity = opacity;
+        m_focusedVertexId = -1;  // 手动调透明度视为退出聚焦淡化状态
         if (m_sphereViz) {
             m_sphereViz->setOpacity(opacity);
         }
+    }
+
+    /**
+     * @brief 双击聚焦淡化：全体标记压到最低不透明度，目标标记稍高
+     *
+     * 再次调用传入新 ID 时自动切换目标；传 -1（如双击空白处）恢复
+     * 用户设置的整体不透明度。
+     *
+     * @param id 聚焦的顶点 ID（-1 = 取消聚焦淡化）
+     */
+    void setFocusedVertex(long id) {
+        if (!m_sphereViz) return;
+        if (id < 0) {
+            // 取消：恢复用户设置的整体不透明度
+            m_focusedVertexId = -1;
+            m_sphereViz->setOpacity(m_vertexOpacity);
+            return;
+        }
+        m_focusedVertexId = id;
+        m_sphereViz->setOpacity(kFocusDimOpacity);
+        m_sphereViz->updateSphereOpacity(id, kFocusTargetOpacity);
     }
 
     /**
@@ -546,7 +568,8 @@ private:
         }
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
-        m_sphereViz->setOpacity(m_vertexOpacity);
+        m_sphereViz->setOpacity(m_focusedVertexId >= 0 ? kFocusDimOpacity
+                                                       : m_vertexOpacity);
 
         // 清空并预标记中心缓存
         m_sphereCenters.clear();
@@ -607,6 +630,10 @@ private:
             } else {
                 m_sphereViz->appendTruncatedCone(center, rot, color, id, customRadius);
             }
+        }
+        // 聚焦淡化状态：目标标记在重建后仍保持稍高的不透明度
+        if (m_focusedVertexId >= 0) {
+            m_sphereViz->updateSphereOpacity(m_focusedVertexId, kFocusTargetOpacity);
         }
         m_sphereViz->finish();
     }
@@ -687,7 +714,12 @@ private:
     std::set<long> m_loopCandidateIds;     ///< 回环检测候选顶点 ID 集合
     long m_selectedVertexId = -1;          ///< 当前选中的顶点 ID（-1 表示无选中）
     long m_playbackPrevId = -1;            ///< 播放轴上一个高亮的顶点 ID（用于恢复颜色）
+    long m_focusedVertexId = -1;           ///< 双击聚焦淡化的目标顶点 ID（-1 = 未聚焦）
     int  m_highlightWindowHalf = 1;        ///< 高亮窗口半宽（与 m_submapWindowHalfSize 一致）
+
+    // —— 聚焦淡化参数 ——
+    static constexpr float kFocusDimOpacity    = 0.10f;  ///< 聚焦时全体标记的最低不透明度
+    static constexpr float kFocusTargetOpacity = 0.35f;  ///< 聚焦目标标记的稍高不透明度
 
     // —— 渲染采样 ——
     int  m_sampleStride = 1;               ///< 渲染采样步长（1=全部, N=每N帧渲染1个球体）
