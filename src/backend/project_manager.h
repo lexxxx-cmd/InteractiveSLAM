@@ -106,14 +106,14 @@ public:
 
         QFile file(info.jsonPath());
         if (!file.open(QIODevice::ReadOnly)) {
-            info.errorString = QObject::tr("无法读取 project.json");
+            info.errorString = QObject::tr("Cannot read project.json");
             return info;
         }
         QJsonParseError err;
         auto doc = QJsonDocument::fromJson(file.readAll(), &err);
         file.close();
         if (doc.isNull()) {
-            info.errorString = QObject::tr("project.json 解析失败：%1").arg(err.errorString());
+            info.errorString = QObject::tr("Failed to parse project.json: %1").arg(err.errorString());
             return info;
         }
 
@@ -172,15 +172,15 @@ public:
         info.createdTime = info.lastOpenedTime = QDateTime::currentDateTime();
 
         if (QFile::exists(info.jsonPath())) {
-            info.errorString = QObject::tr("该目录已包含项目文件");
+            info.errorString = QObject::tr("Directory already contains a project file");
             return info;
         }
         if (!QDir().mkpath(info.projectDir) || !QDir().mkpath(info.resolvedDataDir())) {
-            info.errorString = QObject::tr("无法创建项目目录");
+            info.errorString = QObject::tr("Cannot create project directories");
             return info;
         }
         if (!write(info)) {
-            info.errorString = QObject::tr("无法写入 project.json");
+            info.errorString = QObject::tr("Cannot write project.json");
             return info;
         }
         info.valid = true;

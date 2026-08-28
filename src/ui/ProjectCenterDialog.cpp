@@ -45,7 +45,7 @@ void pushRecentDir(const QString& dir) {
 
 ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
     : QDialog(parent) {
-    setWindowTitle(tr("项目中心"));
+    setWindowTitle(tr("Project Center"));
     setModal(true);
     resize(760, 480);
 
@@ -53,7 +53,7 @@ ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
 
     // ---- 左侧：最近项目 ----
     auto* leftLayout = new QVBoxLayout;
-    auto* recentTitle = new QLabel(tr("最近项目"));
+    auto* recentTitle = new QLabel(tr("Recent Projects"));
     recentTitle->setStyleSheet("font-weight: bold; font-size: 14px;");
     leftLayout->addWidget(recentTitle);
 
@@ -66,17 +66,17 @@ ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
 
     // ---- 右侧：开始使用 ----
     auto* rightLayout = new QVBoxLayout;
-    auto* startTitle = new QLabel(tr("开始使用"));
+    auto* startTitle = new QLabel(tr("Get Started"));
     startTitle->setStyleSheet("font-weight: bold; font-size: 18px;");
     rightLayout->addWidget(startTitle);
 
-    auto* newBtn = new QPushButton(tr("新建项目"));
+    auto* newBtn = new QPushButton(tr("New Project"));
     newBtn->setMinimumHeight(56);
     newBtn->setObjectName("primaryButton");
-    newBtn->setToolTip(tr("设置项目名称和保存位置，可关联 Bag 原始数据"));
-    auto* openBtn = new QPushButton(tr("打开项目"));
+    newBtn->setToolTip(tr("Set project name and location; optionally link a raw Bag file"));
+    auto* openBtn = new QPushButton(tr("Open Project"));
     openBtn->setMinimumHeight(56);
-    openBtn->setToolTip(tr("从最近列表或本地目录打开已有项目"));
+    openBtn->setToolTip(tr("Open an existing project from the recent list or a local directory"));
     rightLayout->addWidget(newBtn);
     rightLayout->addWidget(openBtn);
     rightLayout->addStretch();
@@ -117,10 +117,10 @@ void ProjectCenterDialog::refreshRecentList() {
                                     ? QDir(info.projectDir).dirName() : info.name);
         name->setStyleSheet("font-weight: bold;");
         auto statusText = info.valid ? info.status : QString("invalid");
-        auto* meta = new QLabel(tr("最近打开: %1    状态: %2")
+        auto* meta = new QLabel(tr("Last opened: %1    Status: %2")
                                     .arg(info.lastOpenedTime.isValid()
                                              ? info.lastOpenedTime.toString("yyyy/MM/dd HH:mm")
-                                             : tr("未知"),
+                                             : tr("Unknown"),
                                          statusText));
         auto* path = new QLabel(info.projectDir);
         path->setStyleSheet("color: #8899aa;");
@@ -154,12 +154,12 @@ void ProjectCenterDialog::onOpenProject() {
         return;
     }
     QString dir = QFileDialog::getExistingDirectory(
-        this, tr("选择项目目录"), QString(),
+        this, tr("Choose Project Directory"), QString(),
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
     if (!dir.isEmpty()) openProjectDir(dir);
 }
 
-void ProjectCenterDialog::onOpenRecentItem(int) {
+void ProjectCenterDialog::onOpenRecentItem(QListWidgetItem*) {
     onOpenProject();
 }
 
@@ -167,9 +167,9 @@ void ProjectCenterDialog::openProjectDir(const QString& dir) {
     if (!ProjectManager::isProjectDir(dir)) {
         // 不是项目目录：兼容旧行为——当作纯地图目录直接加载（不回写项目状态）
         QMessageBox::StandardButton btn = QMessageBox::question(
-            this, tr("不是项目目录"),
-            tr("所选目录不是项目（缺少 project.json）。\n\n"
-               "是否直接将其作为地图目录打开？"),
+            this, tr("Not a Project Directory"),
+            tr("The selected directory is not a project (missing project.json).\n\n"
+               "Open it directly as a map directory?"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
         if (btn != QMessageBox::Yes) return;
         m_task.action = ProjectTask::Action::LoadDirectory;
@@ -180,7 +180,7 @@ void ProjectCenterDialog::openProjectDir(const QString& dir) {
 
     auto info = ProjectManager::read(dir);
     if (!info.valid) {
-        QMessageBox::warning(this, tr("打开项目失败"), info.errorString);
+        QMessageBox::warning(this, tr("Open Project Failed"), info.errorString);
         return;
     }
     handleOpenInfo(info);
@@ -192,22 +192,22 @@ void ProjectCenterDialog::handleOpenInfo(const ProjectInfo& info) {
         info.status == QStringLiteral("failed")) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Warning);
-        box.setWindowTitle(tr("项目未正常完成导入"));
-        box.setText(tr("项目「%1」上次导入未完成（状态: %2）。\n"
-                       "数据目录可能不完整，如何处理？")
+        box.setWindowTitle(tr("Previous Import Not Completed"));
+        box.setText(tr("Project \"%1\" did not finish its last import (status: %2).\n"
+                       "The data directory may be incomplete. How to proceed?")
                         .arg(info.name, info.status));
         QPushButton* reimportBtn =
-            box.addButton(tr("重新导入"), QMessageBox::DestructiveRole);
+            box.addButton(tr("Re-import"), QMessageBox::DestructiveRole);
         QPushButton* loadBtn =
-            box.addButton(tr("直接加载已有文件"), QMessageBox::AcceptRole);
+            box.addButton(tr("Load Existing Files"), QMessageBox::AcceptRole);
         box.addButton(QMessageBox::Cancel);
         box.exec();
         auto clicked = box.clickedButton();
 
         if (clicked == reimportBtn) {
             if (info.bagPath.isEmpty() || !QFile::exists(info.bagPath)) {
-                QMessageBox::warning(this, tr("无法重新导入"),
-                                     tr("未找到关联的 Bag 文件：%1").arg(info.bagPath));
+                QMessageBox::warning(this, tr("Cannot Re-import"),
+                                     tr("Linked Bag file not found: %1").arg(info.bagPath));
                 return;
             }
             startImport(info);
@@ -227,9 +227,9 @@ void ProjectCenterDialog::handleOpenInfo(const ProjectInfo& info) {
     // ---- 数据目录丢失 ----
     if (!info.bagPath.isEmpty() && QFile::exists(info.bagPath)) {
         QMessageBox::StandardButton btn = QMessageBox::question(
-            this, tr("数据目录丢失"),
-            tr("项目「%1」的数据目录无效或缺少 graph.g2o。\n\n"
-               "是否从关联的 Bag 重新导入？").arg(info.name),
+            this, tr("Data Directory Missing"),
+            tr("The data directory of project \"%1\" is invalid or missing graph.g2o.\n\n"
+               "Re-import from the linked Bag?").arg(info.name),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
         if (btn == QMessageBox::Yes) startImport(info);
         return;
@@ -237,17 +237,17 @@ void ProjectCenterDialog::handleOpenInfo(const ProjectInfo& info) {
 
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle(tr("数据目录丢失"));
-    box.setText(tr("项目「%1」的数据目录无效或缺少 graph.g2o。")
+    box.setWindowTitle(tr("Data Directory Missing"));
+    box.setText(tr("The data directory of project \"%1\" is invalid or missing graph.g2o.")
                     .arg(info.name));
-    QPushButton* relocateBtn = box.addButton(tr("重新定位"), QMessageBox::ActionRole);
+    QPushButton* relocateBtn = box.addButton(tr("Relocate"), QMessageBox::ActionRole);
     QPushButton* blankBtn =
-        box.addButton(tr("以空白项目打开"), QMessageBox::ActionRole);
+        box.addButton(tr("Open as Blank Project"), QMessageBox::ActionRole);
     box.addButton(QMessageBox::Cancel);
     box.exec();
     if (box.clickedButton() == relocateBtn) {
         QString dir = QFileDialog::getExistingDirectory(
-            this, tr("定位数据目录"), info.projectDir,
+            this, tr("Locate Data Directory"), info.projectDir,
             QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
         if (dir.isEmpty()) return;
         ProjectManager::relocateDataDir(info.projectDir, dir);
@@ -255,8 +255,8 @@ void ProjectCenterDialog::handleOpenInfo(const ProjectInfo& info) {
         if (updated.dataDirExists()) {
             finalizeLoad(updated);
         } else {
-            QMessageBox::warning(this, tr("数据目录丢失"),
-                                 tr("所选目录仍不是有效地图（缺少 graph.g2o）。"));
+            QMessageBox::warning(this, tr("Data Directory Missing"),
+                                 tr("The selected directory is still not a valid map (missing graph.g2o)."));
         }
     } else if (box.clickedButton() == blankBtn) {
         finalizeLoad(info);  // 数据目录无效 → None 任务（空白项目进入主界面）
@@ -286,17 +286,17 @@ bool ProjectCenterDialog::confirmClearAndImport(const ProjectInfo& info) {
     if (hdl_graph_slam::BagImporter::isOutputDirNonEmpty(absData.toStdString())) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Warning);
-        box.setWindowTitle(tr("输出目录非空"));
-        box.setText(tr("数据目录非空：\n%1\n\n"
-                       "导入将永久删除该目录中的所有现有内容（无法撤销）。")
-                        .arg(absData));
-        auto* clearBtn = box.addButton(tr("清空并导入"), QMessageBox::DestructiveRole);
+        box.setWindowTitle(tr("Output Directory Not Empty"));
+        box.setText(tr("The output directory is not empty:\n%1\n\n"
+                       "Importing will permanently delete all existing content "
+                       "in this directory (cannot be undone).").arg(absData));
+        auto* clearBtn = box.addButton(tr("Clear & Import"), QMessageBox::DestructiveRole);
         box.addButton(QMessageBox::Cancel);
         box.exec();
         if (box.clickedButton() != clearBtn) return false;
         if (!hdl_graph_slam::BagImporter::clearDirectory(absData.toStdString())) {
-            QMessageBox::warning(this, tr("清空失败"),
-                                 tr("清空数据目录失败：\n%1").arg(absData));
+            QMessageBox::warning(this, tr("Clear Failed"),
+                                 tr("Failed to clear the data directory:\n%1").arg(absData));
             return false;
         }
     }
@@ -309,8 +309,8 @@ bool ProjectCenterDialog::startImport(const ProjectInfo& info) {
     // 读取 Bag 话题并弹出导入配置对话框（与"打开 Bag"一致的配置流程）
     auto topicsStd = hdl_graph_slam::BagImporter::listTopics(info.bagPath.toStdString());
     if (topicsStd.empty()) {
-        QMessageBox::warning(this, tr("读取 Bag 失败"),
-                             tr("读取 Bag 失败或未找到话题：\n%1").arg(info.bagPath));
+        QMessageBox::warning(this, tr("Read Bag Failed"),
+                             tr("Failed to read bag or no topics found:\n%1").arg(info.bagPath));
         return false;
     }
     QStringList topics;
@@ -341,45 +341,45 @@ bool ProjectCenterDialog::startImport(const ProjectInfo& info) {
 
 void ProjectCenterDialog::onNewProject() {
     QDialog dlg(this);
-    dlg.setWindowTitle(tr("新建项目"));
+    dlg.setWindowTitle(tr("New Project"));
     auto* form = new QFormLayout(&dlg);
 
     auto* nameEdit = new QLineEdit;
-    nameEdit->setPlaceholderText(tr("项目名称"));
-    form->addRow(tr("项目名称:"), nameEdit);
+    nameEdit->setPlaceholderText(tr("Project name"));
+    form->addRow(tr("Project name:"), nameEdit);
 
     auto* locEdit = new QLineEdit(QDir::homePath());
-    auto* locBrowse = new QPushButton(tr("浏览..."));
+    auto* locBrowse = new QPushButton(tr("Browse..."));
     auto* locRow = new QHBoxLayout;
     locRow->addWidget(locEdit, 1);
     locRow->addWidget(locBrowse);
-    form->addRow(tr("保存位置:"), locRow);
+    form->addRow(tr("Save location:"), locRow);
     connect(locBrowse, &QPushButton::clicked, this, [this, locEdit]() {
         QString d = QFileDialog::getExistingDirectory(
-            this, tr("选择保存位置"), locEdit->text(),
+            this, tr("Choose Save Location"), locEdit->text(),
             QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
         if (!d.isEmpty()) locEdit->setText(d);
     });
 
     auto* bagEdit = new QLineEdit;
-    bagEdit->setPlaceholderText(tr("（可选）原始 .bag 文件路径"));
-    auto* bagBrowse = new QPushButton(tr("浏览..."));
+    bagEdit->setPlaceholderText(tr("(Optional) Path to raw .bag file"));
+    auto* bagBrowse = new QPushButton(tr("Browse..."));
     auto* bagRow = new QHBoxLayout;
     bagRow->addWidget(bagEdit, 1);
     bagRow->addWidget(bagBrowse);
-    form->addRow(tr("Bag 文件:"), bagRow);
+    form->addRow(tr("Bag file:"), bagRow);
     connect(bagBrowse, &QPushButton::clicked, this, [this, bagEdit]() {
         QString f = QFileDialog::getOpenFileName(
-            this, tr("选择 Bag 文件"), QString(),
-            tr("ROS Bag (*.bag);;所有文件 (*)"));
+            this, tr("Choose Bag File"), QString(),
+            tr("ROS Bag (*.bag);;All Files (*)"));
         if (!f.isEmpty()) bagEdit->setText(f);
     });
 
     auto* dataEdit = new QLineEdit(ProjectManager::kDefaultDataDir);
-    form->addRow(tr("数据目录名:"), dataEdit);
+    form->addRow(tr("Data directory name:"), dataEdit);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    buttons->button(QDialogButtonBox::Ok)->setText(tr("创建"));
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Create"));
     form->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -388,14 +388,14 @@ void ProjectCenterDialog::onNewProject() {
 
     const QString name = nameEdit->text().trimmed();
     if (name.isEmpty()) {
-        QMessageBox::warning(this, tr("新建项目"), tr("项目名称不能为空"));
+        QMessageBox::warning(this, tr("New Project"), tr("Project name cannot be empty"));
         return;
     }
     auto info = ProjectManager::create(name, locEdit->text().trimmed(),
                                        bagEdit->text().trimmed(),
                                        dataEdit->text().trimmed());
     if (!info.valid) {
-        QMessageBox::warning(this, tr("新建项目失败"), info.errorString);
+        QMessageBox::warning(this, tr("Create Project Failed"), info.errorString);
         return;
     }
 
@@ -404,9 +404,9 @@ void ProjectCenterDialog::onNewProject() {
     // 边界判定：有 Bag → 确认清空后导入；无 Bag → 校验数据目录或空白打开
     if (!info.bagPath.isEmpty()) {
         if (!QFile::exists(info.bagPath)) {
-            QMessageBox::warning(this, tr("Bag 文件不存在"),
-                                 tr("未找到 Bag 文件：%1\n"
-                                    "已创建空白项目，可稍后在项目中重新导入。")
+            QMessageBox::warning(this, tr("Bag File Not Found"),
+                                 tr("Bag file not found: %1\n"
+                                    "A blank project has been created; you can re-import later.")
                                      .arg(info.bagPath));
         } else if (startImport(info)) {
             return;
@@ -421,8 +421,8 @@ void ProjectCenterDialog::onNewProject() {
         return;
     }
     QMessageBox::information(
-        this, tr("空白项目"),
-        tr("项目「%1」已创建（未关联 Bag，数据目录为空）。\n"
-           "进入主界面后可稍后导入数据。").arg(name));
+        this, tr("Blank Project"),
+        tr("Project \"%1\" created (no Bag linked, empty data directory).\n"
+           "You can import data later in the main window.").arg(name));
     finalizeLoad(info);
 }

@@ -14,6 +14,8 @@
 #include <QStatusBar>
 #include <QMenuBar>
 
+#include "backend/project_manager.h"
+
 class QAction;
 class QLabel;
 class QTimer;
@@ -56,7 +58,17 @@ public:
      */
     explicit MainWindow(GraphManager* manager, QWidget* parent = nullptr);
 
+    /**
+     * @brief 从项目中心的启动任务引导主界面
+     *
+     * 由 main.cpp 在窗口 show() 之后调用一次：按任务动作加载地图目录
+     * 或后台导入 Bag；同时更新窗口标题并回写项目导入状态。
+     * Action::None（空白项目）仅更新标题。
+     */
+    void launchFromProject(const ProjectTask& task);
+
 private slots:
+    void onOpenProjectCenter();    ///< 打开项目中心（文件菜单）
     void onOpenMap();              ///< 打开地图目录（文件菜单）
     void onOpenBag();              ///< 打开 ROS1 bag 文件并解析为地图（文件菜单）
     void onCloseMap();             ///< 关闭当前地图（文件菜单）
@@ -105,6 +117,10 @@ private:
     int m_submapWindowHalfSize = 7;  ///< 闭环匹配时合并的相邻关键帧数（±N 帧）
     QAction* m_optimizeAction = nullptr;  ///< 图优化动作（用于启用/禁用状态同步）
     bool m_optimizePending = false;  ///< 优化是否正在进行中（防止重复触发）
+
+    // === 当前项目（项目中心启动时设置，空 = 未使用项目功能） ===
+    QString m_activeProjectDir;      ///< 当前项目根目录
+    bool m_activeIsImport = false;   ///< 当前加载是否为 Bag 导入（决定状态回写）
 
     // === 加载动画（状态栏旋转字符 -\|/ ） ===
     QLabel* m_loadingSpinner = nullptr;   ///< 旋转动画标签（位于状态栏）

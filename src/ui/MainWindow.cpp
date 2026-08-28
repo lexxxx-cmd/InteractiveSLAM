@@ -12,6 +12,7 @@
  */
 
 #include "ui/MainWindow.h"
+#include "ui/ProjectCenterDialog.h"
 #include "ui/ViewportWidget.h"
 #include "ui/GraphStatsPanel.h"
 #include "ui/RenderingPanel.h"
@@ -358,6 +359,11 @@ void MainWindow::setupUi() {
 void MainWindow::setupMenus() {
     // ---- 文件菜单 ----
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
+
+    // 打开项目中心（新建/切换项目；加载前会先关闭当前地图）
+    auto* openProjectAction = fileMenu->addAction(tr("Open &Project..."));
+    openProjectAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    connect(openProjectAction, &QAction::triggered, this, &MainWindow::onOpenProjectCenter);
 
     // 打开地图目录
     auto* openAction = fileMenu->addAction(tr("&Open Map..."));
@@ -823,6 +829,11 @@ void MainWindow::onLoadingSucceeded() {
     // 注意：此处不停止加载动画——点云（含 LOD 分块）仍在后台构建/渐进上传，
     // spinner 由 cloudRenderFinished 信号在点云全部渲染完成后停止
     m_loopBeginVertexId = -1;
+    // Bag 导入随加载一并成功 → 回写项目状态 completed
+    if (m_activeIsImport && !m_activeProjectDir.isEmpty()) {
+        ProjectManager::setStatus(m_activeProjectDir, "completed");
+        m_activeIsImport = false;
+    }
     statusBar()->showMessage(
         tr("Map loaded — %1 vertices, %2 edges, %3 keyframes")
             .arg(m_manager->vertexCount())
@@ -856,6 +867,11 @@ void MainWindow::onLoadingSucceeded() {
  */
 void MainWindow::onLoadingFailed(const QString& error) {
     stopLoadingSpinner();
+    // Bag 导入失败 → 回写项目状态 failed（保留 processing 前的状态信息）
+    if (m_activeIsImport && !m_activeProjectDir.isEmpty()) {
+        ProjectManager::setStatus(m_activeProjectDir, "failed");
+        m_activeIsImport = false;
+    }
     statusBar()->showMessage(tr("Loading failed: %1").arg(error));
     QMessageBox::warning(this, tr("Load Error"), error);
 }
@@ -867,4 +883,62 @@ void MainWindow::onLoadingFailed(const QString& error) {
  */
 void MainWindow::onLogMessage(const QString& message) {
     statusBar()->showMessage(message, 5000);
+}
+
+// ---------------------------------------------------------------------------
+// 项目集成
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 从项目中心的启动任务引导主界面
+ *
+ * 由 main.cpp 在窗口 show() 之后调用一次。Action 分派：
+ *   - LoadDirectory：openMapData() 加载项目数据目录；
+ *   - ImportBag：    openBagFile() 后台导入（配置已在项目中心完成，
+ *                    清空确认也已处理），状态回写挂在加载成功/失败回调；
+ *   - None：         空白项目，仅更新标题。
+ */
+void MainWindow::launchFromProject(const ProjectTask& task) {
+    m_activeProjectDir = task.projectDir;
+    m_activeIsImport = (task.action == ProjectTask::Action::ImportBag);
+
+    if (!task.projectName.isEmpty()) {
+        setWindowTitle(tr("Interactive SLAM — %1").arg(task.projectName));
+    }
+
+    switch (task.action) {
+    case ProjectTask::Action::LoadDirectory:
+        statusBar()->showMessage(tr("Opening project \"%1\"...").arg(task.projectName));
+        m_manager->openMapData(QUrl::fromLocalFile(task.dataDir));
+        break;
+    case ProjectTask::Action::ImportBag:
+        statusBar()->showMessage(tr("Importing Bag into project \"%1\"...").arg(task.projectName));
+        m_manager->openBagFile(QUrl::fromLocalFile(task.bagPath), task.importCfg);
+        break;
+    case ProjectTask::Action::None:
+    default:
+        statusBar()->showMessage(
+            tr("Project \"%1\" opened (blank project, import data later)").arg(task.projectName),
+            5000);
+        break;
+    }
+}
+
+/**
+ * @brief 打开项目中心（文件菜单）
+ *
+ * 重新弹出项目中心；用户选定新项目后关闭当前地图并按新任务引导界面。
+ * 取消则留在当前项目/状态。
+ */
+void MainWindow::onOpenProjectCenter() {
+    ProjectCenterDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    if (m_manager->isLoaded()) {
+        m_manager->closeMap();
+    }
+    setWindowTitle("Interactive SLAM");  // launchFromProject 会按需设置项目名
+    m_activeProjectDir.clear();
+    m_activeIsImport = false;
+    launchFromProject(dlg.task());
 }
