@@ -220,7 +220,7 @@ void ViewportWidget::initOsg() {
     // 球心坐标和边段数据在每次事件触发时实时查询，确保图谱加载/位姿更新后自动反映
     m_pickingHandler = new SpherePickingHandler(
         // 球心坐标提供器
-        [this]() -> const std::vector<std::pair<osg::Vec3d, long>>* {
+        [this]() -> const std::vector<PickableCenter>* {
             return &m_sceneViz->sphereCenters();
         },
         // 边段提供器
