@@ -167,7 +167,7 @@ public:
         info.projectDir = QDir::cleanPath(parentDir + "/" + name);
         info.name       = name;
         info.bagPath    = bagPath;
-        info.dataDir    = dataDirName.isEmpty() ? QStringLiteral(kDefaultDataDir) : dataDirName;
+        info.dataDir    = dataDirName.isEmpty() ? QStringLiteral("map") : dataDirName;
         info.status     = "pending";
         info.createdTime = info.lastOpenedTime = QDateTime::currentDateTime();
 
@@ -225,7 +225,7 @@ public:
             auto info = read(d);
             info.lastOpenedTime = info.lastOpenedTime.isValid()
                                       ? info.lastOpenedTime
-                                      : QDateTime::fromSecs_t(0);  // 排序稳定
+                                      : QDateTime::fromSecsSinceEpoch(0);  // 排序稳定
             list.push_back(info);
         }
         std::sort(list.begin(), list.end(),
