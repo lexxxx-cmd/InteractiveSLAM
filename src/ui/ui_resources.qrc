@@ -2,5 +2,6 @@
     <qresource prefix="/ui">
         <file alias="dark_theme.qss">dark_theme.qss</file>
         <file alias="arrow_down.svg">arrow_down.svg</file>
+        <file alias="app_icon.png">../icon/20260826-163630.png</file>
     </qresource>
 </RCC>

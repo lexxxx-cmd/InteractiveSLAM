@@ -22,6 +22,7 @@
 #include "ui/BagOpenDialog.h"
 #include "ui/AutoLoopClosureDialog.h"
 #include "ui/RenderingAdvancedDialogs.h"
+#include "ui/SaveMapDialog.h"
 #include "backend/graph_manager.hpp"
 #include "data/hdl_graph_slam/bag_importer.hpp"
 
@@ -293,12 +294,12 @@ void MainWindow::setupUi() {
         }
     });
 
-    // ---- 播放轴面板 ----
+    // ---- 播放轴面板（默认显示） ----
     m_playbackPanel = new PlaybackPanel(m_viewport, nullptr);
     m_playbackOverlay = new OverlayPanelWidget(tr("Playback"), m_playbackPanel);
     m_playbackOverlay->setMaximumHeight(200);
     m_viewport->registerOverlay(m_playbackOverlay);
-    m_playbackOverlay->hide();
+    m_playbackOverlay->show();
     m_viewport->updateOverlayPositions();
 
     // 面板关闭按钮 → 同步菜单状态
@@ -375,14 +376,9 @@ void MainWindow::setupMenus() {
 
     fileMenu->addSeparator();
 
-    // 保存位姿图为 .g2o 文件（Ctrl+S）
-    auto* savePoseAction = fileMenu->addAction(tr("Save Pose Graph..."));
-    savePoseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
-    connect(savePoseAction, &QAction::triggered, this, &MainWindow::onSavePoseGraph);
-
-    // 保存地图（含 LVBA 格式输出）（Ctrl+Shift+S）
-    auto* saveMapAction = fileMenu->addAction(tr("Save Map..."));
-    saveMapAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    // 保存地图（弹窗选择保存内容：位姿图/每帧点云/全局点云）（Ctrl+S）
+    auto* saveMapAction = fileMenu->addAction(tr("&Save Map..."));
+    saveMapAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
     connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMap);
 
     fileMenu->addSeparator();
@@ -427,7 +423,7 @@ void MainWindow::setupMenus() {
     // 播放轴面板显示切换（回环起点搜索常用入口）
     m_playbackViewAction = viewMenu->addAction(tr("Playback"));
     m_playbackViewAction->setCheckable(true);
-    m_playbackViewAction->setChecked(false);
+    m_playbackViewAction->setChecked(true);  // 默认显示
     connect(m_playbackViewAction, &QAction::toggled, this, [this](bool checked) {
         if (m_playbackOverlay) {
             m_playbackOverlay->setVisible(checked);
@@ -660,37 +656,14 @@ void MainWindow::onCloseMap() {
 }
 
 /**
- * @brief 保存位姿图为 .g2o 文件
- */
-void MainWindow::onSavePoseGraph() {
-    if (!m_manager->isLoaded()) {
-        statusBar()->showMessage(tr("No graph loaded"), 3000);
-        return;
-    }
-
-    QString path = QFileDialog::getSaveFileName(
-        this, tr("Save Pose Graph"), QString(),
-        tr("Pose Graph Files (*.g2o);;All Files (*)"));
-    if (path.isEmpty()) return;
-
-    try {
-        m_manager->graph()->save(path.toStdString());
-        statusBar()->showMessage(
-            tr("Pose graph saved: %1").arg(path), 5000);
-    } catch (const std::exception& e) {
-        statusBar()->showMessage(
-            tr("Save failed: %1").arg(e.what()), 5000);
-    }
-}
-
-/**
- * @brief 保存地图（含 LVBA 格式输出 + 全局全量点云地图）
+ * @brief 保存地图（统一保存入口）
  *
- * 调用 graph->dump() 保存标准格式地图数据，
- * 并依次尝试额外导出：
- *   - LVBA 格式（saveLVBA）
- *   - 全局全量拼接点云地图（save_pointcloud → accumulated_cloud.pcd）
- * 额外格式导出失败仅记录日志，不影响主保存操作。
+ * 弹窗选择保存内容（SaveMapDialog）：
+ *   - 保存位姿图：graph->save() → graph.g2o
+ *   - 保存每帧点云及 data 文件：graph->dump() 标准地图目录（NNNNNN/{data, raw.pcd, cloud.pcd}）
+ *     + 尽力尝试 LVBA 格式转换（失败仅记录日志）
+ *   - 保存全局点云地图：graph->save_pointcloud() → accumulated_cloud.pcd
+ * 每项按勾选独立执行；各附加导出失败不影响其他项。
  */
 void MainWindow::onSaveMap() {
     if (!m_manager->isLoaded()) {
@@ -698,41 +671,51 @@ void MainWindow::onSaveMap() {
         return;
     }
 
-    QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Save Map Directory"), QString(),
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    SaveMapDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
 
-    if (dir.isEmpty()) return;
+    QString dir = dlg.outputDirectory();
+    if (dir.isEmpty()) {
+        statusBar()->showMessage(tr("No output directory selected"), 3000);
+        return;
+    }
+    if (!dlg.savePoseGraph() && !dlg.saveKeyframes() && !dlg.saveGlobalCloud()) {
+        statusBar()->showMessage(tr("Nothing selected to save"), 3000);
+        return;
+    }
 
     try {
         auto* graph = m_manager->graph();
-        graph->dump(dir.toStdString(), *m_manager->progress());
 
-        // 尽力尝试 LVBA 格式转换 —— 失败仅记录日志，不影响主保存操作
-        try {
-            graph->saveLVBA(dir.toStdString(), *m_manager->progress());
-        } catch (const std::exception& e) {
-            std::cerr << "[MainWindow] LVBA conversion failed: "
-                      << e.what() << std::endl;
+        // 1) 保存位姿图（graph.g2o）
+        if (dlg.savePoseGraph()) {
+            std::string g2oPath = dir.toStdString() + "/graph.g2o";
+            graph->save(g2oPath);
         }
 
-        // 尽力尝试保存全局全量拼接点云地图 —— 失败仅记录日志
-        try {
+        // 2) 保存每帧点云及 data 文件（标准地图目录）+ 尽力 LVBA
+        if (dlg.saveKeyframes()) {
+            graph->dump(dir.toStdString(), *m_manager->progress());
+            try {
+                graph->saveLVBA(dir.toStdString(), *m_manager->progress());
+            } catch (const std::exception& e) {
+                std::cerr << "[MainWindow] LVBA conversion failed: "
+                          << e.what() << std::endl;
+            }
+        }
+
+        // 3) 保存全局全量拼接点云地图（accumulated_cloud.pcd）
+        if (dlg.saveGlobalCloud()) {
             std::string cloudPath = dir.toStdString() + "/accumulated_cloud.pcd";
             if (!graph->save_pointcloud(cloudPath, *m_manager->progress())) {
                 std::cerr << "[MainWindow] save_pointcloud returned false"
                           << std::endl;
             }
-        } catch (const std::exception& e) {
-            std::cerr << "[MainWindow] save_pointcloud failed: "
-                      << e.what() << std::endl;
         }
 
-        statusBar()->showMessage(
-            tr("Map saved: %1").arg(dir), 5000);
+        statusBar()->showMessage(tr("Map saved: %1").arg(dir), 5000);
     } catch (const std::exception& e) {
-        statusBar()->showMessage(
-            tr("Save failed: %1").arg(e.what()), 5000);
+        statusBar()->showMessage(tr("Save failed: %1").arg(e.what()), 5000);
     }
 }
 

@@ -97,6 +97,7 @@ set(UI_SOURCES
     src/ui/BagOpenDialog.cpp                              # 打开 Bag 对话框（topic 选择）
     src/ui/AutoLoopClosureDialog.cpp                       # 高级设置：自动回环对话框
     src/ui/RenderingAdvancedDialogs.cpp                    # 高级设置：渲染相关对话框（LOD/Z裁剪/颜色范围）
+    src/ui/SaveMapDialog.cpp                               # 保存地图配置对话框（位姿图/每帧点云/全局点云）
     src/ui/ViewportWidget.cpp                             # 3D 视口控件
     src/ui/GraphStatsPanel.cpp                            # 图统计面板
     src/ui/RenderingPanel.cpp                             # 渲染设置面板
@@ -135,6 +136,11 @@ qt_add_executable(appInteractiveSLAM
     ${UI_SOURCES}             # UI 层源文件
     src/ui/ui_resources.qrc   # Qt 资源文件（暗色主题 QSS）
 )
+
+# Windows exe 图标（.rc 资源脚本引用 icon/app.ico）
+if(WIN32)
+    target_sources(appInteractiveSLAM PRIVATE app.rc)
+endif()
 
 # --- Qt 中文翻译 ---
 qt_add_translations(appInteractiveSLAM

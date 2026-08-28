@@ -12,6 +12,7 @@
 #include <QLibraryInfo>
 #include <QFile>
 #include <QTextStream>
+#include <QIcon>
 #include <iostream>
 
 // 第三方依赖头文件（编译时检查可用性）
@@ -62,6 +63,9 @@ int main(int argc, char *argv[]) {
         app.setStyleSheet(ts.readAll());
         styleFile.close();
     }
+
+    // --- 设置应用图标（来自 icon 文件夹，qrc 资源） ---
+    app.setWindowIcon(QIcon(":/ui/app_icon.png"));
 
     // 创建图管理器后端实例（应用程序生命周期内作为全局单例使用）
     GraphManager graphManager;

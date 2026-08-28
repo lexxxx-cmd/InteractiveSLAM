@@ -6,7 +6,6 @@
  * - mergeAdjacentClouds() 自由函数：合并相邻关键帧的点云
  * - 对话框 UI 搭建：迷你视口、滑块、按钮、进度条
  * - 滑块增量调节（自动归零 + 局部坐标系变换）
- * - FPFH 全局配准（后台线程执行，进度轮询）
  * - ICP/GICP/NDT 扫描匹配（后台线程执行）
  * - 适应度分数实时计算
  * - 闭环边提交到图谱（更新已有边或创建新边）
@@ -29,15 +28,11 @@
 #include <QSpinBox>
 #include <QDialogButtonBox>
 #include <QMessageBox>
-#include <QTimer>
 #include <QtConcurrent/QtConcurrent>
 
 #include <algorithm>
 
 #include <pcl/common/transforms.h>
-#include <pcl/features/normal_3d_omp.h>
-#include <pcl/features/fpfh.h>
-#include <pcl/registration/sample_consensus_prerejective.h>
 #include <pcl/registration/registration.h>
 
 #include <g2o/types/slam3d/types_slam3d.h>
@@ -157,9 +152,6 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
  */
 LoopClosureDialog::~LoopClosureDialog() {
     // 如果监听器正在运行，等待完成（它们持有 shared_ptr，安全）
-    if (m_fpfhWatcher && m_fpfhWatcher->isRunning()) {
-        m_fpfhWatcher->waitForFinished();
-    }
     if (m_scanMatchWatcher && m_scanMatchWatcher->isRunning()) {
         m_scanMatchWatcher->waitForFinished();
     }
@@ -174,10 +166,10 @@ LoopClosureDialog::~LoopClosureDialog() {
  *
  * 从上到下依次为：
  * 1. 迷你视口（512×512 预览）
- * 2. 适应度分数标签
+ * 2. 匹配结果区域（适应度分数 + 结果日志）
  * 3. 手动调节滑块组（含步长档位选择器）
- * 4. 操作按钮行（FPFH、扫描匹配、重置）
- * 5. 进度条 + 状态标签
+ * 4. 操作按钮行（扫描匹配、重置）
+ * 5. 进度条
  * 6. 底部按钮（添加边 / 取消）
  */
 void LoopClosureDialog::setupUi() {
@@ -188,10 +180,21 @@ void LoopClosureDialog::setupUi() {
     m_miniViewport->setFixedSize(560, 560);
     mainLayout->addWidget(m_miniViewport, 0, Qt::AlignHCenter);
 
-    // --- 适应度分数 ---
+    // --- 匹配结果区域（适应度分数 + 结果日志合并） ---
+    auto* resultGroup = new QGroupBox(tr("Match Result"));
+    auto* resultLayout = new QVBoxLayout(resultGroup);
+
+    // 适应度分数
     m_fitnessLabel = new QLabel(tr("fitness_score: —"));
     m_fitnessLabel->setObjectName("FitnessLabel");
-    mainLayout->addWidget(m_fitnessLabel);
+    resultLayout->addWidget(m_fitnessLabel);
+
+    // 结果日志（扫描匹配运行中/完成/重置提示）
+    m_statusLabel = new QLabel;
+    m_statusLabel->setStyleSheet("color: #999999;");
+    resultLayout->addWidget(m_statusLabel);
+
+    mainLayout->addWidget(resultGroup);
 
     // --- 手动调节滑块组 ---
     auto* sliderGroup = new QGroupBox(tr("Manual Adjustment (local frame)"));
@@ -282,16 +285,13 @@ void LoopClosureDialog::setupUi() {
 
     // --- 操作按钮行 ---
     auto* btnRow = new QHBoxLayout;
-    m_autoAlignBtn = new QPushButton(tr("Auto Align"));
     m_scanMatchBtn = new QPushButton(tr("Scan Matching"));
     m_resetBtn     = new QPushButton(tr("Reset"));
     m_resetBtn->setObjectName("tertiaryButton");
-    btnRow->addWidget(m_autoAlignBtn);
     btnRow->addWidget(m_scanMatchBtn);
     btnRow->addWidget(m_resetBtn);
     mainLayout->addLayout(btnRow);
 
-    connect(m_autoAlignBtn, &QPushButton::clicked, this, &LoopClosureDialog::onAutoAlign);
     connect(m_scanMatchBtn, &QPushButton::clicked, this, &LoopClosureDialog::onScanMatching);
     connect(m_resetBtn, &QPushButton::clicked, this, &LoopClosureDialog::onReset);
 
@@ -300,11 +300,6 @@ void LoopClosureDialog::setupUi() {
     m_progressBar->setVisible(false);
     m_progressBar->setRange(0, 100);
     mainLayout->addWidget(m_progressBar);
-
-    // --- 状态标签 ---
-    m_statusLabel = new QLabel;
-    m_statusLabel->setStyleSheet("color: #999999;");
-    mainLayout->addWidget(m_statusLabel);
 
     // --- 底部按钮 ---
     mainLayout->addStretch();
@@ -410,226 +405,6 @@ void LoopClosureDialog::updatePreview() {
 }
 
 // ---------------------------------------------------------------------------
-// FPFH 全局配准
-// ---------------------------------------------------------------------------
-
-/**
- * @brief 自动对齐按钮处理
- *
- * 弹出 FPFH 参数配置对话框，参数配置完成后在后台线程执行配准。
- */
-void LoopClosureDialog::onAutoAlign() {
-    if (m_fpfhRunning || m_scanMatchRunning) return;
-
-    // 内联创建 FPFH 参数对话框
-    QDialog dlg(this);
-    dlg.setWindowTitle(tr("FPFH Auto Align"));
-    dlg.setModal(true);
-
-    auto* form = new QFormLayout(&dlg);
-
-    // 法线估计搜索半径
-    auto* normalRadius = new QDoubleSpinBox;
-    normalRadius->setRange(0.1, 10.0);
-    normalRadius->setValue(0.5);
-    normalRadius->setDecimals(2);
-    normalRadius->setSingleStep(0.1);
-    form->addRow(tr("Normal radius:"), normalRadius);
-
-    // FPFH 特征搜索半径
-    auto* searchRadius = new QDoubleSpinBox;
-    searchRadius->setRange(0.1, 10.0);
-    searchRadius->setValue(1.0);
-    searchRadius->setDecimals(2);
-    searchRadius->setSingleStep(0.1);
-    form->addRow(tr("FPFH search radius:"), searchRadius);
-
-    // SAC 最大迭代次数
-    auto* maxIter = new QSpinBox;
-    maxIter->setRange(1, 100000);
-    maxIter->setValue(50000);
-    form->addRow(tr("Max iterations:"), maxIter);
-
-    // 采样点数
-    auto* numSamples = new QSpinBox;
-    numSamples->setRange(1, 100);
-    numSamples->setValue(5);
-    form->addRow(tr("Num samples:"), numSamples);
-
-    // 对应点随机性
-    auto* corrRandom = new QSpinBox;
-    corrRandom->setRange(1, 100);
-    corrRandom->setValue(20);
-    form->addRow(tr("Correspondence randomness:"), corrRandom);
-
-    // 特征相似度阈值
-    auto* simThresh = new QDoubleSpinBox;
-    simThresh->setRange(0.1, 1.0);
-    simThresh->setValue(0.9);
-    simThresh->setDecimals(2);
-    simThresh->setSingleStep(0.05);
-    form->addRow(tr("Similarity threshold:"), simThresh);
-
-    // 最大对应点距离
-    auto* maxCorrDist = new QDoubleSpinBox;
-    maxCorrDist->setRange(0.1, 50.0);
-    maxCorrDist->setValue(2.5);
-    maxCorrDist->setDecimals(2);
-    maxCorrDist->setSingleStep(0.1);
-    form->addRow(tr("Max correspondence dist:"), maxCorrDist);
-
-    // 内点比例
-    auto* inlierFrac = new QDoubleSpinBox;
-    inlierFrac->setRange(0.01, 1.0);
-    inlierFrac->setValue(0.2);
-    inlierFrac->setDecimals(2);
-    inlierFrac->setSingleStep(0.05);
-    form->addRow(tr("Inlier fraction:"), inlierFrac);
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-    if (dlg.exec() != QDialog::Accepted) return;
-
-    // 启动 FPFH 配准
-    runFpfhAlign(normalRadius->value(), searchRadius->value(),
-                 maxIter->value(), numSamples->value(), corrRandom->value(),
-                 simThresh->value(), maxCorrDist->value(), inlierFrac->value());
-}
-
-/**
- * @brief 在后台线程执行 FPFH 配准
- *
- * 步骤：
- * 1. 复制点云数据
- * 2. OMP 并行法线估计
- * 3. FPFH 特征计算
- * 4. SAC-Prerejective 全局配准
- * 5. 返回新的终点世界位姿 = beginPose * relative
- */
-void LoopClosureDialog::runFpfhAlign(double normalRadius, double searchRadius,
-                                      int maxIter, int numSamples, int corrRandomness,
-                                      double similarityThresh, double maxCorrDist,
-                                      double inlierFrac) {
-    m_fpfhRunning = true;
-    m_fpfhProgress = 0;
-    m_progressBar->setVisible(true);
-    m_progressBar->setValue(0);
-    m_autoAlignBtn->setEnabled(false);
-    m_scanMatchBtn->setEnabled(false);
-    m_statusLabel->setText(tr("FPFH alignment running..."));
-
-    // 捕获 shared_ptr（安全用于后台线程）
-    CloudPtr beginCloud = m_beginCloud;
-    CloudPtr endCloud   = m_endCloud;
-    Eigen::Isometry3d beginPose = m_beginPose;
-    std::atomic_int* progress = &m_fpfhProgress;
-
-    // 进度轮询定时器
-    auto* pollTimer = new QTimer(this);
-    connect(pollTimer, &QTimer::timeout, this, [this, progress]() {
-        int p = progress->load();
-        m_progressBar->setValue(p * 20);  // 5 个阶段 → 0/20/40/60/80/100
-        if (p >= 5) {
-            m_progressBar->setValue(100);
-        }
-    });
-    pollTimer->start(100);
-
-    // 创建异步结果监听器
-    m_fpfhWatcher = new QFutureWatcher<Eigen::Isometry3d>(this);
-    connect(m_fpfhWatcher, &QFutureWatcher<Eigen::Isometry3d>::finished,
-            this, [this, pollTimer]() {
-        pollTimer->stop();
-        pollTimer->deleteLater();
-        onFpfhAlignFinished();
-    });
-
-    // 后台线程执行配准
-    auto future = QtConcurrent::run([=]() -> Eigen::Isometry3d {
-        using FeatureT = pcl::FPFHSignature33;
-        using PointN = pcl::PointNormal;
-
-        // Stage 1: 复制点云
-        progress->store(1);
-        pcl::PointCloud<PointN>::Ptr src(new pcl::PointCloud<PointN>());
-        pcl::PointCloud<PointN>::Ptr tgt(new pcl::PointCloud<PointN>());
-        pcl::copyPointCloud(*endCloud, *src);
-        pcl::copyPointCloud(*beginCloud, *tgt);
-
-        // Stage 2: 法线估计
-        progress->store(2);
-        pcl::NormalEstimationOMP<PointN, PointN> nest;
-        nest.setRadiusSearch(normalRadius);
-        nest.setInputCloud(src);
-        nest.compute(*src);
-        nest.setInputCloud(tgt);
-        nest.compute(*tgt);
-
-        // Stage 3: FPFH 特征
-        progress->store(3);
-        pcl::PointCloud<FeatureT>::Ptr srcFeat(new pcl::PointCloud<FeatureT>());
-        pcl::PointCloud<FeatureT>::Ptr tgtFeat(new pcl::PointCloud<FeatureT>());
-        pcl::FPFHEstimation<PointN, PointN, FeatureT> fest;
-        fest.setRadiusSearch(searchRadius);
-        fest.setInputCloud(src);
-        fest.setInputNormals(src);
-        fest.compute(*srcFeat);
-        fest.setInputCloud(tgt);
-        fest.setInputNormals(tgt);
-        fest.compute(*tgtFeat);
-
-        // Stage 4: SAC-Prerejective 配准
-        progress->store(4);
-        pcl::SampleConsensusPrerejective<PointN, PointN, FeatureT> align;
-        align.setInputSource(src);
-        align.setSourceFeatures(srcFeat);
-        align.setInputTarget(tgt);
-        align.setTargetFeatures(tgtFeat);
-        align.setMaximumIterations(maxIter);
-        align.setNumberOfSamples(numSamples);
-        align.setCorrespondenceRandomness(corrRandomness);
-        align.setSimilarityThreshold(similarityThresh);
-        align.setMaxCorrespondenceDistance(maxCorrDist);
-        align.setInlierFraction(inlierFrac);
-
-        pcl::PointCloud<PointN>::Ptr aligned(new pcl::PointCloud<PointN>());
-        align.align(*aligned);
-
-        Eigen::Isometry3d rel;
-        rel.matrix() = align.getFinalTransformation().cast<double>();
-
-        progress->store(5);
-        // 返回世界坐标系中的新终点位姿：beginPose * relative
-        return beginPose * rel;
-    });
-
-    m_fpfhWatcher->setFuture(future);
-}
-
-/**
- * @brief FPFH 配准完成
- *
- * 获取配准结果，更新终点位姿，恢复 UI 状态。
- */
-void LoopClosureDialog::onFpfhAlignFinished() {
-    m_endPose = m_fpfhWatcher->result();
-    m_progressBar->setVisible(false);
-    m_autoAlignBtn->setEnabled(true);
-    m_scanMatchBtn->setEnabled(true);
-    m_fpfhRunning = false;
-    m_statusLabel->setText(tr("FPFH alignment complete"));
-
-    updateFitnessScore();
-    updatePreview();
-
-    m_fpfhWatcher->deleteLater();
-    m_fpfhWatcher = nullptr;
-}
-
-// ---------------------------------------------------------------------------
 // 扫描匹配（ICP / GICP / NDT 局部配准）
 // ---------------------------------------------------------------------------
 
@@ -640,7 +415,7 @@ void LoopClosureDialog::onFpfhAlignFinished() {
  * 然后在后台线程执行扫描匹配。
  */
 void LoopClosureDialog::onScanMatching() {
-    if (m_fpfhRunning || m_scanMatchRunning) return;
+    if (m_scanMatchRunning) return;
 
     // 内联创建配准参数对话框
     QDialog dlg(this);
@@ -715,7 +490,6 @@ void LoopClosureDialog::runScanMatching(int methodIndex, int maxIterations,
     m_scanMatchRunning = true;
     m_progressBar->setVisible(true);
     m_progressBar->setRange(0, 0);  // 不确定模式（滚动条）
-    m_autoAlignBtn->setEnabled(false);
     m_scanMatchBtn->setEnabled(false);
     m_statusLabel->setText(tr("Scan matching running..."));
 
@@ -762,7 +536,6 @@ void LoopClosureDialog::runScanMatching(int methodIndex, int maxIterations,
 void LoopClosureDialog::onScanMatchFinished() {
     m_endPose = m_scanMatchWatcher->result();
     m_progressBar->setVisible(false);
-    m_autoAlignBtn->setEnabled(true);
     m_scanMatchBtn->setEnabled(true);
     m_scanMatchRunning = false;
     m_statusLabel->setText(tr("Scan matching complete"));
