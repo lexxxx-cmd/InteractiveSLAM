@@ -648,7 +648,7 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="+86"/>
+        <location filename="../src/ui/MainWindow.cpp" line="+87"/>
         <source>Selected vertex: %1</source>
         <translation>已选择顶点：%1</translation>
     </message>
@@ -699,13 +699,13 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+523"/>
+        <location line="+528"/>
         <location line="+65"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
     <message>
-        <location line="-581"/>
+        <location line="-586"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -781,19 +781,24 @@
     </message>
     <message>
         <location line="+31"/>
-        <location line="+156"/>
+        <location line="+161"/>
         <source>Graph Statistics</source>
         <translation>图统计</translation>
     </message>
     <message>
-        <location line="-155"/>
-        <location line="+166"/>
+        <location line="-160"/>
+        <location line="+171"/>
         <location line="+95"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
     <message>
-        <location line="-128"/>
+        <location line="-150"/>
+        <source>Open &amp;Project...</source>
+        <translation>打开项目(&amp;P)...</translation>
+    </message>
+    <message>
+        <location line="+22"/>
         <source>&amp;Save Map...</source>
         <translation>保存地图(&amp;S)...</translation>
     </message>
@@ -828,18 +833,38 @@
         <translation>未选择任何要保存的内容</translation>
     </message>
     <message>
-        <location line="-384"/>
-        <location line="+125"/>
+        <location line="+217"/>
+        <source>Interactive SLAM — %1</source>
+        <translation>Interactive SLAM — %1</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Opening project &quot;%1&quot;...</source>
+        <translation>正在打开项目「%1」...</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Importing Bag into project &quot;%1&quot;...</source>
+        <translation>正在导入 Bag 到项目「%1」...</translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>Project &quot;%1&quot; opened (blank project, import data later)</source>
+        <translation>项目「%1」已打开（空白项目，可稍后导入数据）</translation>
+    </message>
+    <message>
+        <location line="-621"/>
+        <location line="+130"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-144"/>
+        <location line="-149"/>
         <source>Loop Edges</source>
         <translation>回环边</translation>
     </message>
     <message>
-        <location line="+155"/>
+        <location line="+160"/>
         <source>Ad&amp;vanced</source>
         <translation>高级(&amp;A)</translation>
     </message>
@@ -866,7 +891,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>由自动检测插入的回环边</translation>
     </message>
     <message>
-        <location line="-152"/>
+        <location line="-157"/>
         <source>Ready — open a map folder to begin</source>
         <translation>就绪 — 打开地图文件夹开始</translation>
     </message>
@@ -876,7 +901,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>文件(&amp;F)</translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+8"/>
         <source>&amp;Open Map...</source>
         <translation>打开地图(&amp;O)...</translation>
     </message>
@@ -1049,12 +1074,12 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>加载中...</translation>
     </message>
     <message>
-        <location line="+34"/>
+        <location line="+39"/>
         <source>Map loaded — %1 vertices, %2 edges, %3 keyframes</source>
         <translation>地图加载完成 — %1 个顶点，%2 条边，%3 个关键帧</translation>
     </message>
     <message>
-        <location line="+32"/>
+        <location line="+37"/>
         <source>Loading failed: %1</source>
         <translation>加载失败：%1</translation>
     </message>
@@ -1117,6 +1142,316 @@ Importing will permanently delete all existing content in this directory (cannot
         <location line="+286"/>
         <source>%1 / %2</source>
         <translation>%1 / %2</translation>
+    </message>
+</context>
+<context>
+    <name>ProjectCenterDialog</name>
+    <message>
+        <location filename="../src/ui/ProjectCenterDialog.cpp" line="+48"/>
+        <source>Project Center</source>
+        <translation>项目中心</translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>Recent Projects</source>
+        <translation>最近项目</translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Get Started</source>
+        <translation>开始使用</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <location line="+271"/>
+        <location line="+47"/>
+        <source>New Project</source>
+        <translation>新建项目</translation>
+    </message>
+    <message>
+        <location line="-315"/>
+        <source>Set project name and location; optionally link a raw Bag file</source>
+        <translation>设置项目名称和保存位置，可关联 Bag 原始数据</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Open Project</source>
+        <translation>打开项目</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Open an existing project from the recent list or a local directory</source>
+        <translation>从最近列表或本地目录打开已有项目</translation>
+    </message>
+    <message>
+        <location line="+41"/>
+        <source>Last opened: %1    Status: %2</source>
+        <translation>最近打开: %1    状态: %2</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Unknown</source>
+        <translation>未知</translation>
+    </message>
+    <message>
+        <location line="+34"/>
+        <source>Choose Project Directory</source>
+        <translation>选择项目目录</translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Not a Project Directory</source>
+        <translation>不是项目目录</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The selected directory is not a project (missing project.json).
+
+Open it directly as a map directory?</source>
+        <translation>所选目录不是项目（缺少 project.json）。
+
+是否直接将其作为地图目录打开？</translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>Open Project Failed</source>
+        <translation>打开项目失败</translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>Previous Import Not Completed</source>
+        <translation>上次导入未完成</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Project &quot;%1&quot; did not finish its last import (status: %2).
+The data directory may be incomplete. How to proceed?</source>
+        <translation>项目「%1」上次导入未完成（状态: %2）。
+数据目录可能不完整，如何处理？</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Re-import</source>
+        <translation>重新导入</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Load Existing Files</source>
+        <translation>直接加载已有文件</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Cannot Re-import</source>
+        <translation>无法重新导入</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Linked Bag file not found: %1</source>
+        <translation>未找到关联的 Bag 文件：%1</translation>
+    </message>
+    <message>
+        <location line="+20"/>
+        <location line="+10"/>
+        <location line="+18"/>
+        <source>Data Directory Missing</source>
+        <translation>数据目录丢失</translation>
+    </message>
+    <message>
+        <location line="-27"/>
+        <source>The data directory of project &quot;%1&quot; is invalid or missing graph.g2o.
+
+Re-import from the linked Bag?</source>
+        <translation>项目「%1」的数据目录无效或缺少 graph.g2o。
+
+是否从关联的 Bag 重新导入？</translation>
+    </message>
+    <message>
+        <location line="+10"/>
+        <source>The data directory of project &quot;%1&quot; is invalid or missing graph.g2o.</source>
+        <translation>项目「%1」的数据目录无效或缺少 graph.g2o。</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Relocate</source>
+        <translation>重新定位</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Open as Blank Project</source>
+        <translation>以空白项目打开</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Locate Data Directory</source>
+        <translation>定位数据目录</translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>The selected directory is still not a valid map (missing graph.g2o).</source>
+        <translation>所选目录仍不是有效地图（缺少 graph.g2o）。</translation>
+    </message>
+    <message>
+        <location line="+30"/>
+        <source>Output Directory Not Empty</source>
+        <translation>输出目录非空</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The output directory is not empty:
+%1
+
+Importing will permanently delete all existing content in this directory (cannot be undone).</source>
+        <translation>输出目录非空：
+%1
+
+导入将永久删除该目录中的所有现有内容（无法撤销）。</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Clear &amp; Import</source>
+        <translation>清空并导入</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Clear Failed</source>
+        <translation>清空失败</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Failed to clear the data directory:
+%1</source>
+        <translation>清空数据目录失败：
+%1</translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Read Bag Failed</source>
+        <translation>读取 Bag 失败</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Failed to read bag or no topics found:
+%1</source>
+        <translation>读取 Bag 失败或未找到话题：
+%1</translation>
+    </message>
+    <message>
+        <location line="+35"/>
+        <source>Project name</source>
+        <translation>项目名称</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Project name:</source>
+        <translation>项目名称:</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <location line="+14"/>
+        <source>Browse...</source>
+        <translation>浏览...</translation>
+    </message>
+    <message>
+        <location line="-10"/>
+        <source>Save location:</source>
+        <translation>保存位置:</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Choose Save Location</source>
+        <translation>选择保存位置</translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>(Optional) Path to raw .bag file</source>
+        <translation>（可选）原始 .bag 文件路径</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Bag file:</source>
+        <translation>Bag 文件:</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Choose Bag File</source>
+        <translation>选择 Bag 文件</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>ROS Bag (*.bag);;All Files (*)</source>
+        <translation>ROS Bag 文件 (*.bag);;所有文件 (*)</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Data directory name:</source>
+        <translation>数据目录名:</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Create</source>
+        <translation>创建</translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Project name cannot be empty</source>
+        <translation>项目名称不能为空</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Create Project Failed</source>
+        <translation>新建项目失败</translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Bag File Not Found</source>
+        <translation>Bag 文件不存在</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Bag file not found: %1
+A blank project has been created; you can re-import later.</source>
+        <translation>未找到 Bag 文件：%1
+已创建空白项目，可稍后在项目中重新导入。</translation>
+    </message>
+    <message>
+        <location line="+16"/>
+        <source>Blank Project</source>
+        <translation>空白项目</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Project &quot;%1&quot; created (no Bag linked, empty data directory).
+You can import data later in the main window.</source>
+        <translation>项目「%1」已创建（未关联 Bag，数据目录为空）。
+进入主界面后可稍后导入数据。</translation>
+    </message>
+</context>
+<context>
+    <name>QObject</name>
+    <message>
+        <location filename="../src/backend/project_manager.h" line="+109"/>
+        <source>Cannot read project.json</source>
+        <translation>无法读取 project.json</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Failed to parse project.json: %1</source>
+        <translation>project.json 解析失败：%1</translation>
+    </message>
+    <message>
+        <location line="+59"/>
+        <source>Directory already contains a project file</source>
+        <translation>该目录已包含项目文件</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Cannot create project directories</source>
+        <translation>无法创建项目目录</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Cannot write project.json</source>
+        <translation>无法写入 project.json</translation>
     </message>
 </context>
 <context>
