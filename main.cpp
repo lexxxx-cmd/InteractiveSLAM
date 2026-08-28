@@ -64,8 +64,8 @@ int main(int argc, char *argv[]) {
         styleFile.close();
     }
 
-    // --- 设置应用图标（来自 icon 文件夹，qrc 资源） ---
-    app.setWindowIcon(QIcon(":/ui/app_icon.png"));
+    // --- 设置应用图标（来自 src/icon 文件夹，qrc 资源） ---
+    app.setWindowIcon(QIcon(":/ui/app_icon.jpg"));
 
     // 创建图管理器后端实例（应用程序生命周期内作为全局单例使用）
     GraphManager graphManager;
