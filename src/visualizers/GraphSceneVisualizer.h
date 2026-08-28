@@ -517,17 +517,18 @@ private:
     }
 
     /**
-     * @brief 重建顶点球体
+     * @brief 重建顶点位姿标记
      *
-     * 为每个关键帧创建一个球体，位置在顶点的平移估计值处。
-     * 球体颜色取决于状态：
-     *   - 默认：红色
-     *   - 选中：橙色
-     *   - 回环搜索源：蓝色
-     *   - 回环候选：绿色
+     * 为每个关键帧创建一个定向标记，位置取顶点平移估计值，
+     * 方向取关键帧局部位姿的旋转（右-下-前坐标系，X右/Y下/Z前），
+     * 尖端始终指向局部 +Z（前方）。形状取决于状态：
+     *   - 普通顶点：锥体（红色）
+     *   - 选中 / 播放高亮：箭头（黄色，2 倍尺寸）
+     *   - 回环搜索源：蓝色锥体
+     *   - 回环候选：绿色锥体
      *
-     * 当采样步长 > 1 时，仅渲染 id % stride == 0 的球体，
-     * 但特殊球体（选中、回环）始终渲染。
+     * 当采样步长 > 1 时，仅渲染 id % stride == 0 的标记，
+     * 但特殊标记（选中、回环）始终渲染。
      *
      * @param graph 交互式图数据
      */
@@ -538,23 +539,23 @@ private:
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
 
-        // 清空并预分配球心缓存
+        // 清空并预标记中心缓存
         m_sphereCenters.clear();
         m_sphereCenters.reserve(graph->keyframes.size());
 
-        // 定义不同状态的球体颜色
+        // 定义不同状态的标记颜色
         const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // 红色 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // 橙色 —— 选中
+        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // 黄色 —— 选中
         const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色 —— 回环搜索源
         const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // 绿色 —— 回环候选
 
-        // 遍历所有关键帧，创建顶点球体
+        // 遍历所有关键帧，创建顶点位姿标记
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v) continue;
 
             // 采样过滤：仅渲染 id % stride == 0 的关键帧
-            // 但特殊球体（选中、播放高亮、回环源、回环候选）始终渲染，绕过采样
+            // 但特殊标记（选中、播放高亮、回环源、回环候选）始终渲染，绕过采样
             bool isSpecial = (id == m_selectedVertexId ||
                               id == m_playbackPrevId ||
                               id == m_loopSourceId ||
@@ -565,26 +566,38 @@ private:
             Eigen::Vector3d pos = pose.translation();
             osg::Vec3d center(pos.x(), pos.y(), pos.z());
 
-            // 缓存球心位置（用于鼠标拾取）—— 仅采样后的球体
+            // 关键帧局部位姿的旋转（右-下-前：X右/Y下/Z前），
+            // 标记尖端沿局部 +Z（前方）方向
+            Eigen::Matrix3f rot = pose.linear().cast<float>();
+
+            // 缓存标记中心位置（用于鼠标拾取）—— 仅采样后的标记
             m_sphereCenters.emplace_back(center, id);
 
-            // 根据状态选择颜色和半径
+            // 根据状态选择颜色、形状和尺寸
             osg::Vec4 color = defaultColor;
-            float customRadius = -1.0f;  // < 0 表示使用全局默认半径
+            float customRadius = -1.0f;  // < 0 表示使用全局默认尺寸
+            bool useArrow = false;       // 选中/播放高亮使用箭头，其余使用锥体
             if (id == m_selectedVertexId) {
                 color = selectedColor;
                 customRadius = m_sphereRadius * 2.0f;
+                useArrow = true;
             } else if (id == m_loopSourceId) {
                 color = loopSourceColor;
             } else if (m_loopCandidateIds.count(id)) {
                 color = loopCandColor;
             } else if (id == m_playbackPrevId) {
-                // 播放轴高亮球体同样放大 2 倍（仅在完整重建时生效）
+                // 播放轴高亮标记同样放大 2 倍（仅在完整重建时生效）
                 // 轻量级 highlightPlaybackVertex 路径仅更新颜色，不做几何重建
                 color = selectedColor;
                 customRadius = m_sphereRadius * 2.0f;
+                useArrow = true;
             }
-            m_sphereViz->appendSphere(center, color, id, customRadius);
+
+            if (useArrow) {
+                m_sphereViz->appendArrow(center, rot, color, id, customRadius);
+            } else {
+                m_sphereViz->appendCone(center, rot, color, id, customRadius);
+            }
         }
         m_sphereViz->finish();
     }
