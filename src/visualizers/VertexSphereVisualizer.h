@@ -9,8 +9,8 @@
 //       不使用场景图变换技巧。
 //
 // 标记形状：
-//   - 锥体（appendCone）：普通顶点标记，尖端指向关键帧局部 +Z（前方）
-//   - 箭头（appendArrow）：高亮顶点标记，圆柱杆 + 圆锥头，同样指向局部 +Z
+//   - 尖锥体（appendCone）：高亮顶点标记，尖端指向关键帧局部 +Z（前方）
+//   - 截锥体（appendTruncatedCone）：普通顶点标记，切掉尖顶的圆台，同样指向局部 +Z
 //
 // 方向由关键帧局部位姿（右-下-前坐标系，X右/Y下/Z前）的旋转矩阵决定，
 // 生成时把局部坐标系中的偏移量旋转到世界坐标系并平移到顶点位置。
@@ -40,7 +40,7 @@
  *
  * 使用模式：
  *   1. clear() —— 清除旧数据
- *   2. appendCone() / appendArrow() —— 逐个添加标记（指定位置、方向和颜色）
+ *   2. appendCone() / appendTruncatedCone() —— 逐个添加标记（指定位置、方向和颜色）
  *   3. finish() —— 完成构建并更新 GPU 缓冲区
  */
 class VertexSphereVisualizer {
@@ -133,70 +133,59 @@ public:
     }
 
     /**
-     * @brief 在世界坐标系中添加一个箭头标记
+     * @brief 在世界坐标系中添加一个截锥体（圆台）标记
      *
-     * 箭头总高 = 2 * r，由圆柱杆（后 55%）和圆锥头（前 45%）组成，
-     * 尖端沿局部 +Z（前方）方向，几何中点位于 @p center。
-     * 用于高亮选中的顶点（替代 2 倍尺寸的球体）。
+     * 总高 = 2 * r，底面半径 = r，顶面半径 = topRatio * r（切掉尖锥的尖端），
+     * 轴向沿局部 +Z（前方），几何中点位于 @p center。
+     * 用于普通顶点标记（与高亮的尖锥体形成形状区分）。
      *
      * @param center   标记中心位置（世界坐标）
      * @param rot      局部坐标系 → 世界坐标系的旋转（关键帧位姿的旋转部分）
-     * @param color    颜色（RGBA）
-     * @param vertexId 对应的顶点 ID（默认 -1 不追踪）
+     * @param color    颜色（RGBA，默认深红色）
+     * @param vertexId 对应的顶点 ID（用于后续增量颜色更新，默认 -1 不追踪）
      * @param r        特征尺寸（< 0 时使用构造时设置的全局半径 m_radius）
+     * @param topRatio 顶面半径与底面半径之比（默认 0.35）
      */
-    void appendArrow(const osg::Vec3d& center,
-                     const Eigen::Matrix3f& rot,
-                     const osg::Vec4& color = osg::Vec4(1.0f, 0.8f, 0.0f, 1.0f),
-                     long vertexId = -1,
-                     float r = -1.0f) {
+    void appendTruncatedCone(const osg::Vec3d& center,
+                             const Eigen::Matrix3f& rot,
+                             const osg::Vec4& color = osg::Vec4(0.2f, 0.0f, 0.0f, 1.0f),
+                             long vertexId = -1,
+                             float r = -1.0f,
+                             float topRatio = 0.35f) {
         float R = (r >= 0.0f) ? r : m_radius;
 
         beginAppend(color, vertexId);
 
-        float halfH  = R;              // 总高 2R，尖端在 +Z 方向
-        float headLen  = 0.9f * R;     // 圆锥头长度（45%）
-        float shaftLen = 2.0f * halfH - headLen;
-        float shaftR   = 0.25f * R;    // 杆半径
+        float halfH = R;          // 总高 2R，截锥轴向沿 +Z
+        float topR  = topRatio * R;
         int n = m_segments;
 
-        // 杆后环 / 杆前环 / 头部底环 / 尖端
-        int shaftBack  = pushRing(shaftR, -halfH, center, rot);
-        int shaftFront = pushRing(shaftR, -halfH + shaftLen, center, rot);
-        int headBase   = pushRing(R, -halfH + shaftLen, center, rot);
-        int tipIdx     = pushVertex(0.0f, 0.0f, halfH, center, rot);
-        // 端盖圆心（杆后端、杆前端环面近似用头部底面盖板、锥底）
-        int backCenter  = pushVertex(0.0f, 0.0f, -halfH, center, rot);
-        int frontCenter = pushVertex(0.0f, 0.0f, -halfH + shaftLen, center, rot);
+        // 顶面环 / 底面环 / 两个端面圆心
+        int topStart  = pushRing(topR, +halfH, center, rot);
+        int baseStart = pushRing(R, -halfH, center, rot);
+        int topCenter  = pushVertex(0.0f, 0.0f, +halfH, center, rot);
+        int baseCenter = pushVertex(0.0f, 0.0f, -halfH, center, rot);
 
         for (int i = 0; i < n; ++i) {
             int j = (i + 1) % n;
-            int sb0 = shaftBack + i,  sb1 = shaftBack + j;
-            int sf0 = shaftFront + i, sf1 = shaftFront + j;
-            int hb0 = headBase + i,   hb1 = headBase + j;
+            int t0 = topStart + i,  t1 = topStart + j;
+            int b0 = baseStart + i, b1 = baseStart + j;
 
-            // 杆侧面四边形（两个三角形）
-            m_indices->push_back(sb0);
-            m_indices->push_back(sb1);
-            m_indices->push_back(sf0);
-            m_indices->push_back(sb1);
-            m_indices->push_back(hb1);
-            m_indices->push_back(sf0);
-            // 头部环形底面（连接杆前环与锥底环的圆环面）
-            m_indices->push_back(frontCenter);
-            m_indices->push_back(hb0);
-            m_indices->push_back(sf0);
-            m_indices->push_back(frontCenter);
-            m_indices->push_back(sf0);
-            m_indices->push_back(hb0);
-            // 锥头侧面
-            m_indices->push_back(tipIdx);
-            m_indices->push_back(hb1);
-            m_indices->push_back(hb0);
-            // 杆后端盖
-            m_indices->push_back(backCenter);
-            m_indices->push_back(sb0);
-            m_indices->push_back(sb1);
+            // 侧面四边形（两个三角形）
+            m_indices->push_back(b0);
+            m_indices->push_back(b1);
+            m_indices->push_back(t0);
+            m_indices->push_back(b1);
+            m_indices->push_back(t1);
+            m_indices->push_back(t0);
+            // 顶面扇形
+            m_indices->push_back(topCenter);
+            m_indices->push_back(t0);
+            m_indices->push_back(t1);
+            // 底面扇形
+            m_indices->push_back(baseCenter);
+            m_indices->push_back(b0);
+            m_indices->push_back(b1);
         }
 
         endAppend(vertexId);

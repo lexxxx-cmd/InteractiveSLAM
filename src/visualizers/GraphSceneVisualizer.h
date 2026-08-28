@@ -521,11 +521,11 @@ private:
      *
      * 为每个关键帧创建一个定向标记，位置取顶点平移估计值，
      * 方向取关键帧局部位姿的旋转（右-下-前坐标系，X右/Y下/Z前），
-     * 尖端始终指向局部 +Z（前方）。形状取决于状态：
-     *   - 普通顶点：锥体（红色）
-     *   - 选中 / 播放高亮：箭头（黄色，2 倍尺寸）
-     *   - 回环搜索源：蓝色锥体
-     *   - 回环候选：绿色锥体
+     * 轴向始终沿局部 +Z（前方）。形状取决于状态：
+     *   - 普通顶点：截锥体（红色，切掉尖顶）
+     *   - 选中 / 播放高亮：尖锥体（黄色，2 倍尺寸）
+     *   - 回环搜索源：蓝色截锥体
+     *   - 回环候选：绿色截锥体
      *
      * 当采样步长 > 1 时，仅渲染 id % stride == 0 的标记，
      * 但特殊标记（选中、回环）始终渲染。
@@ -576,11 +576,11 @@ private:
             // 根据状态选择颜色、形状和尺寸
             osg::Vec4 color = defaultColor;
             float customRadius = -1.0f;  // < 0 表示使用全局默认尺寸
-            bool useArrow = false;       // 选中/播放高亮使用箭头，其余使用锥体
+            bool useCone = false;        // 选中/播放高亮使用尖锥体，其余使用截锥体
             if (id == m_selectedVertexId) {
                 color = selectedColor;
                 customRadius = m_sphereRadius * 2.0f;
-                useArrow = true;
+                useCone = true;
             } else if (id == m_loopSourceId) {
                 color = loopSourceColor;
             } else if (m_loopCandidateIds.count(id)) {
@@ -590,13 +590,13 @@ private:
                 // 轻量级 highlightPlaybackVertex 路径仅更新颜色，不做几何重建
                 color = selectedColor;
                 customRadius = m_sphereRadius * 2.0f;
-                useArrow = true;
+                useCone = true;
             }
 
-            if (useArrow) {
-                m_sphereViz->appendArrow(center, rot, color, id, customRadius);
-            } else {
+            if (useCone) {
                 m_sphereViz->appendCone(center, rot, color, id, customRadius);
+            } else {
+                m_sphereViz->appendTruncatedCone(center, rot, color, id, customRadius);
             }
         }
         m_sphereViz->finish();
