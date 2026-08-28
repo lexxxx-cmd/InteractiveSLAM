@@ -462,7 +462,7 @@
 <context>
     <name>LoopClosureDialog</name>
     <message>
-        <location filename="../src/ui/LoopClosureDialog.cpp" line="+112"/>
+        <location filename="../src/ui/LoopClosureDialog.cpp" line="+107"/>
         <source>Loop Closure</source>
         <translation>回环闭合</translation>
     </message>
@@ -470,12 +470,12 @@
         <location line="+7"/>
         <location line="+8"/>
         <location line="+9"/>
-        <location line="+673"/>
+        <location line="+451"/>
         <source>Error</source>
         <translation>错误</translation>
     </message>
     <message>
-        <location line="-690"/>
+        <location line="-468"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
@@ -490,17 +490,22 @@
         <translation>未找到关键帧</translation>
     </message>
     <message>
-        <location line="+56"/>
+        <location line="+53"/>
+        <source>Match Result</source>
+        <translation>匹配结果</translation>
+    </message>
+    <message>
+        <location line="+4"/>
         <source>fitness_score: —</source>
         <translation>配准评分：—</translation>
     </message>
     <message>
-        <location line="+209"/>
+        <location line="+208"/>
         <source>fitness_score: %1</source>
         <translation>配准评分：%1</translation>
     </message>
     <message>
-        <location line="-204"/>
+        <location line="-196"/>
         <source>Manual Adjustment (local frame)</source>
         <translation>手动调整（局部坐标系）</translation>
     </message>
@@ -530,23 +535,22 @@
         <translation>大步   — 1.00 米 / 45.0°</translation>
     </message>
     <message>
-        <location line="+78"/>
         <source>Auto Align</source>
-        <translation>自动对齐</translation>
+        <translation type="vanished">自动对齐</translation>
     </message>
     <message>
-        <location line="+1"/>
-        <location line="+361"/>
+        <location line="+78"/>
+        <location line="+134"/>
         <source>Scan Matching</source>
         <translation>扫描匹配</translation>
     </message>
     <message>
-        <location line="-360"/>
+        <location line="-133"/>
         <source>Reset</source>
         <translation>重置</translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+18"/>
         <source>Add Edge</source>
         <translation>添加边</translation>
     </message>
@@ -556,63 +560,52 @@
         <translation>取消</translation>
     </message>
     <message>
-        <location line="+112"/>
         <source>FPFH Auto Align</source>
-        <translation>FPFH 自动对齐</translation>
+        <translation type="vanished">FPFH 自动对齐</translation>
     </message>
     <message>
-        <location line="+11"/>
         <source>Normal radius:</source>
-        <translation>法线半径：</translation>
+        <translation type="vanished">法线半径：</translation>
     </message>
     <message>
-        <location line="+8"/>
         <source>FPFH search radius:</source>
-        <translation>FPFH 搜索半径：</translation>
+        <translation type="vanished">FPFH 搜索半径：</translation>
     </message>
     <message>
-        <location line="+6"/>
-        <location line="+213"/>
+        <location line="+130"/>
         <source>Max iterations:</source>
         <translation>最大迭代次数：</translation>
     </message>
     <message>
-        <location line="-207"/>
         <source>Num samples:</source>
-        <translation>样本数：</translation>
+        <translation type="vanished">样本数：</translation>
     </message>
     <message>
-        <location line="+6"/>
         <source>Correspondence randomness:</source>
-        <translation>对应点随机性：</translation>
+        <translation type="vanished">对应点随机性：</translation>
     </message>
     <message>
-        <location line="+8"/>
         <source>Similarity threshold:</source>
-        <translation>相似度阈值：</translation>
+        <translation type="vanished">相似度阈值：</translation>
     </message>
     <message>
-        <location line="+8"/>
         <source>Max correspondence dist:</source>
-        <translation>最大对应点距离：</translation>
+        <translation type="vanished">最大对应点距离：</translation>
     </message>
     <message>
-        <location line="+8"/>
         <source>Inlier fraction:</source>
-        <translation>内点比例：</translation>
+        <translation type="vanished">内点比例：</translation>
     </message>
     <message>
-        <location line="+35"/>
         <source>FPFH alignment running...</source>
-        <translation>FPFH 对齐运行中...</translation>
+        <translation type="vanished">FPFH 对齐运行中...</translation>
     </message>
     <message>
-        <location line="+101"/>
         <source>FPFH alignment complete</source>
-        <translation>FPFH 对齐完成</translation>
+        <translation type="vanished">FPFH 对齐完成</translation>
     </message>
     <message>
-        <location line="+35"/>
+        <location line="-6"/>
         <source>Method:</source>
         <translation>方法：</translation>
     </message>
@@ -632,12 +625,12 @@
         <translation>方法不可用</translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="+22"/>
         <source>Scan matching running...</source>
         <translation>扫描匹配运行中...</translation>
     </message>
     <message>
-        <location line="+48"/>
+        <location line="+47"/>
         <source>Scan matching complete</source>
         <translation>扫描匹配完成</translation>
     </message>
@@ -655,7 +648,7 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="+85"/>
+        <location filename="../src/ui/MainWindow.cpp" line="+86"/>
         <source>Selected vertex: %1</source>
         <translation>已选择顶点：%1</translation>
     </message>
@@ -706,14 +699,13 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+521"/>
-        <location line="+30"/>
-        <location line="+55"/>
+        <location line="+523"/>
+        <location line="+65"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
     <message>
-        <location line="-599"/>
+        <location line="-581"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -789,19 +781,24 @@
     </message>
     <message>
         <location line="+31"/>
-        <location line="+161"/>
+        <location line="+156"/>
         <source>Graph Statistics</source>
         <translation>图统计</translation>
     </message>
     <message>
-        <location line="-160"/>
-        <location line="+171"/>
+        <location line="-155"/>
+        <location line="+166"/>
         <location line="+95"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
     <message>
-        <location line="-13"/>
+        <location line="-128"/>
+        <source>&amp;Save Map...</source>
+        <translation>保存地图(&amp;S)...</translation>
+    </message>
+    <message>
+        <location line="+115"/>
         <source>Show Loop Edges Panel</source>
         <translation>显示回环边面板</translation>
     </message>
@@ -821,18 +818,28 @@
         <translation>高程颜色范围...</translation>
     </message>
     <message>
-        <location line="-235"/>
-        <location line="+130"/>
+        <location line="+150"/>
+        <source>No output directory selected</source>
+        <translation>未选择输出目录</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Nothing selected to save</source>
+        <translation>未选择任何要保存的内容</translation>
+    </message>
+    <message>
+        <location line="-384"/>
+        <location line="+125"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-149"/>
+        <location line="-144"/>
         <source>Loop Edges</source>
         <translation>回环边</translation>
     </message>
     <message>
-        <location line="+160"/>
+        <location line="+155"/>
         <source>Ad&amp;vanced</source>
         <translation>高级(&amp;A)</translation>
     </message>
@@ -859,7 +866,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>由自动检测插入的回环边</translation>
     </message>
     <message>
-        <location line="-157"/>
+        <location line="-152"/>
         <source>Ready — open a map folder to begin</source>
         <translation>就绪 — 打开地图文件夹开始</translation>
     </message>
@@ -884,17 +891,15 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>关闭地图(&amp;C)</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Save Pose Graph...</source>
-        <translation>保存位姿图...</translation>
+        <translation type="vanished">保存位姿图...</translation>
     </message>
     <message>
-        <location line="+5"/>
         <source>Save Map...</source>
-        <translation>保存地图...</translation>
+        <translation type="vanished">保存地图...</translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+14"/>
         <source>&amp;Quit</source>
         <translation>退出(&amp;Q)</translation>
     </message>
@@ -993,38 +998,33 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>地图已关闭</translation>
     </message>
     <message>
-        <location line="+13"/>
         <source>Save Pose Graph</source>
-        <translation>保存位姿图</translation>
+        <translation type="vanished">保存位姿图</translation>
     </message>
     <message>
-        <location line="+1"/>
         <source>Pose Graph Files (*.g2o);;All Files (*)</source>
-        <translation>位姿图文件 (*.g2o);;所有文件 (*)</translation>
+        <translation type="vanished">位姿图文件 (*.g2o);;所有文件 (*)</translation>
     </message>
     <message>
-        <location line="+6"/>
         <source>Pose graph saved: %1</source>
-        <translation>位姿图已保存：%1</translation>
+        <translation type="vanished">位姿图已保存：%1</translation>
     </message>
     <message>
-        <location line="+3"/>
-        <location line="+53"/>
+        <location line="+63"/>
         <source>Save failed: %1</source>
         <translation>保存失败：%1</translation>
     </message>
     <message>
-        <location line="-33"/>
         <source>Save Map Directory</source>
-        <translation>保存地图目录</translation>
+        <translation type="vanished">保存地图目录</translation>
     </message>
     <message>
-        <location line="+30"/>
+        <location line="-2"/>
         <source>Map saved: %1</source>
         <translation>地图已保存：%1</translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+24"/>
         <source>Optimization already in progress</source>
         <translation>优化正在进行中</translation>
     </message>
@@ -1175,6 +1175,54 @@ Importing will permanently delete all existing content in this directory (cannot
         <location line="+4"/>
         <source>Render every Nth keyframe (1 = all)</source>
         <translation>每 N 帧渲染一个关键帧（1 = 全部）</translation>
+    </message>
+</context>
+<context>
+    <name>SaveMapDialog</name>
+    <message>
+        <location filename="../src/ui/SaveMapDialog.cpp" line="+19"/>
+        <source>Save Map</source>
+        <translation>保存地图</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Select what to save</source>
+        <translation>选择要保存的内容</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Pose graph (graph.g2o)</source>
+        <translation>位姿图 (graph.g2o)</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Keyframes (per-frame clouds &amp; data files)</source>
+        <translation>关键帧（每帧点云与数据文件）</translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Global point cloud map (accumulated_cloud.pcd)</source>
+        <translation>全局点云地图 (accumulated_cloud.pcd)</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Choose output directory...</source>
+        <translation>选择输出目录...</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Browse...</source>
+        <translation>浏览...</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Save Map Directory</source>
+        <translation>保存地图目录</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>Output directory:</source>
+        <translation>输出目录：</translation>
     </message>
 </context>
 <context>
