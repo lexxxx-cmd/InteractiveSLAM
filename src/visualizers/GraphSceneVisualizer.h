@@ -40,6 +40,7 @@
 #include "visualizers/PointCloudBuilder.h"
 #include "visualizers/KeyframePointCloudVisualizer.h"
 #include "visualizers/EdgeLineVisualizer.h"
+#include "visualizers/SpherePickingHandler.h"
 
 /**
  * @brief 图场景可视化器 —— 场景图构建和管理的中央协调器
@@ -297,10 +298,10 @@ public:
     int sampleStride() const { return m_sampleStride; }
 
     /**
-     * @brief 获取球体中心位置缓存（用于鼠标拾取检测）
-     * @return (球心位置, 顶点ID) 对列表
+     * @brief 获取可拾取标记缓存（用于鼠标拾取检测）
+     * @return (标记中心, 顶点ID, 拾取半径) 列表
      */
-    const std::vector<std::pair<osg::Vec3d, long>>& sphereCenters() const {
+    const std::vector<PickableCenter>& sphereCenters() const {
         return m_sphereCenters;
     }
 
@@ -602,9 +603,6 @@ private:
             // 标记尖端沿局部 +Z（前方）方向
             Eigen::Matrix3f rot = pose.linear().cast<float>();
 
-            // 缓存标记中心位置（用于鼠标拾取）—— 仅采样后的标记
-            m_sphereCenters.emplace_back(center, id);
-
             // 根据状态选择颜色、形状和尺寸
             osg::Vec4 color = defaultColor;
             float customRadius = -1.0f;  // < 0 表示使用全局默认尺寸
@@ -624,6 +622,12 @@ private:
                 customRadius = m_sphereRadius * 2.0f;
                 useCone = true;
             }
+
+            // 缓存可拾取标记（用于鼠标拾取）—— 仅采样后的标记；
+            // 拾取半径 = 1.5 × 实际渲染半径（锥体表面到中心最远约 1.42 倍），
+            // 高亮放大的标记（2 倍渲染半径）自动获得成比例的拾取半径
+            float renderRadius = (customRadius > 0.0f) ? customRadius : m_sphereRadius;
+            m_sphereCenters.push_back({center, id, 1.5f * renderRadius});
 
             if (useCone) {
                 m_sphereViz->appendCone(center, rot, color, id, customRadius);
@@ -705,7 +709,7 @@ private:
 
     // —— 缓存数据 ——
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_lastGraph;  ///< 缓存的图引用（用于实时参数更改）
-    std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;  ///< 球心缓存（与 VBO 并行，重建时刷新）
+    std::vector<PickableCenter> m_sphereCenters;  ///< 可拾取标记缓存（与 VBO 并行，重建时刷新）
     mutable std::vector<EdgeSegment> m_emptySegments;  ///< 无边时的空向量返回（备用）
 
     // —— 交互状态 ——

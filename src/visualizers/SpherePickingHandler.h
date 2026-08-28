@@ -22,7 +22,6 @@
 #include <functional>
 #include <vector>
 #include <limits>
-#include <optional>
 
 #include "visualizers/EdgeLineVisualizer.h"   // 引入 EdgeSegment
 
@@ -48,6 +47,20 @@ struct PickingHit {
 };
 
 /**
+ * @brief 可拾取的顶点标记数据（球心 + 顶点 ID + 拾取半径）
+ *
+ * pickRadius 为该标记的世界空间拾取阈值：标记渲染为锥体/截锥体，
+ * 表面到中心最远约 1.42 倍渲染半径，故 pickRadius 取 1.5 倍渲染半径，
+ * 保证标记可见部分全部可点中。高亮放大的标记（2 倍渲染半径）
+ * 自动获得成比例的更大拾取半径。
+ */
+struct PickableCenter {
+    osg::Vec3d center;      ///< 标记中心（世界坐标）
+    long      vertexId;     ///< 对应顶点 ID
+    float     pickRadius;   ///< 拾取阈值（世界空间距离）
+};
+
+/**
  * @brief 球体和边线的拾取事件处理器
  *
  * 使用延迟提供者函数（std::function）来获取最新的数据，
@@ -59,8 +72,8 @@ public:
     using ContextMenuCallback = std::function<void(const PickingHit&)>; ///< 右键菜单回调
     using DoubleClickCallback = std::function<void(long)>;           ///< 双击回调（参数为顶点 ID，未命中为 -1）
 
-    /// 球心数据提供者：返回当前球心数据向量指针（可能为空）
-    using SphereProvider = std::function<const std::vector<std::pair<osg::Vec3d, long>>*()>;
+    /// 球心数据提供者：返回当前可拾取标记数据向量指针（可能为空）
+    using SphereProvider = std::function<const std::vector<PickableCenter>*()>;
     /// 边线段数据提供者：返回当前边线段数据向量指针（可能为空）
     using EdgeProvider   = std::function<const std::vector<EdgeSegment>*()>;
 
@@ -114,10 +127,10 @@ public:
                 m_onSelect(-1);
                 return true;
             }
-            // 射线检测并查找最近球体
-            auto hit = raycast(ea.getX(), ea.getY(), viewer);
-            if (!hit) { m_onSelect(-1); return true; }
-            m_onSelect(nearestCenter(*hit, *centers, m_sphereRadius));
+            // 射线检测（全部交点）并查找最近的标记
+            auto hits = raycast(ea.getX(), ea.getY(), viewer);
+            if (hits.empty()) { m_onSelect(-1); return true; }
+            m_onSelect(nearestCenter(hits, *centers));
             return true;
         }
 
@@ -132,9 +145,9 @@ public:
                 m_onDoubleClick(-1);
                 return true;
             }
-            auto hit = raycast(ea.getX(), ea.getY(), viewer);
-            if (!hit) { m_onDoubleClick(-1); return true; }
-            m_onDoubleClick(nearestCenter(*hit, *centers, m_sphereRadius));
+            auto hits = raycast(ea.getX(), ea.getY(), viewer);
+            if (hits.empty()) { m_onDoubleClick(-1); return true; }
+            m_onDoubleClick(nearestCenter(hits, *centers));
             return true;
         }
 
@@ -149,21 +162,35 @@ public:
             hitInfo.screenX = ea.getX();
             hitInfo.screenY = ea.getY();
 
-            // 射线检测场景交点
-            auto hitPt = raycast(ea.getX(), ea.getY(), viewer);
-            if (hitPt) {
+            // 射线检测场景交点（全部，近 → 远）
+            auto hits = raycast(ea.getX(), ea.getY(), viewer);
+            if (!hits.empty()) {
                 // 优先检测球体（顶点）
                 auto* centers = m_sphereProvider();
                 if (centers && !centers->empty())
-                    hitInfo.vertexId = nearestCenter(*hitPt, *centers, m_sphereRadius);
+                    hitInfo.vertexId = nearestCenter(hits, *centers);
 
-                // 如果未命中球体，检测边线段
+                // 如果未命中球体，检测边线段（同样遍历全部交点）
                 if (hitInfo.vertexId < 0) {
                     auto* edges = m_edgeProvider();
-                    if (edges && !edges->empty())
-                        hitInfo.edgeId = nearestSegment(*hitPt, *edges,
-                                                        m_sphereRadius * 2.0f,
-                                                        hitInfo);
+                    if (edges && !edges->empty()) {
+                        double bestD2 = std::numeric_limits<double>::max();
+                        for (const auto& pt : hits) {
+                            PickingHit tmp;
+                            double d2 = nearestSegment(pt, *edges,
+                                                       m_sphereRadius * 2.0f,
+                                                       tmp);
+                            if (d2 < bestD2) {
+                                bestD2 = d2;
+                                // 只取边字段，保留 hitInfo 的屏幕坐标
+                                hitInfo.edgeId    = tmp.edgeId;
+                                hitInfo.edgeV1    = tmp.edgeV1;
+                                hitInfo.edgeV2    = tmp.edgeV2;
+                                hitInfo.edgeDist  = tmp.edgeDist;
+                                hitInfo.edgeKernel = tmp.edgeKernel;
+                            }
+                        }
+                    }
                 }
             }
             m_onContextMenu(hitInfo);
@@ -174,50 +201,60 @@ public:
 
 private:
     /**
-     * @brief 从给定屏幕坐标发射射线，计算场景交点
+     * @brief 从给定屏幕坐标发射射线，收集场景沿线的所有交点
      *
      * 使用 osgUtil::LineSegmentIntersector 进行窗口坐标到场景坐标的
-     * 射线投射。
+     * 射线投射。返回按离相机距离排序的全部交点（近 → 远）。
+     *
+     * 不再只取第一个交点：地面网格（z=0 平面三角面片）等前景几何
+     * 会"截胡"第一个交点，导致点击 z=0 以下的标记失效；把所有交点
+     * 交给调用方逐一匹配即可绕过遮挡问题。
      *
      * @param x      屏幕 X 坐标
      * @param y      屏幕 Y 坐标
      * @param viewer OSG 查看器指针
-     * @return 世界坐标系下的交点（如果存在），否则 std::nullopt
+     * @return 世界坐标系下的交点列表（可能为空）
      */
-    static std::optional<osg::Vec3d> raycast(float x, float y,
-                                             osgViewer::Viewer* viewer) {
+    static std::vector<osg::Vec3d> raycast(float x, float y,
+                                           osgViewer::Viewer* viewer) {
+        std::vector<osg::Vec3d> points;
         osg::ref_ptr<osgUtil::LineSegmentIntersector> picker =
             new osgUtil::LineSegmentIntersector(
                 osgUtil::Intersector::WINDOW, x, y);
         osgUtil::IntersectionVisitor iv(picker.get());
         viewer->getCamera()->accept(iv);
-        if (!picker->containsIntersections()) return std::nullopt;
-        return picker->getFirstIntersection().getWorldIntersectPoint();
+        if (!picker->containsIntersections()) return points;
+        const auto& intersections = picker->getIntersections();
+        for (const auto& isect : intersections) {
+            points.push_back(isect.getWorldIntersectPoint());
+        }
+        return points;
     }
 
     /**
-     * @brief 查找离射线交点最近的球体中心
+     * @brief 在全部射线交点中查找可拾取的标记
      *
-     * 遍历所有球心，找到距离射线交点最近的球体。
-     * 仅当最近距离小于球体半径阈值时才认为拾取成功。
+     * 遍历（交点 × 标记）组合，找到"交点落在标记 pickRadius 内"
+     * 的最近匹配。只要射线上任一交点（含被遮挡的远端交点）进入
+     * 某标记的拾取半径即视为命中。
      *
-     * @param hit     射线与场景的交点
-     * @param centers 球心数据向量（包含球心位置和顶点 ID）
-     * @param radius  球体半径（距离阈值）
+     * @param hits    射线与世界几何的全部交点（按距离排序）
+     * @param centers 可拾取标记数据（含各自拾取半径）
      * @return 最近的顶点 ID（未找到返回 -1）
      */
     static long nearestCenter(
-            const osg::Vec3d& hit,
-            const std::vector<std::pair<osg::Vec3d, long>>& centers,
-            float radius) {
-        double bestD2  = std::numeric_limits<double>::max();
-        long   bestId  = -1;
-        double thresh2 = static_cast<double>(radius) * radius;  // 距离平方阈值
-        for (const auto& [c, id] : centers) {
-            double d2 = (c - hit).length2();
-            if (d2 < bestD2) { bestD2 = d2; bestId = id; }
+            const std::vector<osg::Vec3d>& hits,
+            const std::vector<PickableCenter>& centers) {
+        double bestD2 = std::numeric_limits<double>::max();
+        long   bestId = -1;
+        for (const auto& [c, id, r] : centers) {
+            double thresh2 = static_cast<double>(r) * r;
+            for (const auto& hit : hits) {
+                double d2 = (c - hit).length2();
+                if (d2 <= thresh2 && d2 < bestD2) { bestD2 = d2; bestId = id; }
+            }
         }
-        return (bestId >= 0 && bestD2 <= thresh2) ? bestId : -1;
+        return bestId;
     }
 
     /**
@@ -231,12 +268,13 @@ private:
      * @param segments  边线段数据向量
      * @param threshold 距离阈值
      * @param out       输出：填充对应边的元数据
-     * @return 最近的边 ID（未找到返回 -1）
+     * @return 最近距离的平方（未命中返回 double 最大值，供调用方跨交点比较）；
+     *         out.edgeId 仅在命中时有效
      */
-    static long nearestSegment(const osg::Vec3d& hit,
-                               const std::vector<EdgeSegment>& segments,
-                               float threshold,
-                               PickingHit& out) {
+    static double nearestSegment(const osg::Vec3d& hit,
+                                 const std::vector<EdgeSegment>& segments,
+                                 float threshold,
+                                 PickingHit& out) {
         long   bestIdx = -1;
         double bestD2  = static_cast<double>(threshold) * threshold;
         for (size_t i = 0; i < segments.size(); ++i) {
@@ -255,14 +293,18 @@ private:
             }
             if (d2 < bestD2) { bestD2 = d2; bestIdx = static_cast<long>(i); }
         }
-        if (bestIdx < 0) return -1;
+        if (bestIdx < 0) {
+            out.edgeId = -1;
+            return std::numeric_limits<double>::max();
+        }
         // 填充输出结构
         const auto& seg = segments[bestIdx];
         out.edgeV1    = seg.v1_id;
         out.edgeV2    = seg.v2_id;
         out.edgeDist  = seg.distance;
         out.edgeKernel = seg.kernel;
-        return seg.id;
+        out.edgeId    = seg.id;
+        return bestD2;
     }
 
     // —— 成员变量 ——
