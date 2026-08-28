@@ -15,6 +15,7 @@
 
 #include <QDialog>
 #include <QList>
+#include <QListWidget>
 
 #include "backend/project_manager.h"
 
@@ -45,7 +46,6 @@ private:
     bool finalizeLoad(const ProjectInfo& info);   ///< 组装 LoadDirectory/None 任务并接受
     bool startImport(const ProjectInfo& info);    ///< 组装 ImportBag 任务（含导入配置弹窗）并接受
     bool confirmClearAndImport(const ProjectInfo& info); ///< 数据目录非空时的清空确认
-    static void pushRecentDir(const QString& dir); ///< 最近项目 MRU 追加（QSettings）
     void refreshRecentList();
 
     ProjectTask m_task;            ///< 最终启动任务
