@@ -94,6 +94,7 @@ set(BACKEND_SOURCES
 # --- Qt Widgets UI（新的基于 Widgets 的界面，替代 QML） ---
 set(UI_SOURCES
     src/ui/MainWindow.cpp                                 # 主窗口
+    src/ui/ProjectCenterDialog.cpp                        # 项目中心对话框（新建/打开项目）
     src/ui/BagOpenDialog.cpp                              # 打开 Bag 对话框（topic 选择）
     src/ui/AutoLoopClosureDialog.cpp                       # 高级设置：自动回环对话框
     src/ui/RenderingAdvancedDialogs.cpp                    # 高级设置：渲染相关对话框（LOD/Z裁剪/颜色范围）
