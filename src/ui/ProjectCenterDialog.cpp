@@ -184,8 +184,11 @@ void ProjectCenterDialog::refreshRecentList() {
         item->setData(Qt::UserRole, info.projectDir);
         // 宽度传 0：QListView 用视口宽度铺满条目（通栏）。
         // 若用 row->sizeHint().width()（含标签完整文字宽度，通常比视口宽），
-        // 会出现横向溢出，选中边框右侧被裁掉
-        item->setSizeHint(QSize(0, row->sizeHint().height()));
+        // 会出现横向溢出，选中边框右侧被裁掉。
+        // 高度补偿 ::item 的上下 margin（2px×2）+ 2px 余量：
+        // 行 widget 铺满条目矩形，而边框盒被 margin 内缩，
+        // 不补偿则内容底部顶出圆角边框（下缘被截）
+        item->setSizeHint(QSize(0, row->sizeHint().height() + 6));
         m_recentList->setItemWidget(item, row);
     }
 }
