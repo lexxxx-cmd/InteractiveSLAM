@@ -124,8 +124,13 @@ void ProjectCenterDialog::refreshRecentList() {
                                              ? info.lastOpenedTime.toString("yyyy/MM/dd HH:mm")
                                              : tr("Unknown"),
                                          statusText));
+        // 允许被布局压缩：QLabel 默认最小宽度 = 整行文字宽度，
+        // 路径过长时会把最右侧的 ⋯ 按钮挤出裁剪区（按钮"消失"的根源）
+        meta->setMinimumSize(0, 0);
         auto* path = new QLabel(info.projectDir);
         path->setStyleSheet("color: #8899aa;");
+        path->setMinimumSize(0, 0);
+        path->setToolTip(info.projectDir);  // 被截断时悬停可看完整路径
         textLayout->addWidget(name);
         textLayout->addWidget(meta);
         textLayout->addWidget(path);
@@ -133,7 +138,7 @@ void ProjectCenterDialog::refreshRecentList() {
 
         // 右对齐 ⋯ 按钮：弹出该条目的操作菜单（重命名/删除）。
         // 按值捕获目录——info 是循环引用，按钮点击发生在循环结束后
-        auto* moreBtn = new QPushButton(QStringLiteral("⋯"));
+        auto* moreBtn = new QPushButton(QStringLiteral("…"));
         moreBtn->setFixedSize(24, 24);
         moreBtn->setFlat(true);
         moreBtn->setStyleSheet(
