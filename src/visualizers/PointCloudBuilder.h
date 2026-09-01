@@ -13,12 +13,14 @@
 //      锁只覆盖毫秒级快照，不阻塞优化/删边等图操作；
 //   2. 无锁变换：将每个关键帧的点按位姿变换到世界坐标系，统计
 //      Z 值范围与包围盒，记录每帧全量范围；
-//   3. 主级别（全量）：所有关键帧点变换到世界坐标后即为主渲染数据，
-//      不做预算降采样（点预算档位已移除，渲染固定为"全量 + LOD"）；
-//   4. 多级 LOD：当 lodEnabled 时，在全量点基础上按递增体素边长生成
-//      level1~5（目标点数 N/2、N/4、N/8、N/16、N/32，级间 2×，每级
-//      不低于 5 万点），每级都映射回同一个全量点数组，供相机距离
-//      自动切换或手动选择使用；
+//   3. 孤立杂点滤波（阶段 2.5）：全局细体素占据计数，仅被少于阈值个
+//      点占据的格子判为杂点（多帧重叠互证）。全量数组与 cloudRanges
+//      保持完整（索引锚点，选中高亮仍用全量），滤波只体现在派生的
+//      主级别渲染索引/范围上——存活的点按原顺序组成升序子序列；
+//   4. 主级别（全量或滤波后存活点）+ 多级 LOD：当 lodEnabled 时，在
+//      主级别子集上按递增体素边长生成 level1~5（目标点数 N/2、N/4、
+//      N/8、N/16、N/32，级间 2×，每级不低于 5 万点），每级都映射回
+//      同一个全量点数组，供相机距离自动切换或手动选择使用；
 //   5. 构建渲染顶点数组（osg::Vec3Array，仅普通容器填充，无 GL 调用）。
 //
 // 输出 PointCloudBuildResult 由主线程 KeyframePointCloudVisualizer::
@@ -84,6 +86,11 @@ struct LodLevel {
  */
 struct BuildOptions {
     bool lodEnabled = false;    ///< 是否生成多级 LOD（渲染固定为全量 + LOD）
+
+    // —— 孤立杂点滤波（全局体素占据计数，见 build() 阶段 2.5） ——
+    bool  outlierFilterEnabled = true;  ///< 是否启用孤立杂点滤波
+    float outlierFilterLeaf    = 0.10f; ///< 滤波体素边长（米）
+    int   outlierFilterMinPts  = 2;     ///< 体素内点数低于该值判为孤立杂点
 
     // —— 颜色生成参数（构建时直接生成颜色，主线程 commit 时零遍历） ——
     bool  useAutoColorRange = true;  ///< true = 用构建统计的 zMin/zMax 映射颜色
@@ -209,10 +216,62 @@ public:
             r.zMax += 0.5f;
         }
 
-        // ---- 阶段 3：主级别（全量，LOD 分级在阶段 5 生成） ----
+        // ---- 阶段 2.5：全局体素占据滤波（剔除孤立杂点） ----
+        // 在全量世界坐标上按细体素统计每格点数：占据点数低于阈值的格子
+        // 判为孤立杂点（多帧重叠区域互相印证，真实表面计数 >= 阈值；
+        // 传感器串扰/飘点通常只出现一次）。全量数组与 cloudRanges 保持
+        // 完整（它们是索引体系的锚点，选中高亮仍用全量数据），滤波只
+        // 体现在派生层：存活点按原顺序组成主级别 renderIndices——对有序
+        // 序列过滤仍是升序子序列，逐帧范围一遍循环即可重切。
         const size_t n = r.allWorldPoints.size();
-        r.renderRanges = r.cloudRanges;
-        r.renderFullRes = true;
+        std::vector<size_t> mainIndices;    // 主级别渲染索引（空 = 全量直通）
+        std::vector<CloudRange> mainRanges; // 主级别逐帧范围（空 = 用 cloudRanges）
+        if (options.outlierFilterEnabled && options.outlierFilterMinPts > 1) {
+            const float invLeaf = 1.0f / options.outlierFilterLeaf;
+            std::unordered_map<uint64_t, int> occ;
+            occ.reserve(std::min<size_t>(n, 4u * 1024u * 1024u));
+            for (const auto& p : r.allWorldPoints) {
+                ++occ[voxelKey(static_cast<float>(p.x()),
+                               static_cast<float>(p.y()),
+                               static_cast<float>(p.z()), invLeaf)];
+            }
+
+            // 先探测是否存在孤立体素，干净数据零额外开销直通
+            bool hasIsolated = false;
+            for (const auto& [key, count] : occ) {
+                if (count < options.outlierFilterMinPts) { hasIsolated = true; break; }
+            }
+            if (hasIsolated) {
+                std::vector<size_t> survivors;
+                survivors.reserve(n);
+                mainRanges.reserve(r.cloudRanges.size());
+                for (const auto& range : r.cloudRanges) {
+                    const size_t rstart = survivors.size();  // 该帧存活点段的起点
+                    for (size_t j = range.startVertex;
+                         j < range.startVertex + range.vertexCount; ++j) {
+                        const auto& p = r.allWorldPoints[j];
+                        auto it = occ.find(voxelKey(static_cast<float>(p.x()),
+                                                    static_cast<float>(p.y()),
+                                                    static_cast<float>(p.z()), invLeaf));
+                        if (it != occ.end() && it->second >= options.outlierFilterMinPts)
+                            survivors.push_back(j);
+                    }
+                    mainRanges.push_back(
+                        {rstart, survivors.size() - rstart, range.vertexId});
+                }
+                // 安全兜底：极端参数下若全军覆没则放弃滤波（回退全量）
+                if (!survivors.empty() && survivors.size() < n) {
+                    mainIndices = std::move(survivors);
+                } else {
+                    mainRanges.clear();
+                }
+            }
+        }
+
+        // ---- 阶段 3：主级别（全量或滤波后的存活点，LOD 分级在阶段 5 生成） ----
+        r.renderRanges = mainRanges.empty() ? r.cloudRanges : mainRanges;
+        r.renderFullRes = mainIndices.empty();
+        r.renderIndices = std::move(mainIndices);
 
         // ---- 阶段 4：构建主级别分块顶点/颜色数组 ----
         {
@@ -229,14 +288,18 @@ public:
 
         // ---- 阶段 5：多级 LOD ----
         // 目标点数 N/2、N/4、…、N/32（级间 2×，最多 5 级；每级不低于 minLodPoints）
-        // 级间 2× 使相机距离切换过渡平滑，避免 4× 时"差一级就跳回全量"的突兀感
+        // 级间 2× 使相机距离切换过渡平滑，避免 4× 时"差一级就跳回全量"的突兀感。
+        // 以主级别（滤波后存活点）为基数，在子集上继续抽稀
         if (options.lodEnabled) {
             const size_t minLodPoints = 50000;
             const int    maxLodLevels = 5;
-            size_t target = n / 2;
+            const size_t baseCount = r.renderFullRes ? n : r.renderIndices.size();
+            size_t target = baseCount / 2;
             while (target >= minLodPoints && (int)r.lodLevels.size() < maxLodLevels) {
                 r.lodLevels.push_back(
-                    buildLodLevel(r.allWorldPoints, r.cloudRanges, r.bMin, r.bMax,
+                    buildLodLevel(r.allWorldPoints, r.renderRanges,
+                                  r.renderIndices, r.renderFullRes,
+                                  r.bMin, r.bMax,
                                   target, options, r.zMin, r.zMax));
                 target /= 2;
             }
@@ -264,19 +327,32 @@ private:
     }
 
     /**
-     * @brief 统计给定体素边长下点集的体素数（≈渲染点数）
+     * @brief 统计给定体素边长下子集的体素数（≈渲染点数）
+     *
+     * 遍历 ranges 描述的子集（主级别可能经过孤立杂点滤波，
+     * 全量下标不再连续），体素数为该级降采样的实际点数估计。
+     * 子集非全量时，range.startVertex 指向 subsetIndices 的位置，
+     * 需经其解析为全量下标。
      */
     static size_t countVoxels(
         const std::vector<Eigen::Vector3d,
                           Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
+        const std::vector<CloudRange>& ranges,
+        const std::vector<size_t>& subsetIndices,
+        bool subsetFullRes,
         float leaf) {
         const float inv = 1.0f / leaf;
         std::unordered_set<uint64_t> seen;
         seen.reserve(std::min<size_t>(pts.size(), 4u * 1024u * 1024u));
-        for (const auto& p : pts) {
-            seen.insert(voxelKey(static_cast<float>(p.x()),
-                                 static_cast<float>(p.y()),
-                                 static_cast<float>(p.z()), inv));
+        for (const auto& range : ranges) {
+            for (size_t i = 0; i < range.vertexCount; ++i) {
+                const size_t j = subsetFullRes
+                                     ? range.startVertex + i
+                                     : subsetIndices[range.startVertex + i];
+                seen.insert(voxelKey(static_cast<float>(pts[j].x()),
+                                     static_cast<float>(pts[j].y()),
+                                     static_cast<float>(pts[j].z()), inv));
+            }
         }
         return seen.size();
     }
@@ -284,13 +360,16 @@ private:
     /**
      * @brief 按给定体素边长构建降采样后的渲染索引与逐帧渲染范围
      *
-     * 每个体素保留按原始顺序最先出现的点，因此渲染索引天然升序、
-     * 逐帧范围可直接按关键帧切分计算。每帧至少保留一个点。
+     * 在 ranges 描述的子集上扫描（子集非全量时经 subsetIndices 解析为
+     * 全量下标），每个体素保留按子集顺序最先出现的点，因此渲染索引
+     * 天然升序、逐帧范围可直接按关键帧切分计算。每帧至少保留一个点。
      */
     static void decimateTo(
         const std::vector<Eigen::Vector3d,
                           Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
         const std::vector<CloudRange>& cloudRanges,
+        const std::vector<size_t>& subsetIndices,
+        bool subsetFullRes,
         float leaf,
         std::vector<size_t>& outIndices,
         std::vector<CloudRange>& outRanges) {
@@ -308,8 +387,11 @@ private:
 
         for (const auto& range : cloudRanges) {
             size_t rstart = sel.size();
-            for (size_t j = range.startVertex;
-                 j < range.startVertex + range.vertexCount; ++j) {
+            for (size_t i = 0; i < range.vertexCount; ++i) {
+                // 子集位置 -> 全量下标（全量直通时为恒等映射）
+                const size_t j = subsetFullRes
+                                     ? range.startVertex + i
+                                     : subsetIndices[range.startVertex + i];
                 const Eigen::Vector3d& p = pts[j];
                 uint64_t k = voxelKey(static_cast<float>(p.x()),
                                       static_cast<float>(p.y()),
@@ -320,7 +402,9 @@ private:
             }
             // 每帧至少保留一个点，保证选中/播放高亮时该帧仍有可见点
             if (sel.size() == rstart && range.vertexCount > 0) {
-                sel.push_back(range.startVertex);
+                sel.push_back(subsetFullRes
+                                  ? range.startVertex
+                                  : subsetIndices[range.startVertex]);
             }
             outRanges.push_back({rstart, sel.size() - rstart, range.vertexId});
         }
@@ -378,12 +462,19 @@ private:
     }
 
     /**
-     * @brief 构建单个 LOD 级别（目标点数 targetCount 的自适应体素降采样）
+     * @brief 构建单个 LOD 级别（在主级别子集上做目标点数的自适应体素降采样）
+     *
+     * @param pts          全量点数组（ranges/indices 中的下标指向它）
+     * @param ranges       主级别逐帧范围（可能是滤波后的存活点范围）
+     * @param subsetIndices 主级别渲染索引（subsetFullRes=false 时有效）
+     * @param subsetFullRes 主级别是否全量直通
      */
     static LodLevel buildLodLevel(
         const std::vector<Eigen::Vector3d,
                           Eigen::aligned_allocator<Eigen::Vector3d>>& pts,
-        const std::vector<CloudRange>& cloudRanges,
+        const std::vector<CloudRange>& ranges,
+        const std::vector<size_t>& subsetIndices,
+        bool subsetFullRes,
         const Eigen::Vector3d& bMin,
         const Eigen::Vector3d& bMax,
         size_t targetCount,
@@ -391,18 +482,20 @@ private:
         float dataZMin,
         float dataZMax) {
         LodLevel lod;
-        if (pts.size() <= targetCount) {
+        const size_t subsetCount = subsetFullRes ? pts.size() : subsetIndices.size();
+        if (subsetCount <= targetCount) {
             lod.renderFullRes = true;
-            lod.renderRanges = cloudRanges;
+            lod.renderRanges = ranges;
         } else {
             float leaf = estimateLeafFromBounds(bMin, bMax, targetCount);
             for (int iter = 0; iter < 6; ++iter) {
-                size_t c = countVoxels(pts, leaf);
+                size_t c = countVoxels(pts, ranges, subsetIndices, subsetFullRes, leaf);
                 if (c == 0 || c <= targetCount) break;  // 已满足目标
                 double ratio = (double)c / (double)targetCount;
                 leaf *= (float)(std::pow(ratio, 0.5) * 1.03);
             }
-            decimateTo(pts, cloudRanges, leaf, lod.renderIndices, lod.renderRanges);
+            decimateTo(pts, ranges, subsetIndices, subsetFullRes, leaf,
+                       lod.renderIndices, lod.renderRanges);
             lod.renderFullRes = false;
         }
         {
