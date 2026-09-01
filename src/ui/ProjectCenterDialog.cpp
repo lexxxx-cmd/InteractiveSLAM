@@ -135,14 +135,16 @@ void ProjectCenterDialog::refreshRecentList() {
         layout->setContentsMargins(4, 4, 4, 4);
 
         auto* thumb = new QLabel;
-        thumb->setFixedSize(56, 56);
+        // 48×48：小于右侧三行文字的高度（条目高度的真正决定者），
+        // 任何 ::item 盒模型变化下都有富余，不会被下缘截断
+        thumb->setFixedSize(48, 48);
         thumb->setAlignment(Qt::AlignCenter);
         // 占位缩略图：深色底 + 项目名首字符（后续版本替换为主视口截图）
         thumb->setStyleSheet(
-            "background-color: #1e2430; color: #8899aa; font-size: 22px;"
+            "background-color: #1e2430; color: #8899aa; font-size: 20px;"
             "border: 1px solid #33405a; border-radius: 4px;");
         thumb->setText(info.name.isEmpty() ? "?" : info.name.left(1).toUpper());
-        layout->addWidget(thumb);
+        layout->addWidget(thumb, 0, Qt::AlignVCenter);
 
         auto* textLayout = new QVBoxLayout;
         auto* name = new QLabel(info.name.isEmpty()
