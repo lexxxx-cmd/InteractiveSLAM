@@ -138,11 +138,14 @@ void ProjectCenterDialog::refreshRecentList() {
 
         // 右对齐 ⋯ 按钮：弹出该条目的操作菜单（重命名/删除）。
         // 按值捕获目录——info 是循环引用，按钮点击发生在循环结束后
-        auto* moreBtn = new QPushButton(QStringLiteral("…"));
+        // 注意用 ASCII "..."：U+22EF/U+2026 等码位在部分字体下无字形，
+        // 会渲染成空白按钮
+        auto* moreBtn = new QPushButton(QStringLiteral("..."));
         moreBtn->setFixedSize(24, 24);
         moreBtn->setFlat(true);
         moreBtn->setStyleSheet(
-            "QPushButton { color: #8899aa; border: none; font-size: 16px; }"
+            "QPushButton { color: #8899aa; border: none; font-size: 14px;"
+            "font-weight: bold; }"
             "QPushButton:hover { color: #ffffff; background: #2a3550;"
             "border-radius: 4px; }");
         connect(moreBtn, &QPushButton::clicked, this,
