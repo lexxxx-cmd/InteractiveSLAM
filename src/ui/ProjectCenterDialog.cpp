@@ -66,10 +66,31 @@ ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
     m_recentList->setObjectName("recentProjectList");
     m_recentList->setStyleSheet(
         "QListWidget#recentProjectList { background: transparent; }"
-        "QListWidget#recentProjectList::item { border-radius: 6px;"
-        "  margin: 2px 4px; }"
-        "QListWidget#recentProjectList::item:hover { background: #2a3550; }"
-        "QListWidget#recentProjectList::item:selected { background: #2e3c5e; }");
+        /* 基础态：透明边框占位，保证各状态下盒子几何一致不跳动 */
+        "QListWidget#recentProjectList::item {"
+        "    border-radius: 6px;"
+        "    margin: 2px 4px;"
+        "    padding: 4px;"
+        "    border: 1px solid transparent;"
+        "    border-left: 3px solid transparent;"
+        "}"
+        /* 悬停：轻量高亮 */
+        "QListWidget#recentProjectList::item:hover {"
+        "    background: #3a4a6a;"
+        "}"
+        /* 选中：更重的颜色 + 四边统一边框，左侧 3px 强调条 */
+        "QListWidget#recentProjectList::item:selected {"
+        "    background: #4a5a8a;"
+        "    border: 1px solid #66aaff;"
+        "    border-left: 3px solid #66aaff;"
+        "}"
+        /* 选中+悬停：比单纯选中再亮一点 */
+        "QListWidget#recentProjectList::item:hover:selected {"
+        "    background: #5a6a9a;"
+        "    border: 1px solid #88ccff;"
+        "    border-left: 3px solid #88ccff;"
+        "}"
+    );
     connect(m_recentList, &QListWidget::itemDoubleClicked,
             this, &ProjectCenterDialog::onOpenRecentItem);
     leftLayout->addWidget(m_recentList, 1);
@@ -161,7 +182,10 @@ void ProjectCenterDialog::refreshRecentList() {
         layout->addWidget(moreBtn);
 
         item->setData(Qt::UserRole, info.projectDir);
-        item->setSizeHint(row->sizeHint());
+        // 宽度传 0：QListView 用视口宽度铺满条目（通栏）。
+        // 若用 row->sizeHint().width()（含标签完整文字宽度，通常比视口宽），
+        // 会出现横向溢出，选中边框右侧被裁掉
+        item->setSizeHint(QSize(0, row->sizeHint().height()));
         m_recentList->setItemWidget(item, row);
     }
 }
