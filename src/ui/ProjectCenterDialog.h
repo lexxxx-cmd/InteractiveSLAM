@@ -48,6 +48,11 @@ private:
     bool confirmClearAndImport(const ProjectInfo& info); ///< 数据目录非空时的清空确认
     void refreshRecentList();
 
+    // --- 最近列表条目操作（⋯ 按钮） ---
+    void showItemMenu(const QString& dir);  ///< 弹出条目操作菜单（重命名/删除）
+    void renameProject(const QString& dir); ///< 重命名项目（修改 project_name）
+    void removeProject(const QString& dir); ///< 删除项目（移出列表/删除文件夹）
+
     ProjectTask m_task;            ///< 最终启动任务
     QListWidget* m_recentList;     ///< 最近项目列表
 };

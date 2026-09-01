@@ -10,8 +10,10 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QSettings>
 #include <QPushButton>
@@ -129,6 +131,19 @@ void ProjectCenterDialog::refreshRecentList() {
         textLayout->addWidget(path);
         layout->addLayout(textLayout, 1);
 
+        // 右对齐 ⋯ 按钮：弹出该条目的操作菜单（重命名/删除）。
+        // 按值捕获目录——info 是循环引用，按钮点击发生在循环结束后
+        auto* moreBtn = new QPushButton(QStringLiteral("⋯"));
+        moreBtn->setFixedSize(24, 24);
+        moreBtn->setFlat(true);
+        moreBtn->setStyleSheet(
+            "QPushButton { color: #8899aa; border: none; font-size: 16px; }"
+            "QPushButton:hover { color: #ffffff; background: #2a3550;"
+            "border-radius: 4px; }");
+        connect(moreBtn, &QPushButton::clicked, this,
+                [this, dir = info.projectDir]() { showItemMenu(dir); });
+        layout->addWidget(moreBtn);
+
         item->setData(Qt::UserRole, info.projectDir);
         item->setSizeHint(row->sizeHint());
         m_recentList->setItemWidget(item, row);
@@ -140,6 +155,87 @@ void ProjectCenterDialog::accept() {
         pushRecentDir(m_task.projectDir);
     }
     QDialog::accept();
+}
+
+// ---------------------------------------------------------------------------
+// 最近列表条目操作（⋯ 按钮）
+// ---------------------------------------------------------------------------
+
+void ProjectCenterDialog::showItemMenu(const QString& dir) {
+    QMenu menu(this);
+    QAction* renameAct = menu.addAction(tr("Rename"));
+    menu.addSeparator();
+    QAction* removeAct = menu.addAction(tr("Remove"));
+
+    QAction* chosen = menu.exec(QCursor::pos());
+    if (chosen == renameAct) {
+        renameProject(dir);
+    } else if (chosen == removeAct) {
+        removeProject(dir);
+    }
+}
+
+void ProjectCenterDialog::renameProject(const QString& dir) {
+    auto info = ProjectManager::read(dir);
+    if (!info.valid) {
+        QMessageBox::warning(this, tr("Open Project Failed"), info.errorString);
+        return;
+    }
+    bool ok = false;
+    QString name = QInputDialog::getText(
+        this, tr("Rename Project"), tr("Project name:"),
+        QLineEdit::Normal, info.name, &ok);
+    if (!ok) return;
+    name = name.trimmed();
+    if (name.isEmpty() || name == info.name) return;
+
+    info.name = name;
+    if (!ProjectManager::write(info)) {
+        QMessageBox::warning(this, tr("Rename Project"),
+                             tr("Cannot write project.json"));
+        return;
+    }
+    refreshRecentList();
+}
+
+void ProjectCenterDialog::removeProject(const QString& dir) {
+    auto info = ProjectManager::read(dir);
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(tr("Remove Project"));
+    box.setText(tr("Remove project \"%1\"?\n\n%2")
+                    .arg(info.valid ? info.name : QDir(dir).dirName(), dir));
+    QPushButton* listBtn =
+        box.addButton(tr("Remove from List"), QMessageBox::ActionRole);
+    QPushButton* folderBtn =
+        box.addButton(tr("Delete Project Folder"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.exec();
+    auto clicked = box.clickedButton();
+
+    if (clicked == listBtn) {
+        // 仅移出最近列表，不动磁盘文件
+        QSettings settings("DAFTECH", "InteractiveSLAM");
+        QStringList list = settings.value("recent_projects").toStringList();
+        list.removeAll(dir);
+        settings.setValue("recent_projects", list);
+        refreshRecentList();
+    } else if (clicked == folderBtn) {
+        // 删除磁盘上的项目文件夹（含地图数据，破坏性操作，路径已在上方展示）
+        QDir d(dir);
+        if (d.removeRecursively()) {
+            QSettings settings("DAFTECH", "InteractiveSLAM");
+            QStringList list = settings.value("recent_projects").toStringList();
+            list.removeAll(dir);
+            settings.setValue("recent_projects", list);
+            refreshRecentList();
+        } else {
+            QMessageBox::warning(this, tr("Remove Project"),
+                                 tr("Failed to delete the project folder:\n%1")
+                                     .arg(dir));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

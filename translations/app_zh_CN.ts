@@ -1186,7 +1186,7 @@ Importing will permanently delete all existing content in this directory (cannot
 <context>
     <name>ProjectCenterDialog</name>
     <message>
-        <location filename="../src/ui/ProjectCenterDialog.cpp" line="+48"/>
+        <location filename="../src/ui/ProjectCenterDialog.cpp" line="+50"/>
         <source>Project Center</source>
         <translation>项目中心</translation>
     </message>
@@ -1202,13 +1202,13 @@ Importing will permanently delete all existing content in this directory (cannot
     </message>
     <message>
         <location line="+4"/>
-        <location line="+271"/>
+        <location line="+365"/>
         <location line="+47"/>
         <source>New Project</source>
         <translation>新建项目</translation>
     </message>
     <message>
-        <location line="-315"/>
+        <location line="-409"/>
         <source>Set project name and location; optionally link a raw Bag file</source>
         <translation>设置项目名称和保存位置，可关联 Bag 原始数据</translation>
     </message>
@@ -1233,7 +1233,7 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>未知</translation>
     </message>
     <message>
-        <location line="+34"/>
+        <location line="+128"/>
         <source>Choose Project Directory</source>
         <translation>选择项目目录</translation>
     </message>
@@ -1252,12 +1252,66 @@ Open it directly as a map directory?</source>
 是否直接将其作为地图目录打开？</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="-86"/>
+        <location line="+98"/>
         <source>Open Project Failed</source>
         <translation>打开项目失败</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="-113"/>
+        <source>Rename</source>
+        <translation>重命名</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Remove</source>
+        <translation>删除</translation>
+    </message>
+    <message>
+        <location line="+18"/>
+        <location line="+8"/>
+        <source>Rename Project</source>
+        <translation>重命名项目</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Cannot write project.json</source>
+        <translation>无法写入 project.json</translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <location line="+28"/>
+        <source>Remove Project</source>
+        <translation>删除项目</translation>
+    </message>
+    <message>
+        <location line="-27"/>
+        <source>Remove project &quot;%1&quot;?
+
+%2</source>
+        <translation>删除项目「%1」？
+
+%2</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Remove from List</source>
+        <translation>仅从列表移除</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Delete Project Folder</source>
+        <translation>删除项目文件夹</translation>
+    </message>
+    <message>
+        <location line="+23"/>
+        <source>Failed to delete the project folder:
+%1</source>
+        <translation>删除项目文件夹失败：
+%1</translation>
+    </message>
+    <message>
+        <location line="+56"/>
         <source>Previous Import Not Completed</source>
         <translation>上次导入未完成</translation>
     </message>
@@ -1380,7 +1434,8 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>项目名称</translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="-258"/>
+        <location line="+259"/>
         <source>Project name:</source>
         <translation>项目名称:</translation>
     </message>
