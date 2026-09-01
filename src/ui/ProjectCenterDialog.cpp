@@ -61,6 +61,15 @@ ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
 
     m_recentList = new QListWidget;
     m_recentList->setSelectionMode(QAbstractItemView::SingleSelection);
+    // 悬停/选中高亮（与 ⋯ 按钮 hover 同色系），便于确认将要打开的项目。
+    // 行 widget 与内部 QLabel 均为透明背景，item 高亮可透出显示
+    m_recentList->setObjectName("recentProjectList");
+    m_recentList->setStyleSheet(
+        "QListWidget#recentProjectList { background: transparent; }"
+        "QListWidget#recentProjectList::item { border-radius: 6px;"
+        "  margin: 2px 4px; }"
+        "QListWidget#recentProjectList::item:hover { background: #2a3550; }"
+        "QListWidget#recentProjectList::item:selected { background: #2e3c5e; }");
     connect(m_recentList, &QListWidget::itemDoubleClicked,
             this, &ProjectCenterDialog::onOpenRecentItem);
     leftLayout->addWidget(m_recentList, 1);
