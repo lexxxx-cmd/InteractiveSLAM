@@ -137,17 +137,16 @@ void ProjectCenterDialog::refreshRecentList() {
         layout->addLayout(textLayout, 1);
 
         // 右对齐 ⋯ 按钮：弹出该条目的操作菜单（重命名/删除）。
-        // 按值捕获目录——info 是循环引用，按钮点击发生在循环结束后
-        // 注意用 ASCII "..."：U+22EF/U+2026 等码位在部分字体下无字形，
-        // 会渲染成空白按钮
-        auto* moreBtn = new QPushButton(QStringLiteral("..."));
+        // 按值捕获目录——info 是循环引用，按钮点击发生在循环结束后。
+        // 图标用 src/icon/dots.svg（Tabler 三点图标，qrc 内嵌）
+        auto* moreBtn = new QPushButton;
         moreBtn->setFixedSize(24, 24);
         moreBtn->setFlat(true);
+        moreBtn->setIcon(QIcon(":/ui/dots.svg"));
+        moreBtn->setIconSize(QSize(16, 16));
         moreBtn->setStyleSheet(
-            "QPushButton { color: #8899aa; border: none; font-size: 14px;"
-            "font-weight: bold; }"
-            "QPushButton:hover { color: #ffffff; background: #2a3550;"
-            "border-radius: 4px; }");
+            "QPushButton { border: none; border-radius: 4px; }"
+            "QPushButton:hover { background: #2a3550; }");
         connect(moreBtn, &QPushButton::clicked, this,
                 [this, dir = info.projectDir]() { showItemMenu(dir); });
         layout->addWidget(moreBtn);

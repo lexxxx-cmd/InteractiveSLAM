@@ -3,5 +3,6 @@
         <file alias="dark_theme.qss">dark_theme.qss</file>
         <file alias="arrow_down.svg">arrow_down.svg</file>
         <file alias="app_icon.jpg">../icon/20260826-165722.jpg</file>
+        <file alias="dots.svg">../icon/dots.svg</file>
     </qresource>
 </RCC>
