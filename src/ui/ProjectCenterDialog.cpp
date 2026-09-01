@@ -72,7 +72,6 @@ ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
         "    margin: 2px 4px;"
         "    padding: 4px;"
         "    border: 1px solid transparent;"
-        "    border-left: 3px solid transparent;"
         "}"
         /* 悬停：轻量高亮 */
         "QListWidget#recentProjectList::item:hover {"
@@ -82,13 +81,11 @@ ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
         "QListWidget#recentProjectList::item:selected {"
         "    background: #4a5a8a;"
         "    border: 1px solid #66aaff;"
-        "    border-left: 3px solid #66aaff;"
         "}"
         /* 选中+悬停：比单纯选中再亮一点 */
         "QListWidget#recentProjectList::item:hover:selected {"
         "    background: #5a6a9a;"
         "    border: 1px solid #88ccff;"
-        "    border-left: 3px solid #88ccff;"
         "}"
     );
     connect(m_recentList, &QListWidget::itemDoubleClicked,
