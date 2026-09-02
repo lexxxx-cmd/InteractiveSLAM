@@ -75,7 +75,9 @@ public:
     // --- osgGA::CameraManipulator 接口 ---
     void setByMatrix(const osg::Matrixd& matrix) override {
         m_eye = matrix.getTrans();
-        osg::Vec3d dir = -matrix.getCol(2);  // 相机 -Z 即视线方向
+        // OSG 矩阵为行向量约定（v * M）：相机世界矩阵旋转部分
+        // 第 2 行 = -视线（相机看向自身 -Z），取负得到视线方向
+        osg::Vec3d dir(-matrix(2, 0), -matrix(2, 1), -matrix(2, 2));
         dir.normalize();
         m_pitchDeg = std::asin(std::clamp(dir.z(), -1.0, 1.0)) * 57.29577951308232;
         m_yawDeg   = std::atan2(dir.x(), dir.y()) * 57.29577951308232;
@@ -173,8 +175,10 @@ private:
         if (m_keyS) delta -= fwdH;
         if (m_keyD) delta += right;
         if (m_keyA) delta -= right;
-        if (delta.length2() > 0.0)
-            m_eye += delta.getNormalized() * (m_speed * dt);
+        if (delta.length2() > 0.0) {
+            delta.normalize();  // OSG Vec3 无 getNormalized()，原地归一化
+            m_eye += delta * (m_speed * dt);
+        }
     }
 
     void clearKeys() { m_keyW = m_keyA = m_keyS = m_keyD = false; }
