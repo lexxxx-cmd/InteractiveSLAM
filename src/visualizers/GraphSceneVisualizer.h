@@ -231,6 +231,18 @@ public:
         }
     }
 
+    /** @brief 设置是否绘制视锥体局部坐标轴（调试用，立即重建标记） */
+    void setDrawLocalAxes(bool on) {
+        if (m_drawLocalAxes == on) return;
+        m_drawLocalAxes = on;
+        if (m_sphereViz && m_lastGraph) {
+            rebuildSpheres(m_lastGraph);
+        }
+    }
+
+    /** @brief 查询局部坐标轴开关状态 */
+    bool drawLocalAxes() const { return m_drawLocalAxes; }
+
     /** @brief 设置顶点位姿标记的整体不透明度（0.0 全透明 ~ 1.0 不透明） */
     void setVertexOpacity(float opacity) {
         m_vertexOpacity = opacity;
@@ -323,8 +335,8 @@ public:
     /**
      * @brief 设置选中的顶点 ID
      *
-     * 选中顶点后，该顶点的球体变为橙色，同时其时序邻居帧的
-     * 点云会高亮为白色。
+     * 选中顶点后，该顶点的视锥体放大为 2 倍并变为红色系，
+     * 同时其时序邻居帧的点云会高亮为白色。
      *
      * @param id 顶点 ID（设为 -1 取消选择）
      */
@@ -339,25 +351,25 @@ public:
     long selectedVertex() const { return m_selectedVertexId; }
 
     /**
-     * @brief 轻量级播放高亮（不重建球体几何体）
+     * @brief 轻量级播放高亮（不重建视锥体几何体）
      *
      * 用于播放轴功能，在滑块拖动或自动播放时调用。
-     * 仅更新两个球体的颜色数组（上一个恢复红色，当前变橙色）
-     * + 点云高亮，不触发完整的球体几何体重建。
+     * 仅更新两个视锥体的颜色数组（上一个恢复蓝色，当前变红色）
+     * + 点云高亮，不触发完整的几何体重建。
      *
      * 与 setSelectedVertex() 独立管理，两者互不干扰。
      *
      * @param id 顶点 ID（设为 -1 取消高亮）
      */
     void highlightPlaybackVertex(long id) {
-        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);   // 红色 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);  // 橙色 —— 选中
+        const osg::Vec4 defaultColor(0.20f, 0.50f, 1.0f, 1.0f);  // 蓝色 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红色 —— 播放高亮
 
-        // 恢复上一个播放高亮球体为默认红色
+        // 恢复上一个播放高亮视锥体为默认蓝色
         if (m_playbackPrevId >= 0 && m_sphereViz) {
             m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
         }
-        // 设置新球体为橙色
+        // 设置新视锥体为红色
         if (id >= 0 && m_sphereViz) {
             m_sphereViz->updateSphereColor(id, selectedColor);
         }
@@ -550,13 +562,13 @@ private:
     /**
      * @brief 重建顶点位姿标记
      *
-     * 为每个关键帧创建一个定向标记，位置取顶点平移估计值，
-     * 方向取关键帧局部位姿的旋转（右-下-前坐标系，X右/Y下/Z前），
-     * 轴向始终沿局部 +Z（前方）。形状取决于状态：
-     *   - 普通顶点：截锥体（红色，切掉尖顶）
-     *   - 选中 / 播放高亮：尖锥体（黄色，2 倍尺寸）
-     *   - 回环搜索源：蓝色截锥体
-     *   - 回环候选：绿色截锥体
+     * 为每个关键帧创建一个相机视锥体标记：锥顶位于顶点平移估计值
+     * （相机光心），方向取关键帧局部位姿的旋转
+     * （右-下-前坐标系，X右/Y下/Z前），沿局部 +Z（前方）展开。配色：
+     *   - 普通顶点：蓝色系
+     *   - 选中 / 播放高亮：红色系（2 倍尺寸）
+     *   - 回环搜索源：深蓝色
+     *   - 回环候选：绿色
      *
      * 当采样步长 > 1 时，仅渲染 id % stride == 0 的标记，
      * 但特殊标记（选中、回环）始终渲染。
@@ -571,16 +583,17 @@ private:
         m_sphereViz->setRadius(m_sphereRadius);
         m_sphereViz->setOpacity(m_focusedVertexId >= 0 ? kFocusDimOpacity
                                                        : m_vertexOpacity);
+        m_sphereViz->setDrawLocalAxes(m_drawLocalAxes);
 
         // 清空并预标记中心缓存
         m_sphereCenters.clear();
         m_sphereCenters.reserve(graph->keyframes.size());
 
-        // 定义不同状态的标记颜色
-        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // 红色 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // 黄色 —— 选中
-        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色 —— 回环搜索源
-        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // 绿色 —— 回环候选
+        // 定义不同状态的标记颜色：普通蓝色系，高亮红色系
+        const osg::Vec4 defaultColor(0.20f, 0.50f, 1.0f, 1.0f);  // 蓝 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红 —— 选中/播放高亮
+        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 深蓝 —— 回环搜索源
+        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // 绿 —— 回环候选
 
         // 遍历所有关键帧，创建顶点位姿标记
         for (auto& [id, kf] : graph->keyframes) {
@@ -603,14 +616,12 @@ private:
             // 标记尖端沿局部 +Z（前方）方向
             Eigen::Matrix3f rot = pose.linear().cast<float>();
 
-            // 根据状态选择颜色、形状和尺寸
+            // 根据状态选择颜色和尺寸（造型统一为相机视锥体）
             osg::Vec4 color = defaultColor;
             float customRadius = -1.0f;  // < 0 表示使用全局默认尺寸
-            bool useCone = false;        // 选中/播放高亮使用尖锥体，其余使用截锥体
             if (id == m_selectedVertexId) {
                 color = selectedColor;
                 customRadius = m_sphereRadius * 2.0f;
-                useCone = true;
             } else if (id == m_loopSourceId) {
                 color = loopSourceColor;
             } else if (m_loopCandidateIds.count(id)) {
@@ -620,20 +631,17 @@ private:
                 // 轻量级 highlightPlaybackVertex 路径仅更新颜色，不做几何重建
                 color = selectedColor;
                 customRadius = m_sphereRadius * 2.0f;
-                useCone = true;
             }
 
             // 缓存可拾取标记（用于鼠标拾取）—— 仅采样后的标记；
-            // 拾取半径 = 1.5 × 实际渲染半径（锥体表面到中心最远约 1.42 倍），
-            // 高亮放大的标记（2 倍渲染半径）自动获得成比例的拾取半径
+            // 视锥体远平面四角距锥顶最远约 2.3 倍特征尺寸
+            // （深度 2R + 侧向偏移），拾取半径取 2.5 倍保证整个
+            // 视锥体可见部分均可点中；高亮放大的标记（2 倍尺寸）
+            // 自动获得成比例的拾取半径
             float renderRadius = (customRadius > 0.0f) ? customRadius : m_sphereRadius;
-            m_sphereCenters.push_back({center, id, 1.5f * renderRadius});
+            m_sphereCenters.push_back({center, id, 2.5f * renderRadius});
 
-            if (useCone) {
-                m_sphereViz->appendCone(center, rot, color, id, customRadius);
-            } else {
-                m_sphereViz->appendTruncatedCone(center, rot, color, id, customRadius);
-            }
+            m_sphereViz->appendFrustum(center, rot, color, id, customRadius);
         }
         // 聚焦淡化状态：目标标记在重建后仍保持稍高的不透明度
         if (m_focusedVertexId >= 0) {
@@ -732,6 +740,7 @@ private:
     // —— 状态配置 ——
     bool m_hasGraph    = false;   ///< 是否有已加载的图数据
     bool m_drawClouds  = true;    ///< 是否绘制点云
+    bool m_drawLocalAxes = true;  ///< 是否绘制视锥体局部坐标轴（调试用）
     float m_sphereRadius  = 1.0f; ///< 球体半径
     float m_vertexOpacity = 1.0f; ///< 顶点位姿标记不透明度（1.0 不透明）
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
