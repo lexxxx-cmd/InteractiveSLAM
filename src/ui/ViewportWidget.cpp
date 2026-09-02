@@ -594,6 +594,8 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
                 case Qt::Key_A: m_fpManip->setKey('A', true); return true;
                 case Qt::Key_S: m_fpManip->setKey('S', true); return true;
                 case Qt::Key_D: m_fpManip->setKey('D', true); return true;
+                case Qt::Key_Space: m_fpManip->setKey(' ', true); return true;
+                case Qt::Key_Control: m_fpManip->setKey('C', true); return true;
                 default: break;
                 }
             }
@@ -608,6 +610,8 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
                 case Qt::Key_A: m_fpManip->setKey('A', false); return true;
                 case Qt::Key_S: m_fpManip->setKey('S', false); return true;
                 case Qt::Key_D: m_fpManip->setKey('D', false); return true;
+                case Qt::Key_Space: m_fpManip->setKey(' ', false); return true;
+                case Qt::Key_Control: m_fpManip->setKey('C', false); return true;
                 default: break;
                 }
             }

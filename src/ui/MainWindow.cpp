@@ -104,7 +104,7 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             this, [this](bool active) {
         statusBar()->showMessage(active
             ? tr("First-person mode: drag to look, W/A/S/D to walk, "
-                 "wheel adjusts speed, Shift to exit")
+                 "Ctrl down, Space up, wheel adjusts speed, Shift to exit")
             : tr("First-person mode off"), 5000);
     });
 

@@ -64,6 +64,8 @@ public:
         case 'A': m_keyA = pressed; break;
         case 'S': m_keyS = pressed; break;
         case 'D': m_keyD = pressed; break;
+        case ' ': m_keyUp = pressed; break;    // Space 上升
+        case 'C': m_keyDown = pressed; break;  // Ctrl 下降
         default: break;
         }
     }
@@ -175,19 +177,25 @@ private:
         if (m_keyS) delta -= fwdH;
         if (m_keyD) delta += right;
         if (m_keyA) delta -= right;
+        if (m_keyUp)   delta += osg::Vec3d(0.0, 0.0, 1.0);  // Space 上升
+        if (m_keyDown) delta -= osg::Vec3d(0.0, 0.0, 1.0);  // Ctrl 下降
         if (delta.length2() > 0.0) {
             delta.normalize();  // OSG Vec3 无 getNormalized()，原地归一化
             m_eye += delta * (m_speed * dt);
         }
     }
 
-    void clearKeys() { m_keyW = m_keyA = m_keyS = m_keyD = false; }
+    void clearKeys() {
+        m_keyW = m_keyA = m_keyS = m_keyD = false;
+        m_keyUp = m_keyDown = false;
+    }
 
     osg::Vec3d m_eye{0.0, 0.0, 0.0};
     double m_yawDeg   = 0.0;    ///< 偏航角（绕世界 Z，0 = 朝 +Y）
     double m_pitchDeg = 0.0;    ///< 俯仰角（±85° 限制，避免翻转）
     double m_speed    = 5.0;    ///< 行走速度（米/秒）
     bool   m_keyW = false, m_keyA = false, m_keyS = false, m_keyD = false;
+    bool   m_keyUp = false, m_keyDown = false;  // Space 上升 / Ctrl 下降
     bool   m_dragging = false;
     float  m_lastX = 0.0f, m_lastY = 0.0f;
     double m_lastFrameTime = -1.0;
