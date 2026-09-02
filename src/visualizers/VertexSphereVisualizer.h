@@ -10,11 +10,11 @@
 //
 // 标记形状（相机视锥体，frustum）：
 //   - 所有标记统一为相机视锥体造型：锥顶位于关键帧位姿（相机光心），
-//     沿局部 +Z（前方）张开四个侧面，末端为 16:9 矩形"影像平面"。
+//     沿局部 +Z（前方）张开，末端为 16:9 矩形"投影屏"。
+//   - 仅投影屏一个蓝色填充面（正反两面均可见），锥体轮廓由
+//     锥顶四条棱 + 投影屏边框的同色系提亮线框勾出，轻盈不遮挡。
 //   - 纵向渐变标明方向：按标记自身局部右-下-前坐标系的"下"方向（+Y），
 //     上面（图像上方）颜色较深、下面颜色较浅，随关键帧姿态一起旋转。
-//   - 三层视觉分区：侧面半透明、远平面（影像屏）较实，
-//     锥顶四条棱 + 远平面边框用同色系提亮线框勾边，整体轻盈可透视。
 //   - 配色由调用方决定：普通顶点蓝色系，高亮顶点红色系（并放大尺寸）。
 //   - 调试：可在锥顶绘制局部 RGB 坐标轴（+X 右红 / +Y 下绿 / +Z 前蓝），
 //     X-ray 显示（关闭深度测试），任何视角下方向指示始终可见，可开关。
@@ -57,7 +57,7 @@ public:
      * @brief 构造函数
      *
      * @param radius 标记特征尺寸（默认 1.0；视锥体深度 = 2 × radius，
-     *               远平面 16:9：半宽 = radius、半高 = 0.5625 × radius，
+     *               投影屏 16:9：半宽 = radius、半高 = 0.5625 × radius，
      *               约 53° 水平视场角）
      */
     explicit VertexSphereVisualizer(float radius = 1.0f)
@@ -69,7 +69,7 @@ public:
         m_geom->setUseVertexArrayObject(true);
         m_geom->setDataVariance(osg::Object::DYNAMIC);
 
-        // 顶点、颜色和索引数组（三角形 = 面，线段 = 线框）
+        // 顶点、颜色和索引数组（三角形 = 投影屏，线段 = 线框）
         m_verts  = new osg::Vec3Array;
         m_colors = new osg::Vec4Array;
         m_indices     = new osg::DrawElementsUInt(GL_TRIANGLES);
@@ -90,11 +90,10 @@ public:
         ss->setAttributeAndModes(
             new osg::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
             osg::StateAttribute::ON);
-        // 背面剔除：透明混合下若同时渲染内壁（背面）与正面，
-        // 同一像素会被混合两次形成深色杂斑；凸体每个像素只有一层
-        // 正面，剔除背面后混合结果干净。要求所有三角形按
-        // "从外部看逆时针"（外法线）的环绕方向生成。
-        ss->setMode(GL_CULL_FACE, osg::StateAttribute::ON);
+        // 不启用背面剔除：填充面只剩投影屏单一平面（无自重叠，
+        // 不会出现正反面同像素双重混合），关闭剔除使其正反两面
+        // 均可见——从锥顶方向看投影屏同样显示
+        // （要求三角形仍按"从外部看逆时针"的环绕方向生成，保证法线一致）
 
         m_geode = new osg::Geode;
         m_geode->addDrawable(m_geom);
@@ -129,14 +128,14 @@ public:
      * @brief 在世界坐标系中添加一个相机视锥体标记
      *
      * 锥顶（相机光心）位于 @p center（即关键帧位姿平移处），沿局部
-     * +Z（前方）展开：深度 = 2R，远平面为 16:9 矩形（半宽 R、
+     * +Z（前方）展开：深度 = 2R，投影屏为 16:9 矩形（半宽 R、
      * 半高 0.5625R）。纵向渐变沿局部"下"方向（右-下-前坐标系的
      * +Y）：图像上方（-Y）颜色较深、下方（+Y）较浅，随关键帧姿态
      * 一起旋转，用于标明视锥体朝向。
-     * 三层分区着色（均先乘全局不透明度）：
-     *   - 侧面：alpha × kSideAlpha（半透明，便于透视内部结构）
-     *   - 远平面：alpha × kPlaneAlpha（较实，读作"影像屏"）
+     * 着色（均先乘全局不透明度）：
+     *   - 投影屏：唯一的填充面，alpha × kPlaneAlpha（较实）
      *   - 线框：同色系提亮（RGB 各 × 0.5 + 0.5），alpha × kLineAlpha
+     * 侧面不做填充，锥体轮廓完全由线框表达。
      *
      * 同时记录 vertexId 对应的颜色数组分区范围，供 updateSphereColor()
      * 后续增量更新颜色使用（避免全量几何体重建）。
@@ -160,43 +159,28 @@ public:
         float hw = kHalfWidth * R;
         float hh = kHalfHeight * R;
 
-        // ---- 顶点推入顺序固定：侧面 → 远平面 → 线框 ----
+        // ---- 顶点推入顺序固定：投影屏 → 线框 ----
         //（与 SphereRange 分区记录及渐变参数表一一对应，勿打乱）
-        // t 为纵向渐变参数：0 = 图像上方（局部 -Y，深），1 = 下方（+Y，浅），
-        // 锥顶居中取 0.5
+        // t 为纵向渐变参数：0 = 图像上方（局部 -Y，深），1 = 下方（+Y，浅）
 
-        // 锥顶 + 远平面四角（侧面共用）
-        int apex = pushVertex(0.0f,  0.0f, 0.0f, center, rot, m_sideBase, 0.5f);
-        int tl   = pushVertex(-hw, -hh,    d, center, rot, m_sideBase, 0.0f);
-        int tr   = pushVertex( hw, -hh,    d, center, rot, m_sideBase, 0.0f);
-        int br   = pushVertex( hw,  hh,    d, center, rot, m_sideBase, 1.0f);
-        int bl   = pushVertex(-hw,  hh,    d, center, rot, m_sideBase, 1.0f);
+        // 投影屏四角（唯一的填充面，不启用背面剔除，正反两面均可见）
+        int ptl = pushVertex(-hw, -hh, d, center, rot, m_planeBase, 0.0f, kPlaneAlpha);
+        int ptr = pushVertex( hw, -hh, d, center, rot, m_planeBase, 0.0f, kPlaneAlpha);
+        int pbr = pushVertex( hw,  hh, d, center, rot, m_planeBase, 1.0f, kPlaneAlpha);
+        int pbl = pushVertex(-hw,  hh, d, center, rot, m_planeBase, 1.0f, kPlaneAlpha);
 
-        // 远平面四角（独立顶点，与侧面 alpha 分区不同）
-        int ptl = pushVertex(-hw, -hh, d, center, rot, m_planeBase, 0.0f);
-        int ptr = pushVertex( hw, -hh, d, center, rot, m_planeBase, 0.0f);
-        int pbr = pushVertex( hw,  hh, d, center, rot, m_planeBase, 1.0f);
-        int pbl = pushVertex(-hw,  hh, d, center, rot, m_planeBase, 1.0f);
+        // 线框角点（锥顶 + 投影屏四角，独立顶点）
+        int lApex = pushVertex(0.0f,  0.0f, 0.0f, center, rot, m_lineBase, 0.5f, kLineAlpha);
+        int lTl   = pushVertex(-hw, -hh,    d, center, rot, m_lineBase, 0.0f, kLineAlpha);
+        int lTr   = pushVertex( hw, -hh,    d, center, rot, m_lineBase, 0.0f, kLineAlpha);
+        int lBr   = pushVertex( hw,  hh,    d, center, rot, m_lineBase, 1.0f, kLineAlpha);
+        int lBl   = pushVertex(-hw,  hh,    d, center, rot, m_lineBase, 1.0f, kLineAlpha);
 
-        // 线框角点（锥顶 + 远平面四角，独立顶点）
-        int lApex = pushVertex(0.0f,  0.0f, 0.0f, center, rot, m_lineBase, 0.5f);
-        int lTl   = pushVertex(-hw, -hh,    d, center, rot, m_lineBase, 0.0f);
-        int lTr   = pushVertex( hw, -hh,    d, center, rot, m_lineBase, 0.0f);
-        int lBr   = pushVertex( hw,  hh,    d, center, rot, m_lineBase, 1.0f);
-        int lBl   = pushVertex(-hw,  hh,    d, center, rot, m_lineBase, 1.0f);
-
-        // 四个侧面三角形（局部 X 右 / Y 下 / Z 前；已按外法线
-        // "从外部看逆时针"排列环绕方向，配合背面剔除）
-        m_indices->push_back(apex); m_indices->push_back(tr); m_indices->push_back(tl);
-        m_indices->push_back(apex); m_indices->push_back(br); m_indices->push_back(tr);
-        m_indices->push_back(apex); m_indices->push_back(bl); m_indices->push_back(br);
-        m_indices->push_back(apex); m_indices->push_back(tl); m_indices->push_back(bl);
-
-        // 远平面（影像屏）两个三角形，外法线朝 +Z
+        // 投影屏两个三角形（局部 X 右 / Y 下 / Z 前，外法线朝 +Z）
         m_indices->push_back(ptl); m_indices->push_back(ptr); m_indices->push_back(pbr);
         m_indices->push_back(ptl); m_indices->push_back(pbr); m_indices->push_back(pbl);
 
-        // 线框：锥顶到四角的 4 条棱 + 远平面矩形边框
+        // 线框：锥顶到四角的 4 条棱 + 投影屏矩形边框
         auto line = [this](int a, int b) {
             m_lineIndices->push_back(a);
             m_lineIndices->push_back(b);
@@ -214,11 +198,11 @@ public:
      * @brief 按顶点 ID 更新单个标记的颜色（不重建几何体）
      *
      * 从 m_sphereRanges 中查找该顶点对应的颜色数组分区范围，仅更新该
-     * 范围的颜色值，并保留标记的全部视觉结构："侧面/远平面/线框"
-     * 三层 alpha 分区与"上深下浅"的纵向方向渐变；调试坐标轴保持
-     * 固定 RGB 惯例色，不随高亮变色。与 clear() +
-     * appendFrustum() + finish() 的全量重建相比，此方法只需更新少量
-     * 颜色值 + 一次 dirty()，O(1) 复杂度，与总关键帧数无关。
+     * 范围的颜色值，并保留标记的全部视觉结构："投影屏/线框"分区 alpha
+     * 与"上深下浅"的纵向方向渐变；调试坐标轴保持固定 RGB 惯例色，
+     * 不随高亮变色。与 clear() + appendFrustum() + finish() 的全量
+     * 重建相比，此方法只需更新少量颜色值 + 一次 dirty()，O(1) 复杂度，
+     * 与总关键帧数无关。
      *
      * @param vertexId 顶点 ID（需已在 appendFrustum 中添加过）
      * @param newColor 新颜色（RGBA）
@@ -231,20 +215,15 @@ public:
         osg::Vec4 base = newColor;
         base.a() = m_opacity;  // 颜色更新不破坏整体不透明度
 
-        osg::Vec4 sideBase  = withAlpha(base, base.a() * kSideAlpha);
-        osg::Vec4 planeBase = withAlpha(base, base.a() * kPlaneAlpha);
-        osg::Vec4 lineBase  = withAlpha(lightened(base), base.a() * kLineAlpha);
-
-        // 按与 appendFrustum 相同的顶点顺序重放纵向渐变
+        // 按与 appendFrustum 相同的顶点顺序重放方向渐变
         unsigned int idx = range.startIndex;
-        auto assign = [this, &idx](const osg::Vec4& layerBase,
-                                   const float* ts, int count) {
+        auto assign = [this, &idx](const osg::Vec4& layerBase, const float* ts,
+                                   const float* mul, int count) {
             for (int i = 0; i < count; ++i)
-                (*m_colors)[idx++] = shaded(layerBase, ts[i]);
+                (*m_colors)[idx++] = shaded(layerBase, ts[i], mul[i]);
         };
-        assign(sideBase,  kSideGradT,  range.sideCount);
-        assign(planeBase, kPlaneGradT, range.planeCount);
-        assign(lineBase,  kLineGradT,  range.lineCount);
+        assign(base,            kPlaneGradT, kPlaneAlphaMul, range.planeCount);
+        assign(lightened(base), kLineGradT,  kLineAlphaMul,  range.lineCount);
         m_colors->dirty();
     }
 
@@ -261,7 +240,7 @@ public:
         auto it = m_sphereRanges.find(vertexId);
         if (it == m_sphereRanges.end()) return;
         const auto& range = it->second;
-        int total = range.sideCount + range.planeCount + range.lineCount;
+        int total = range.planeCount + range.lineCount;
         for (int i = 0; i < total; ++i)
             (*m_colors)[range.startIndex + i].a() = alpha;
         // 局部坐标轴（独立数组）同步淡化
@@ -286,8 +265,8 @@ public:
     /**
      * @brief 设置顶点标记的整体不透明度
      *
-     * 按三层视觉分区重写当前颜色数组中的 alpha 值
-     * （侧面 × kSideAlpha、远平面 × kPlaneAlpha、线框 × kLineAlpha）；
+     * 按顶点 alpha 系数表重写当前颜色数组中的 alpha 值
+     * （投影屏 × kPlaneAlpha、线框 × kLineAlpha）；
      * 后续 appendFrustum() 新增的标记也会使用该不透明度。
      *
      * @param opacity 不透明度（0.0 全透明 ~ 1.0 不透明）
@@ -303,12 +282,12 @@ public:
         } else {
             for (auto& [id, range] : m_sphereRanges) {
                 unsigned int idx = range.startIndex;
-                for (int i = 0; i < range.sideCount; ++i)
-                    (*m_colors)[idx++].a() = opacity * kSideAlpha;
-                for (int i = 0; i < range.planeCount; ++i)
-                    (*m_colors)[idx++].a() = opacity * kPlaneAlpha;
-                for (int i = 0; i < range.lineCount; ++i)
-                    (*m_colors)[idx++].a() = opacity * kLineAlpha;
+                auto apply = [this, &idx, &opacity](const float* mul, int count) {
+                    for (int i = 0; i < count; ++i)
+                        (*m_colors)[idx++].a() = opacity * mul[i];
+                };
+                apply(kPlaneAlphaMul, range.planeCount);
+                apply(kLineAlphaMul,  range.lineCount);
                 for (int i = 0; i < range.axisCount; ++i)
                     (*m_axesColors)[range.axisStartIndex + i].a() =
                         opacity * kAxisAlpha;
@@ -359,53 +338,53 @@ private:
     /**
      * @brief 单个标记在颜色数组中的分区范围
      *
-     * 顶点按"侧面 → 远平面 → 线框"连续排布，记录三段长度即可在
+     * 顶点按"投影屏 → 线框"连续排布，记录各段长度即可在
      * updateSphereColor()/setOpacity() 中按分区应用不同的
      * alpha 与线框提亮，避免遍历所有标记。
      */
     struct SphereRange {
         unsigned int startIndex;  ///< 在 m_colors 中的起始索引
-        int sideCount  = 0;       ///< 侧面顶点数（锥顶 + 远平面四角 = 5）
-        int planeCount = 0;       ///< 远平面顶点数（4）
+        int planeCount = 0;       ///< 投影屏顶点数（4）
         int lineCount  = 0;       ///< 线框顶点数（锥顶 + 四角 = 5）
         unsigned int axisStartIndex = 0; ///< 在 m_axesColors 中的起始索引
         int axisCount = 0;        ///< 局部坐标轴顶点数（6；未启用为 0）
     };
 
     // —— 视锥体造型参数（单位 = 特征尺寸 R） ——
-    static constexpr float kDepth      = 2.0f;    ///< 视锥体深度（沿局部 +Z）
-    static constexpr float kHalfWidth  = 1.0f;    ///< 远平面半宽（16:9）
-    static constexpr float kHalfHeight = 0.5625f; ///< 远平面半高（9/16 × 半宽）
+    static constexpr float kDepth      = 0.5f;    ///< 视锥体深度（沿局部 +Z）
+    static constexpr float kHalfWidth  = 1.0f;    ///< 投影屏半宽（16:9）
+    static constexpr float kHalfHeight = 0.5625f; ///< 投影屏半高（9/16 × 半宽）
     // —— 纵向渐变（沿局部"下"方向标明朝向：上面深、下面浅） ——
     static constexpr float kTopShade    = 0.55f;  ///< 图像上方（局部 -Y）亮度系数
     static constexpr float kBottomShade = 1.15f;  ///< 图像下方（局部 +Y）亮度系数
-    // —— 三层视觉分区 alpha（再乘全局不透明度） ——
-    static constexpr float kSideAlpha  = 0.30f;  ///< 侧面：半透明
-    static constexpr float kPlaneAlpha = 0.55f;  ///< 远平面（影像屏）：较实
+    // —— 分区 alpha（再乘全局不透明度） ——
+    static constexpr float kPlaneAlpha = 0.55f;  ///< 投影屏填充面：较实
     static constexpr float kLineAlpha  = 0.95f;  ///< 线框：最亮
     // —— 每标记固定顶点布局（appendFrustum 的推入顺序） ——
-    static constexpr int kSideVerts  = 5;        ///< 锥顶 + 远平面四角
-    static constexpr int kPlaneVerts = 4;        ///< 远平面四角
+    static constexpr int kPlaneVerts = 4;        ///< 投影屏四角
     static constexpr int kLineVerts  = 5;        ///< 线框锥顶 + 四角
     // —— 渐变参数表（与 appendFrustum 顶点推入顺序一一对应） ——
-    // t：0 = 图像上方（局部 -Y，最深）、1 = 下方（+Y，最浅）、0.5 = 锥顶
-    static constexpr float kSideGradT[kSideVerts]   = {0.5f, 0.0f, 0.0f, 1.0f, 1.0f};
+    // t：0 = 图像上方（局部 -Y，最深）、1 = 下方（+Y，最浅）
     static constexpr float kPlaneGradT[kPlaneVerts] = {0.0f, 0.0f, 1.0f, 1.0f};
     static constexpr float kLineGradT[kLineVerts]   = {0.5f, 0.0f, 0.0f, 1.0f, 1.0f};
+    // —— 顶点 alpha 系数表（同上顺序） ——
+    static constexpr float kPlaneAlphaMul[kPlaneVerts] = {kPlaneAlpha, kPlaneAlpha,
+                                                          kPlaneAlpha, kPlaneAlpha};
+    static constexpr float kLineAlphaMul[kLineVerts]   = {kLineAlpha, kLineAlpha,
+                                                          kLineAlpha, kLineAlpha, kLineAlpha};
     // —— 调试局部坐标轴 ——
     static constexpr float kAxisLen   = 1.0f;    ///< 轴长（× 特征尺寸 R）
     static constexpr float kAxisAlpha = 0.95f;   ///< 坐标轴不透明度系数（× 全局）
 
-    /** @brief appendFrustum 公共前置：计算分区基色并注册追踪范围 */
+    /** @brief appendFrustum 公共前置：准备分区基色并注册追踪范围 */
     void beginAppend(const osg::Vec4& color, long vertexId) {
         osg::Vec4 base = color;
         base.a() *= m_opacity;  // 应用全局不透明度
-        m_sideBase  = withAlpha(base, base.a() * kSideAlpha);
-        m_planeBase = withAlpha(base, base.a() * kPlaneAlpha);
-        m_lineBase  = withAlpha(lightened(base), base.a() * kLineAlpha);
+        m_planeBase = base;             // 投影屏 alpha 按顶点系数表逐点应用
+        m_lineBase  = lightened(base);  // 线框整体提亮
         if (vertexId >= 0) {
             m_sphereRanges[vertexId] = {static_cast<unsigned int>(m_colors->size()),
-                                        0, 0, 0};
+                                        0, 0};
         }
     }
 
@@ -414,14 +393,8 @@ private:
         if (vertexId < 0) return;
         auto& range = m_sphereRanges[vertexId];
         int total = static_cast<int>(m_colors->size()) - range.startIndex;
-        range.sideCount  = kSideVerts;
         range.planeCount = kPlaneVerts;
-        range.lineCount  = total - kSideVerts - kPlaneVerts;
-    }
-
-    /** @brief 返回 alpha 被替换为 @p a 的颜色副本 */
-    static osg::Vec4 withAlpha(const osg::Vec4& c, float a) {
-        return osg::Vec4(c.r(), c.g(), c.b(), a);
+        range.lineCount  = total - kPlaneVerts;
     }
 
     /** @brief 同色系提亮：RGB 各 × 0.5 + 0.5（用于线框勾边） */
@@ -432,15 +405,15 @@ private:
                          c.a());
     }
 
-    /** @brief 纵向渐变：t = 0 图像上方（局部 -Y）× kTopShade 最深，
-     *         t = 1 图像下方（局部 +Y）× kBottomShade 最浅，线性插值，
-     *         只调 RGB 不动 alpha */
-    static osg::Vec4 shaded(const osg::Vec4& base, float t) {
+    /** @brief 计算顶点最终颜色：RGB 按 @p t 做纵向方向渐变
+     *         （t = 0 图像上方 × kTopShade 最深 → t = 1 下方 × kBottomShade
+     *         最浅，线性插值并钳制），alpha 取 base.a() × @p alphaMul */
+    static osg::Vec4 shaded(const osg::Vec4& base, float t, float alphaMul) {
         float f = kTopShade + t * (kBottomShade - kTopShade);
         return osg::Vec4(std::min(1.0f, base.r() * f),
                          std::min(1.0f, base.g() * f),
                          std::min(1.0f, base.b() * f),
-                         base.a());
+                         base.a() * alphaMul);
     }
 
     /** @brief 追加锥顶局部坐标轴（调试用，X-ray 几何体）
@@ -485,17 +458,18 @@ private:
     }
 
     /** @brief 推入一个局部坐标点经 rot 旋转 + center 平移后的顶点，返回其索引。
-     *         颜色取 @p base 按 @p t 的纵向渐变（0 顶部深 → 1 底部浅） */
+     *         颜色取 @p base：RGB 按 @p t 纵向渐变（0 顶部深 → 1 底部浅），
+     *         alpha 乘 @p alphaMul */
     int pushVertex(float lx, float ly, float lz,
                    const osg::Vec3d& center, const Eigen::Matrix3f& rot,
-                   const osg::Vec4& base, float t) {
+                   const osg::Vec4& base, float t, float alphaMul) {
         Eigen::Vector3f local(lx, ly, lz);
         Eigen::Vector3f world = rot * local;
         m_verts->push_back(osg::Vec3(
             center.x() + world.x(),
             center.y() + world.y(),
             center.z() + world.z()));
-        m_colors->push_back(shaded(base, t));
+        m_colors->push_back(shaded(base, t, alphaMul));
         return static_cast<int>(m_verts->size()) - 1;
     }
 
@@ -507,7 +481,7 @@ private:
     osg::ref_ptr<osg::Geometry> m_geom;            ///< 标记几何体
     osg::ref_ptr<osg::Vec3Array> m_verts;          ///< 标记顶点数组
     osg::ref_ptr<osg::Vec4Array> m_colors;         ///< 标记颜色数组
-    osg::ref_ptr<osg::DrawElementsUInt> m_indices;     ///< 面片索引数组
+    osg::ref_ptr<osg::DrawElementsUInt> m_indices;     ///< 投影屏索引数组
     osg::ref_ptr<osg::DrawElementsUInt> m_lineIndices; ///< 线框索引数组
 
     osg::ref_ptr<osg::Geometry> m_axesGeom;            ///< 坐标轴几何体（X-ray）
@@ -515,9 +489,8 @@ private:
     osg::ref_ptr<osg::Vec4Array> m_axesColors;         ///< 坐标轴颜色数组
     osg::ref_ptr<osg::DrawElementsUInt> m_axesIndices; ///< 坐标轴索引数组
 
-    osg::Vec4 m_sideBase;    ///< 当前标记侧面基色（append 期间临时使用）
-    osg::Vec4 m_planeBase;   ///< 当前标记远平面基色（append 期间临时使用）
-    osg::Vec4 m_lineBase;    ///< 当前标记线框基色（append 期间临时使用）
+    osg::Vec4 m_planeBase;   ///< 当前标记投影屏基色（append 期间临时使用）
+    osg::Vec4 m_lineBase;    ///< 当前标记线框基色（已提亮，同上）
 
     /** @brief 顶点 ID → 颜色数组分区范围的映射（用于增量颜色更新）
      *         由 beginAppend()/endAppend() 在添加标记时填充 */

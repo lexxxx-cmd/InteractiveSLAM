@@ -740,7 +740,7 @@ private:
     // —— 状态配置 ——
     bool m_hasGraph    = false;   ///< 是否有已加载的图数据
     bool m_drawClouds  = true;    ///< 是否绘制点云
-    bool m_drawLocalAxes = true;  ///< 是否绘制视锥体局部坐标轴（调试用）
+    bool m_drawLocalAxes = false;  ///< 是否绘制视锥体局部坐标轴（调试用）
     float m_sphereRadius  = 1.0f; ///< 球体半径
     float m_vertexOpacity = 1.0f; ///< 顶点位姿标记不透明度（1.0 不透明）
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
