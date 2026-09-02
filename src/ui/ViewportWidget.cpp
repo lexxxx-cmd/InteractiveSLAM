@@ -568,40 +568,48 @@ void ViewportWidget::exitFirstPersonMode() {
 }
 
 /**
- * @brief 事件过滤器：第一人称模式下拦截 osgQOpenGLWidget 的键盘事件
+ * @brief 事件过滤器：拦截 osgQOpenGLWidget 的键盘事件驱动第一人称模式
  *
- * - Shift 按下 → 切换/退出第一人称模式；
- * - W/A/S/D 按下/释放 → 写入行走键状态（不转发给 OSG）。
+ * - Shift 按下 → 在任意状态下切换第一人称模式（进入/退出）；
+ * - 第一人称模式下 W/A/S/D 按下/释放 → 写入行走键状态（不转发给 OSG）。
  * 其余事件一律放行。osgQOpenGLWidget 默认无键盘焦点策略，
- * 已在构造时设为 StrongFocus。
+ * 已在构造时设为 StrongFocus（点击视口一次即获得焦点）。
  */
 bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == m_osgWidget && m_fpActive) {
+    if (watched == m_osgWidget) {
         switch (event->type()) {
         case QEvent::KeyPress: {
             auto* ke = static_cast<QKeyEvent*>(event);
             if (ke->isAutoRepeat()) break;
-            switch (ke->key()) {
-            case Qt::Key_Shift:
-                exitFirstPersonMode();
+            // Shift 在两种状态下都可切换（进入/退出第一人称）
+            if (ke->key() == Qt::Key_Shift) {
+                if (m_fpActive) exitFirstPersonMode();
+                else enterFirstPersonMode();
                 return true;
-            case Qt::Key_W: m_fpManip->setKey('W', true); return true;
-            case Qt::Key_A: m_fpManip->setKey('A', true); return true;
-            case Qt::Key_S: m_fpManip->setKey('S', true); return true;
-            case Qt::Key_D: m_fpManip->setKey('D', true); return true;
-            default: break;
+            }
+            // WASD 仅在第一人称模式下作为行走键拦截
+            if (m_fpActive) {
+                switch (ke->key()) {
+                case Qt::Key_W: m_fpManip->setKey('W', true); return true;
+                case Qt::Key_A: m_fpManip->setKey('A', true); return true;
+                case Qt::Key_S: m_fpManip->setKey('S', true); return true;
+                case Qt::Key_D: m_fpManip->setKey('D', true); return true;
+                default: break;
+                }
             }
             break;
         }
         case QEvent::KeyRelease: {
             auto* ke = static_cast<QKeyEvent*>(event);
             if (ke->isAutoRepeat()) break;
-            switch (ke->key()) {
-            case Qt::Key_W: m_fpManip->setKey('W', false); return true;
-            case Qt::Key_A: m_fpManip->setKey('A', false); return true;
-            case Qt::Key_S: m_fpManip->setKey('S', false); return true;
-            case Qt::Key_D: m_fpManip->setKey('D', false); return true;
-            default: break;
+            if (m_fpActive) {
+                switch (ke->key()) {
+                case Qt::Key_W: m_fpManip->setKey('W', false); return true;
+                case Qt::Key_A: m_fpManip->setKey('A', false); return true;
+                case Qt::Key_S: m_fpManip->setKey('S', false); return true;
+                case Qt::Key_D: m_fpManip->setKey('D', false); return true;
+                default: break;
+                }
             }
             break;
         }
