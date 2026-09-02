@@ -41,7 +41,9 @@ struct BagImportConfig {
     double meterGap = 1.0;              ///< 关键帧抽稀：累计平移阈值（米）
     double degGap = 30.0;               ///< 关键帧抽稀：累计旋转阈值（度）
 
-    std::string outputDir;              ///< 输出根目录（空 = 临时目录）
+    // 输出根目录由程序内部赋值：项目模式 = 项目数据目录，非项目模式 = 临时目录
+    //（不再从 bag_import.yaml 或导入弹窗读取）
+    std::string outputDir;
     bool saveFullCloud = true;          ///< 是否保存全分辨率 raw.pcd
 };
 

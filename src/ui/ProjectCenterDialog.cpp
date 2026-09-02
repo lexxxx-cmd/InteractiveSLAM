@@ -475,6 +475,7 @@ bool ProjectCenterDialog::startImport(const ProjectInfo& info) {
     BagOpenDialog dlg(topics, cfg, this);
     if (dlg.exec() != QDialog::Accepted) return false;
     cfg = dlg.config();
+    // 输出目录固定为项目数据目录（导入弹窗不再提供输出目录设定）
     cfg.outputDir = info.resolvedDataDir().toStdString();
 
     // 先落盘 processing 状态再交给后台导入（MainWindow 完成后写 completed/failed）

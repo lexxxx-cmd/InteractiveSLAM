@@ -8,12 +8,10 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
-#include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QToolButton>
@@ -58,8 +56,7 @@ hdl_graph_slam::BagImportConfig BagOpenDialog::config() const {
     if (m_meterGapSpin)   cfg.meterGap = m_meterGapSpin->value();
     if (m_degGapSpin)     cfg.degGap   = m_degGapSpin->value();
 
-    // 输出
-    if (m_outputDirEdit)  cfg.outputDir = m_outputDirEdit->text().trimmed().toStdString();
+    // 保存选项（输出目录由程序内部决定，不再提供设定）
     if (m_saveFullCloudCb) cfg.saveFullCloud = m_saveFullCloudCb->isChecked();
 
     return cfg;
@@ -209,20 +206,6 @@ void BagOpenDialog::setupUi(const QStringList& topics,
     // ============ 输出 ============
     auto* outGroup = new QGroupBox(tr("Output"));
     auto* outForm = new QFormLayout(outGroup);
-
-    auto* dirRow = new QHBoxLayout;
-    m_outputDirEdit = new QLineEdit;
-    m_outputDirEdit->setText(QString::fromStdString(defaults.outputDir));
-    m_outputDirEdit->setPlaceholderText(tr("(empty = temporary directory)"));
-    dirRow->addWidget(m_outputDirEdit, 1);
-    auto* browseBtn = new QPushButton(tr("Browse..."));
-    connect(browseBtn, &QPushButton::clicked, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(
-            this, tr("Choose Output Directory"), m_outputDirEdit->text());
-        if (!dir.isEmpty()) m_outputDirEdit->setText(dir);
-    });
-    dirRow->addWidget(browseBtn);
-    outForm->addRow(tr("Output directory:"), dirRow);
 
     m_saveFullCloudCb = new QCheckBox(tr("Save full-resolution raw.pcd"));
     m_saveFullCloudCb->setChecked(defaults.saveFullCloud);

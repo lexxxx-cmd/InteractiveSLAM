@@ -279,7 +279,6 @@ BagImportConfig BagImporter::loadConfig(const std::string& yamlPath) {
         cfg.passthroughMode = getParamOrDefault<bool>(root, "passthrough_mode", cfg.passthroughMode);
         cfg.meterGap        = getParamOrDefault<double>(root, "meter_gap", cfg.meterGap);
         cfg.degGap          = getParamOrDefault<double>(root, "deg_gap", cfg.degGap);
-        cfg.outputDir       = getParamOrDefault<std::string>(root, "output_dir", cfg.outputDir);
         cfg.saveFullCloud   = getParamOrDefault<bool>(root, "save_full_cloud", cfg.saveFullCloud);
     } catch (const YAML::Exception& e) {
         std::cerr << "[BagImporter] YAML parse error: " << e.what()

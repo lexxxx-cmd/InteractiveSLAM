@@ -27,8 +27,8 @@ meter_gap: 1.0
 deg_gap: 30.0
 
 # -------------------- 输出 --------------------
-# 生成的标准地图目录（含 keyframes/graph.g2o 与 keyframes/NNNNNN/）
-# 留空 = 使用系统临时目录（加载后可用"保存地图"另存）
-output_dir: "E:/bag_out"
+# 输出目录由程序内部决定，不再从本文件读取：
+#   非项目模式 = 系统临时目录（加载后可用"保存地图"另存）
+#   项目模式   = 项目数据目录
 # 是否保存全分辨率点云 raw.pcd（false 时仅 cloud.pcd）
 save_full_cloud: true

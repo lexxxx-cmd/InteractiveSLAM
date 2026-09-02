@@ -31,7 +31,6 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QSettings>
-#include <QAbstractButton>
 #include <QMenu>
 #include <QDialog>
 #include <QFormLayout>
@@ -577,8 +576,9 @@ void MainWindow::onOpenMap() {
  * @brief 打开 ROS1 bag 文件（按 SCPGO 数据流解析）
  *
  * 流程：选择 .bag → 读取 bag 索引列出 topic → 弹配置对话框（topic/外参/
- * 抽稀/输出，以 config/bag_import.yaml 为默认预填）→ GraphManager::
- * openBagFile() 用弹窗返回的完整配置后台解析 → 自动加载生成的地图。
+ * 抽稀/保存选项，以 config/bag_import.yaml 为默认预填）→ GraphManager::
+ * openBagFile() 用弹窗返回的完整配置后台解析（输出到新建的临时地图目录）
+ * → 自动加载生成的地图。
  */
 void MainWindow::onOpenBag() {
     QString bagPath = QFileDialog::getOpenFileName(
@@ -605,37 +605,13 @@ void MainWindow::onOpenBag() {
     QStringList topics;
     for (auto& t : topicsStd) topics << QString::fromStdString(t);
 
-    // 对话框：以 yaml 配置为默认值预填（topic + 外参 + 抽稀 + 输出），
-    // 用户可编辑全部导入参数；确认后返回完整配置供后台导入
+    // 对话框：以 yaml 配置为默认值预填（topic + 外参 + 抽稀 + 保存选项），
+    // 用户可编辑导入参数；确认后返回完整配置供后台导入。
+    // 输出目录不在此设定：GraphManager 使用新建的临时地图目录
     auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
     BagOpenDialog dlg(topics, cfg, this);
     if (dlg.exec() != QDialog::Accepted) return;
     cfg = dlg.config();
-
-    // 输出目录非空：残留旧地图文件会与新数据混合（如 000003/ 等残留子目录
-    // 不会自动清除），导入前强制用户确认清空（清空为永久删除，不可恢复）
-    if (!cfg.outputDir.empty() &&
-        hdl_graph_slam::BagImporter::isOutputDirNonEmpty(cfg.outputDir)) {
-        const QString dir = QString::fromStdString(cfg.outputDir);
-        QMessageBox box(this);
-        box.setIcon(QMessageBox::Warning);
-        box.setWindowTitle(tr("Output Directory Not Empty"));
-        box.setText(tr("The output directory is not empty:\n%1\n\n"
-                       "Importing will permanently delete all existing content "
-                       "in this directory (cannot be undone).").arg(dir));
-        auto* clearBtn = box.addButton(tr("Clear & Import"), QMessageBox::DestructiveRole);
-        box.addButton(QMessageBox::Cancel);
-        box.exec();
-        QAbstractButton* clicked = box.clickedButton();
-        if (clicked != clearBtn) return;  // 取消（含关闭窗口）→ 中止导入
-        // 清空目录下所有内容（保留目录本身），失败则中止导入
-        if (!hdl_graph_slam::BagImporter::clearDirectory(cfg.outputDir)) {
-            QMessageBox::warning(
-                this, tr("Open Bag"),
-                tr("Failed to clear output directory:\n%1").arg(dir));
-            return;
-        }
-    }
 
     m_manager->openBagFile(QUrl::fromLocalFile(bagPath), cfg);
 }

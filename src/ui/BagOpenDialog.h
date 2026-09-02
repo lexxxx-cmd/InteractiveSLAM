@@ -12,7 +12,7 @@
  * 除 topic 外，弹窗还提供 yaml 中其余导入参数的 UI 配置（预填 yaml 值）：
  *   - Lidar↔IMU 外参（calib_r 3×3 行主序 + calib_t 3 个）
  *   - 关键帧抽稀（passthrough_mode / meter_gap / deg_gap）
- *   - 输出（output_dir 留空=临时目录 / save_full_cloud）
+ *   - 输出（save_full_cloud；输出目录由程序内部决定，不再提供设定）
  * 用户确认后经 config() 返回完整 BagImportConfig，供后台导入使用。
  */
 #pragma once
@@ -25,7 +25,6 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QCheckBox;
-class QLineEdit;
 
 class BagOpenDialog : public QDialog {
     Q_OBJECT
@@ -34,7 +33,7 @@ public:
     /**
      * @brief 构造函数
      * @param topics    bag 内可用 topic 列表
-     * @param defaults  yaml 配置的默认导入参数（topic/外参/抽稀/输出）
+     * @param defaults  yaml 配置的默认导入参数（topic/外参/抽稀/保存选项）
      * @param parent    父组件
      */
     explicit BagOpenDialog(const QStringList& topics,
@@ -49,7 +48,7 @@ public:
     /**
      * @brief 返回用户编辑后的完整导入配置
      *
-     * topic 取下拉框当前值，外参/抽稀/输出取各控件当前值
+     * topic 取下拉框当前值，外参/抽稀/保存选项取各控件当前值
      * （以构造时传入的 yaml 默认值初始化，未改动部分保持一致）。
      */
     hdl_graph_slam::BagImportConfig config() const;
@@ -73,8 +72,7 @@ private:
     QDoubleSpinBox* m_meterGapSpin = nullptr;
     QDoubleSpinBox* m_degGapSpin   = nullptr;
 
-    // 输出
-    QLineEdit*      m_outputDirEdit = nullptr;
+    // 输出（输出目录由程序内部决定，不再提供设定）
     QCheckBox*      m_saveFullCloudCb = nullptr;
 
     hdl_graph_slam::BagImportConfig m_defaults;  ///< 构造时的 yaml 默认值
