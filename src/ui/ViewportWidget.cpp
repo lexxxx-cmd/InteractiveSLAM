@@ -16,6 +16,7 @@
 
 #include <QVBoxLayout>
 #include <QColor>
+#include <QKeyEvent>
 #include <QResizeEvent>
 #include <QtConcurrent/QtConcurrent>
 #include <chrono>
@@ -32,6 +33,7 @@
 #include "backend/graph_manager.hpp"
 #include "visualizers/SpherePickingHandler.h"
 #include "visualizers/PointCloudBuilder.h"
+#include "ui/FirstPersonManipulator.h"
 #include "ui/OverlayPanelWidget.h"
 
 // ---------------------------------------------------------------------------
@@ -54,6 +56,9 @@ ViewportWidget::ViewportWidget(QWidget* parent)
     // 创建 OSG 嵌入部件
     m_osgWidget = new osgQOpenGLWidget(this);
     layout->addWidget(m_osgWidget);
+    // 键盘焦点：第一人称模式（Shift + WASD）需要接收键盘事件
+    m_osgWidget->setFocusPolicy(Qt::StrongFocus);
+    m_osgWidget->installEventFilter(this);
 
     // 初始化场景可视化器
     m_sceneViz = std::make_unique<GraphSceneVisualizer>();
@@ -475,6 +480,7 @@ void ViewportWidget::setLoopHighlight(long sourceId, const std::vector<long>& ca
 }
 
 void ViewportWidget::resetCamera() {
+    exitFirstPersonMode();
     restoreWheelZoomFactor();
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
@@ -501,6 +507,111 @@ void ViewportWidget::restoreWheelZoomFactor() {
     m_savedWheelZoomFactor = -1.0;
 }
 
+// ---------------------------------------------------------------------------
+// 第一人称模式（Shift 切换）
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 进入第一人称模式
+ *
+ * 从当前相机位姿取视线方向初始化 yaw/pitch，行走速度按场景包围球
+ * 半径设定；切换操作器到 FirstPersonManipulator（保留轨迹球实例，
+ * 退出时恢复并以第一人称位姿无缝衔接）。
+ */
+void ViewportWidget::enterFirstPersonMode() {
+    if (m_fpActive) return;
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer || !viewer->getSceneData()) return;
+    auto* trackball = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!trackball) return;
+
+    osg::Vec3d eye, center, up;
+    viewer->getCamera()->getViewMatrixAsLookAt(eye, center, up);
+    osg::Vec3d dir = center - eye;
+    if (dir.length2() < 1e-12) dir.set(0.0, 1.0, 0.0);
+
+    if (!m_fpManip) m_fpManip = new FirstPersonManipulator;
+    const double sceneR = viewer->getSceneData()->getBound().radius();
+    const double speed = std::max(sceneR * 0.15, 1.5);  // 米/秒，随场景尺度
+    m_fpManip->startFrom(eye, dir, speed);
+
+    m_savedManip = viewer->getCameraManipulator();
+    viewer->setCameraManipulator(m_fpManip.get(), false);  // false = 不重置 home
+    m_fpActive = true;
+    emit firstPersonModeChanged(true);
+}
+
+/**
+ * @brief 退出第一人称模式
+ *
+ * 取当前第一人称位姿，恢复轨迹球操作器并 setTransformation 到同一
+ * 位姿，视角无跳变衔接。
+ */
+void ViewportWidget::exitFirstPersonMode() {
+    if (!m_fpActive) return;
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) { m_fpActive = false; return; }
+
+    osg::Vec3d eye, dir;
+    m_fpManip->getPose(eye, dir);
+
+    viewer->setCameraManipulator(m_savedManip.get(), false);
+    auto* trackball = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (trackball) {
+        trackball->setTransformation(eye, eye + dir, osg::Vec3d(0.0, 0.0, 1.0));
+    }
+    m_savedManip = nullptr;
+    m_fpActive = false;
+    emit firstPersonModeChanged(false);
+}
+
+/**
+ * @brief 事件过滤器：第一人称模式下拦截 osgQOpenGLWidget 的键盘事件
+ *
+ * - Shift 按下 → 切换/退出第一人称模式；
+ * - W/A/S/D 按下/释放 → 写入行走键状态（不转发给 OSG）。
+ * 其余事件一律放行。osgQOpenGLWidget 默认无键盘焦点策略，
+ * 已在构造时设为 StrongFocus。
+ */
+bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_osgWidget && m_fpActive) {
+        switch (event->type()) {
+        case QEvent::KeyPress: {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            if (ke->isAutoRepeat()) break;
+            switch (ke->key()) {
+            case Qt::Key_Shift:
+                exitFirstPersonMode();
+                return true;
+            case Qt::Key_W: m_fpManip->setKey('W', true); return true;
+            case Qt::Key_A: m_fpManip->setKey('A', true); return true;
+            case Qt::Key_S: m_fpManip->setKey('S', true); return true;
+            case Qt::Key_D: m_fpManip->setKey('D', true); return true;
+            default: break;
+            }
+            break;
+        }
+        case QEvent::KeyRelease: {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            if (ke->isAutoRepeat()) break;
+            switch (ke->key()) {
+            case Qt::Key_W: m_fpManip->setKey('W', false); return true;
+            case Qt::Key_A: m_fpManip->setKey('A', false); return true;
+            case Qt::Key_S: m_fpManip->setKey('S', false); return true;
+            case Qt::Key_D: m_fpManip->setKey('D', false); return true;
+            default: break;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 /**
  * @brief 双击聚焦：相机飞到指定位姿球体正后上方，沿扫描方向看向球心
  *
@@ -515,6 +626,7 @@ void ViewportWidget::restoreWheelZoomFactor() {
  */
 void ViewportWidget::focusOnVertex(long vertexId) {
     if (!m_graph) return;
+    if (m_fpActive) exitFirstPersonMode();  // 聚焦使用轨迹球，先退出第一人称
     auto it = m_graph->keyframes.find(vertexId);
     if (it == m_graph->keyframes.end()) return;
     const auto& pose = it->second->estimate();   // Eigen::Isometry3d

@@ -658,7 +658,17 @@
         <translation>渲染层级：%1/%2</translation>
     </message>
     <message>
-        <location line="+19"/>
+        <location line="+8"/>
+        <source>First-person mode: drag to look, W/A/S/D to walk, wheel adjusts speed, Shift to exit</source>
+        <translation>第一人称模式：拖动鼠标转视角，W/A/S/D 行走，滚轮调节速度，按 Shift 退出</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>First-person mode off</source>
+        <translation>已退出第一人称模式</translation>
+    </message>
+    <message>
+        <location line="+18"/>
         <source>Vertex ID: %1</source>
         <translation>顶点 ID：%1</translation>
     </message>
@@ -699,14 +709,14 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+629"/>
+        <location line="+619"/>
         <location line="+25"/>
         <location line="+24"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
     <message>
-        <location line="-671"/>
+        <location line="-661"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -823,7 +833,7 @@
         <translation>高程颜色范围...</translation>
     </message>
     <message>
-        <location line="+158"/>
+        <location line="+148"/>
         <source>No output directory selected</source>
         <translation>未选择输出目录</translation>
     </message>
@@ -881,7 +891,7 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>项目「%1」已打开（空白项目，可稍后导入数据）</translation>
     </message>
     <message>
-        <location line="-706"/>
+        <location line="-696"/>
         <location line="+135"/>
         <source>Playback</source>
         <translation>播放轴</translation>
@@ -1007,7 +1017,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>ROS Bag 文件 (*.bag);;所有文件 (*)</translation>
     </message>
     <message>
-        <location line="+17"/>
+        <location line="+7"/>
         <location line="+8"/>
         <location line="+33"/>
         <source>Open Bag</source>
@@ -1186,7 +1196,7 @@ Importing will permanently delete all existing content in this directory (cannot
 <context>
     <name>ProjectCenterDialog</name>
     <message>
-        <location filename="../src/ui/ProjectCenterDialog.cpp" line="+50"/>
+        <location filename="../src/ui/ProjectCenterDialog.cpp" line="+62"/>
         <source>Project Center</source>
         <translation>项目中心</translation>
     </message>
@@ -1196,19 +1206,19 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>最近项目</translation>
     </message>
     <message>
-        <location line="+13"/>
+        <location line="+40"/>
         <source>Get Started</source>
         <translation>开始使用</translation>
     </message>
     <message>
         <location line="+4"/>
-        <location line="+365"/>
+        <location line="+385"/>
         <location line="+47"/>
         <source>New Project</source>
         <translation>新建项目</translation>
     </message>
     <message>
-        <location line="-409"/>
+        <location line="-429"/>
         <source>Set project name and location; optionally link a raw Bag file</source>
         <translation>设置项目名称和保存位置，可关联 Bag 原始数据</translation>
     </message>
@@ -1223,7 +1233,7 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>从最近列表或本地目录打开已有项目</translation>
     </message>
     <message>
-        <location line="+41"/>
+        <location line="+43"/>
         <source>Last opened: %1    Status: %2</source>
         <translation>最近打开: %1    状态: %2</translation>
     </message>
@@ -1233,7 +1243,7 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>未知</translation>
     </message>
     <message>
-        <location line="+128"/>
+        <location line="+141"/>
         <source>Choose Project Directory</source>
         <translation>选择项目目录</translation>
     </message>
@@ -1429,13 +1439,13 @@ Importing will permanently delete all existing content in this directory (cannot
 %1</translation>
     </message>
     <message>
-        <location line="+35"/>
+        <location line="+40"/>
         <source>Project name</source>
         <translation>项目名称</translation>
     </message>
     <message>
-        <location line="-258"/>
-        <location line="+259"/>
+        <location line="-263"/>
+        <location line="+264"/>
         <source>Project name:</source>
         <translation>项目名称:</translation>
     </message>

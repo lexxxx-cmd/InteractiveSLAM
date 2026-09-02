@@ -99,6 +99,15 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
         }
     });
 
+    // 第一人称模式提示：操作方式在状态栏显示
+    connect(m_viewport, &ViewportWidget::firstPersonModeChanged,
+            this, [this](bool active) {
+        statusBar()->showMessage(active
+            ? tr("First-person mode: drag to look, W/A/S/D to walk, "
+                 "wheel adjusts speed, Shift to exit")
+            : tr("First-person mode off"), 5000);
+    });
+
     // 右键上下文菜单：显示顶点/边信息，支持手动闭环操作和边删除
     connect(m_viewport, &ViewportWidget::contextMenuRequested,
             this, [this](long vertexId, long edgeId,

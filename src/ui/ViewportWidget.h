@@ -34,6 +34,7 @@ class osgQOpenGLWidget;
 class GraphManager;
 class OverlayPanelWidget;
 class SpherePickingHandler;
+class FirstPersonManipulator;
 
 namespace hdl_graph_slam {
 class InteractiveGraph;
@@ -129,6 +130,11 @@ public slots:
     void resetCamera();                      ///< 重置摄像机
     void restoreWheelZoomFactor();           ///< 恢复聚焦时提高的滚轮缩放系数
 
+    // === 第一人称模式（Shift 切换） ===
+    void enterFirstPersonMode();             ///< 进入第一人称模式
+    void exitFirstPersonMode();              ///< 退出并恢复轨迹球相机（位姿无缝衔接）
+    bool firstPersonActive() const { return m_fpActive; }
+
     /**
      * @brief 双击聚焦：相机移动到指定位姿球体局部 x 轴负方向，
      *        视线沿位姿朝向（局部 x 轴）看向球心，球心位于视角中心
@@ -202,6 +208,12 @@ signals:
     void sampleStrideChanged(int stride);
 
     /**
+     * @brief 第一人称模式切换信号（供状态栏提示操作方式）
+     * @param active true = 进入第一人称模式，false = 退出
+     */
+    void firstPersonModeChanged(bool active);
+
+    /**
      * @brief 右键上下文菜单请求信号
      * @param vertexId 选中顶点 ID（-1 表示未选中顶点）
      * @param edgeId   选中边 ID（-1 表示未选中边）
@@ -225,6 +237,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override; ///< 拦截第一人称模式的键盘事件（Shift 切换 / WASD 行走）
 
 private slots:
     void initOsg();          ///< OSG 初始化（osgQOpenGLWidget 准备就绪后调用）
@@ -271,4 +284,9 @@ private:
 
     // 双击聚焦状态
     double m_savedWheelZoomFactor = -1.0; ///< 聚焦前的滚轮缩放系数（-1 = 未修改）
+
+    // 第一人称模式状态
+    osg::ref_ptr<FirstPersonManipulator> m_fpManip;   ///< 第一人称操作器
+    osg::ref_ptr<osgGA::CameraManipulator> m_savedManip; ///< 进入前保存的轨迹球操作器
+    bool m_fpActive = false;                          ///< 是否处于第一人称模式
 };
