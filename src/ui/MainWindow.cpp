@@ -372,49 +372,47 @@ void MainWindow::setupMenus() {
 
     // 打开项目中心（新建/切换项目；加载前会先关闭当前地图）
     auto* openProjectAction = fileMenu->addAction(tr("Open &Project..."));
-    openProjectAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
     connect(openProjectAction, &QAction::triggered, this, &MainWindow::onOpenProjectCenter);
 
     // 打开地图目录
+    // 注意：文件菜单的 Ctrl 系快捷键已全部移除（第一人称模式 Ctrl=下降，
+    // 按住 Ctrl 行走时会误触发 Ctrl+W 关地图 / Ctrl+Q 退出程序等）
     auto* openAction = fileMenu->addAction(tr("&Open Map..."));
-    openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenMap);
 
     // 打开 ROS1 bag 文件（解析为地图后自动加载）
+    // 注意：不设 Ctrl 系快捷键——第一人称模式下 Ctrl 为下降键，
+    // 按住 Ctrl 行走时再按字母会误触发（如 Ctrl+W 关地图、Ctrl+Q 退出）
     auto* openBagAction = fileMenu->addAction(tr("Open &Bag File..."));
-    openBagAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_O));
     connect(openBagAction, &QAction::triggered, this, &MainWindow::onOpenBag);
 
     // 关闭当前地图
     auto* closeAction = fileMenu->addAction(tr("&Close Map"));
-    closeAction->setShortcut(QKeySequence::Close);
     connect(closeAction, &QAction::triggered, this, &MainWindow::onCloseMap);
 
     fileMenu->addSeparator();
 
-    // 快速保存：直接写入项目数据目录/地图来源目录（Ctrl+S，不弹窗）
+    // 快速保存：直接写入项目数据目录/地图来源目录（不弹窗）
     auto* saveAction = fileMenu->addAction(tr("&Save"));
-    saveAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
     connect(saveAction, &QAction::triggered, this, &MainWindow::onSaveMap);
 
     // 另存为：弹窗选择保存内容与目标目录
     auto* saveMapAction = fileMenu->addAction(tr("Save Map &As..."));
-    saveMapAction->setShortcut(QKeySequence::SaveAs);
     connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMapAs);
 
     fileMenu->addSeparator();
 
     // 退出应用程序
     auto* quitAction = fileMenu->addAction(tr("&Quit"));
-    quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
 
     // ---- 视图菜单 ----
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
-    // 重置摄像机视角（按 R 键）
+    // 重置摄像机视角
+    // 注意：不设单键 R 快捷键——R 紧邻 WASD，第一人称行走时易误触
+    // （重置相机同时会退出第一人称模式）
     auto* resetCamAction = viewMenu->addAction(tr("&Reset Camera"));
-    resetCamAction->setShortcut(QKeySequence(Qt::Key_R));
     connect(resetCamAction, &QAction::triggered, this, &MainWindow::onResetCamera);
 
     viewMenu->addSeparator();
@@ -458,9 +456,9 @@ void MainWindow::setupMenus() {
     // ==================== 优化相关（子菜单） ====================
     auto* optMenu = settingsMenu->addMenu(tr("Optimization"));
 
-    // 图优化（Ctrl+Shift+O）
+    // 图优化（不设快捷键：Ctrl 系与第一人称下降键冲突，且历史上与
+    // "打开项目"快捷键重复）
     auto* optimizeAction = optMenu->addAction(tr("&Optimize"));
-    optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
     m_optimizeAction = optimizeAction;
     connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
 
