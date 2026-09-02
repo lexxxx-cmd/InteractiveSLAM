@@ -23,6 +23,14 @@ class QLabel;
 class QListWidgetItem;
 class QLineEdit;
 
+/**
+ * @brief 定位 bag 导入配置文件（可执行文件旁 → 工作目录）
+ * @return 找到的 yaml 路径；未找到返回空串（调用方应使用默认参数，
+ *         不要把空路径传给 BagImporter::loadConfig——它会打 YAML 解析
+ *         错误日志并回退默认值）
+ */
+QString findBagImportConfigYaml();
+
 class ProjectCenterDialog : public QDialog {
     Q_OBJECT
 public:

@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QSettings>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -44,6 +45,17 @@ void pushRecentDir(const QString& dir) {
 }
 
 }  // namespace
+
+QString findBagImportConfigYaml() {
+    const QStringList candidates = {
+        QCoreApplication::applicationDirPath() + "/config/bag_import.yaml",
+        QDir::currentPath() + "/config/bag_import.yaml",
+    };
+    for (const auto& p : candidates) {
+        if (QFileInfo::exists(p)) return p;
+    }
+    return QString();
+}
 
 ProjectCenterDialog::ProjectCenterDialog(QWidget* parent)
     : QDialog(parent) {
@@ -454,7 +466,12 @@ bool ProjectCenterDialog::startImport(const ProjectInfo& info) {
     QStringList topics;
     for (auto& t : topicsStd) topics << QString::fromStdString(t);
 
-    auto cfg = hdl_graph_slam::BagImporter::loadConfig(std::string());
+    // 优先用找到的 bag_import.yaml 预填默认值；未找到时直接默认构造
+    // （不要把空路径传给 loadConfig——会打 "YAML parse error" 日志再回退）
+    const QString yamlPath = findBagImportConfigYaml();
+    auto cfg = yamlPath.isEmpty()
+                   ? hdl_graph_slam::BagImportConfig{}
+                   : hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
     BagOpenDialog dlg(topics, cfg, this);
     if (dlg.exec() != QDialog::Accepted) return false;
     cfg = dlg.config();

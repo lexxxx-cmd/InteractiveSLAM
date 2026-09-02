@@ -580,17 +580,7 @@ void MainWindow::onOpenBag() {
     if (bagPath.isEmpty()) return;
 
     // 定位导入配置文件：优先可执行文件旁，其次当前工作目录，再其次用默认参数
-    QString yamlPath;
-    const QStringList candidates = {
-        QCoreApplication::applicationDirPath() + "/config/bag_import.yaml",
-        QDir::currentPath() + "/config/bag_import.yaml",
-    };
-    for (const auto& p : candidates) {
-        if (QFileInfo::exists(p)) {
-            yamlPath = p;
-            break;
-        }
-    }
+    const QString yamlPath = findBagImportConfigYaml();
     if (yamlPath.isEmpty()) {
         QMessageBox::information(
             this, tr("Open Bag"),
