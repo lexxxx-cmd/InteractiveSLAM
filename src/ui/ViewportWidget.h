@@ -127,6 +127,7 @@ public slots:
     void setHiddenEdges(const std::set<long>& ids);     ///< 设置隐藏边集合
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);  ///< 闭环高亮
     void resetCamera();                      ///< 重置摄像机
+    void restoreWheelZoomFactor();           ///< 恢复聚焦时提高的滚轮缩放系数
 
     /**
      * @brief 双击聚焦：相机移动到指定位姿球体局部 x 轴负方向，
@@ -267,4 +268,7 @@ private:
     // LOD 模式状态
     bool m_lodManualMode = true;  ///< true = 手动固定层级（默认手动，不随距离自动切换）
     int  m_lodManualLevel = 1;    ///< 手动模式下固定的目标层级（默认 level 1 = 1/2 点数）
+
+    // 双击聚焦状态
+    double m_savedWheelZoomFactor = -1.0; ///< 聚焦前的滚轮缩放系数（-1 = 未修改）
 };

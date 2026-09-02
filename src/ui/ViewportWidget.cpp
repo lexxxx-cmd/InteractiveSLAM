@@ -270,8 +270,9 @@ void ViewportWidget::initOsg() {
         [this](long vertexId) {
             QMetaObject::invokeMethod(this, [this, vertexId]() {
                 if (vertexId < 0) {
-                    // 双击空白处：取消聚焦淡化，恢复整体不透明度
+                    // 双击空白处：取消聚焦淡化，恢复整体不透明度与滚轮缩放系数
                     m_sceneViz->setFocusedVertex(-1);
+                    restoreWheelZoomFactor();
                     m_osgWidget->update();
                     return;
                 }
@@ -474,11 +475,30 @@ void ViewportWidget::setLoopHighlight(long sourceId, const std::vector<long>& ca
 }
 
 void ViewportWidget::resetCamera() {
+    restoreWheelZoomFactor();
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
         viewer->home();
     }
     m_osgWidget->update();
+}
+
+/**
+ * @brief 恢复聚焦时提高的滚轮缩放系数
+ *
+ * 由 resetCamera 与"双击空白处取消聚焦"调用。
+ */
+void ViewportWidget::restoreWheelZoomFactor() {
+    if (m_savedWheelZoomFactor < 0.0) return;  // 未处于聚焦加速状态
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (viewer) {
+        auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+            viewer->getCameraManipulator());
+        if (manip) {
+            manip->setWheelZoomFactor(m_savedWheelZoomFactor);
+        }
+    }
+    m_savedWheelZoomFactor = -1.0;
 }
 
 /**
@@ -527,6 +547,14 @@ void ViewportWidget::focusOnVertex(long vertexId) {
         viewer->getCameraManipulator());
     if (manip) {
         manip->setTransformation(eye, center, up);
+        // 聚焦后相机距离骤减（约 radius×12，可能仅数米），而 Trackball 的
+        // 滚轮/平移步长都与当前距离成正比，退回工作视距会变得极慢。
+        // 提高滚轮缩放系数（OSG 默认 0.1），保存原值供 resetCamera /
+        // 双击空白处取消聚焦时恢复
+        if (m_savedWheelZoomFactor < 0.0) {
+            m_savedWheelZoomFactor = manip->getWheelZoomFactor();
+        }
+        manip->setWheelZoomFactor(0.5);
     }
     // 聚焦淡化：全体标记透明度压到最低，目标锥体保持稍高不透明度
     m_sceneViz->setFocusedVertex(vertexId);
