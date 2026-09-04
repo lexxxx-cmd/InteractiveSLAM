@@ -26,7 +26,6 @@
 #include "backend/graph_manager.hpp"
 #include "data/hdl_graph_slam/bag_importer.hpp"
 
-#include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QSettings>
@@ -394,14 +393,10 @@ void MainWindow::setupMenus() {
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
 
     // 打开项目中心（新建/切换项目；加载前会先关闭当前地图）
+    // 外部地图目录经"新建项目 → 关联已有地图目录"或项目中心选中
+    // 非项目目录时的"直接加载"入口进入，文件菜单不再单设"打开地图"
     auto* openProjectAction = fileMenu->addAction(tr("Open &Project..."));
     connect(openProjectAction, &QAction::triggered, this, &MainWindow::onOpenProjectCenter);
-
-    // 打开地图目录
-    // 注意：文件菜单的 Ctrl 系快捷键已全部移除（第一人称模式 Ctrl=下降，
-    // 按住 Ctrl 行走时会误触发 Ctrl+W 关地图 / Ctrl+Q 退出程序等）
-    auto* openAction = fileMenu->addAction(tr("&Open Map..."));
-    connect(openAction, &QAction::triggered, this, &MainWindow::onOpenMap);
 
     // 关闭当前地图
     auto* closeAction = fileMenu->addAction(tr("&Close Map"));
@@ -574,21 +569,6 @@ void MainWindow::setupMenus() {
 // ---------------------------------------------------------------------------
 // 槽函数 — 文件操作
 // ---------------------------------------------------------------------------
-
-/**
- * @brief 打开地图目录
- *
- * 弹出目录选择对话框，调用 GraphManager 加载地图数据（.g2o 及相关点云信息）。
- */
-void MainWindow::onOpenMap() {
-    QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Open Map Directory"), QString(),
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-
-    if (dir.isEmpty()) return;
-
-    m_manager->openMapData(QUrl::fromLocalFile(dir));
-}
 
 /**
  * @brief 关闭当前地图

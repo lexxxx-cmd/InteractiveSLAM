@@ -531,8 +531,30 @@ void ProjectCenterDialog::onNewProject() {
         if (!f.isEmpty()) bagEdit->setText(f);
     });
 
+    // 已有地图目录（可选）：关联后项目 data_dir 直接指向该目录（引用，
+    // 不拷贝），打开/保存均作用于原目录
+    auto* mapEdit = new QLineEdit;
+    mapEdit->setPlaceholderText(tr("(Optional) Link an existing map directory (graph.g2o)"));
+    auto* mapBrowse = new QPushButton(tr("Browse..."));
+    auto* mapRow = new QHBoxLayout;
+    mapRow->addWidget(mapEdit, 1);
+    mapRow->addWidget(mapBrowse);
+    form->addRow(tr("Existing map directory:"), mapRow);
+    connect(mapBrowse, &QPushButton::clicked, this, [this, mapEdit]() {
+        QString d = QFileDialog::getExistingDirectory(
+            this, tr("Choose Map Directory"), mapEdit->text(),
+            QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+        if (!d.isEmpty()) mapEdit->setText(d);
+    });
+
     auto* dataEdit = new QLineEdit(ProjectManager::kDefaultDataDir);
     form->addRow(tr("Data directory name:"), dataEdit);
+    // 关联已有地图目录时数据目录名不生效，置灰提示
+    auto onDataSourceChanged = [mapEdit, dataEdit]() {
+        dataEdit->setEnabled(mapEdit->text().trimmed().isEmpty());
+    };
+    connect(mapEdit, &QLineEdit::textChanged, this, onDataSourceChanged);
+    onDataSourceChanged();
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Create"));
@@ -547,15 +569,40 @@ void ProjectCenterDialog::onNewProject() {
         QMessageBox::warning(this, tr("New Project"), tr("Project name cannot be empty"));
         return;
     }
+
+    // 数据来源三选一：已有地图目录（引用）> Bag 导入 > 空白项目
+    const QString mapDir = QDir::cleanPath(mapEdit->text().trimmed());
+    const QString bagPath = bagEdit->text().trimmed();
+    if (!mapDir.isEmpty() && !bagPath.isEmpty()) {
+        QMessageBox::warning(this, tr("New Project"),
+                             tr("Choose either an existing map directory or a Bag file — not both."));
+        return;
+    }
+    if (!mapDir.isEmpty() && !QFile::exists(mapDir + "/graph.g2o")) {
+        QMessageBox::warning(this, tr("New Project"),
+                             tr("Not a valid map directory (missing graph.g2o):\n%1").arg(mapDir));
+        return;
+    }
+
+    // 关联已有地图目录时把绝对路径作为 data_dir 传入（create 原样记录，
+    // 不拷贝、不改动该目录内容）
     auto info = ProjectManager::create(name, locEdit->text().trimmed(),
-                                       bagEdit->text().trimmed(),
-                                       dataEdit->text().trimmed());
+                                       bagPath,
+                                       mapDir.isEmpty() ? dataEdit->text().trimmed()
+                                                        : mapDir);
     if (!info.valid) {
         QMessageBox::warning(this, tr("Create Project Failed"), info.errorString);
         return;
     }
 
     pushRecentDir(info.projectDir);
+
+    // 关联已有地图目录：数据已就绪，状态直接置 completed 并加载
+    if (!mapDir.isEmpty()) {
+        ProjectManager::setStatus(info.projectDir, "completed");
+        finalizeLoad(info);
+        return;
+    }
 
     // 边界判定：有 Bag → 确认清空后导入；无 Bag → 校验数据目录或空白打开
     if (!info.bagPath.isEmpty()) {

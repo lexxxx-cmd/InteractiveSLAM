@@ -70,7 +70,6 @@ public:
 
 private slots:
     void onOpenProjectCenter();    ///< 打开项目中心（文件菜单）
-    void onOpenMap();              ///< 打开地图目录（文件菜单）
     void onCloseMap();             ///< 关闭当前地图（文件菜单）
     void onSaveMap();              ///< 快速保存（Ctrl+S，直接存到项目数据目录/来源目录）
     void onSaveMapAs();            ///< 另存为（弹窗选择保存内容与目标目录）

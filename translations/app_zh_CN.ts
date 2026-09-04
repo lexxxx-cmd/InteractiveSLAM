@@ -957,11 +957,6 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>文件(&amp;F)</translation>
     </message>
     <message>
-        <location line="+8"/>
-        <source>&amp;Open Map...</source>
-        <translation>打开地图(&amp;O)...</translation>
-    </message>
-    <message>
         <location line="+5"/>
         <source>&amp;Close Map</source>
         <translation>关闭地图(&amp;C)</translation>
@@ -1003,11 +998,6 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <location line="+4"/>
         <source>Submap Merge Window</source>
         <translation>子图合并窗口</translation>
-    </message>
-    <message>
-        <location line="+96"/>
-        <source>Open Map Directory</source>
-        <translation>打开地图目录</translation>
     </message>
     <message>
         <location line="+20"/>
@@ -1477,6 +1467,28 @@ A blank project has been created; you can re-import later.</source>
 You can import data later in the main window.</source>
         <translation>项目「%1」已创建（未关联 Bag，数据目录为空）。
 进入主界面后可稍后导入数据。</translation>
+    </message>
+    <message>
+        <source>Existing map directory:</source>
+        <translation>已有地图目录：</translation>
+    </message>
+    <message>
+        <source>(Optional) Link an existing map directory (graph.g2o)</source>
+        <translation>（可选）关联已有地图目录（含 graph.g2o）</translation>
+    </message>
+    <message>
+        <source>Choose Map Directory</source>
+        <translation>选择地图目录</translation>
+    </message>
+    <message>
+        <source>Choose either an existing map directory or a Bag file — not both.</source>
+        <translation>已有地图目录和 Bag 文件只能二选一。</translation>
+    </message>
+    <message>
+        <source>Not a valid map directory (missing graph.g2o):
+%1</source>
+        <translation>不是有效的地图目录（缺少 graph.g2o）：
+%1</translation>
     </message>
 </context>
 <context>

@@ -157,7 +157,9 @@ public:
      * @param name       项目名称
      * @param parentDir  项目所在父目录
      * @param bagPath    原始 Bag 路径（可为空）
-     * @param dataDirName 数据目录名（相对项目根，默认 "map"）
+     * @param dataDirName 数据目录：相对项目根的目录名（默认 "map"，会被
+     *                    创建），或外部已有地图目录的绝对路径（"引用"语义，
+     *                    不拷贝、不改动该目录内容，要求其中已有 graph.g2o）
      * @return 创建好的元数据；失败时 valid=false
      */
     static ProjectInfo create(const QString& name, const QString& parentDir,
