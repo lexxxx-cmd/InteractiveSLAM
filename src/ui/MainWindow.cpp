@@ -102,7 +102,7 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             this, [this](bool active) {
         statusBar()->showMessage(active
             ? tr("First-person mode: drag to look, W/A/S/D to walk, "
-                 "Ctrl down, Space up, wheel adjusts speed, Shift to exit")
+                 "Q up, E down, wheel adjusts speed, Shift to exit")
             : tr("First-person mode off"), 5000);
     });
 
@@ -459,8 +459,8 @@ void MainWindow::setupMenus() {
     // ==================== 优化相关（子菜单） ====================
     auto* optMenu = settingsMenu->addMenu(tr("Optimization"));
 
-    // 图优化（不设快捷键：Ctrl 系与第一人称下降键冲突，且历史上与
-    // "打开项目"快捷键重复）
+    // 图优化（不设快捷键：历史上与"打开项目"快捷键重复，
+    // 且需避免与 WASD 行走键相互干扰）
     auto* optimizeAction = optMenu->addAction(tr("&Optimize"));
     m_optimizeAction = optimizeAction;
     connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);

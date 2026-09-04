@@ -897,8 +897,8 @@ Saving will permanently delete all existing content in this directory (cannot be
     </message>
     <message>
         <location line="-339"/>
-        <source>First-person mode: drag to look, W/A/S/D to walk, Ctrl down, Space up, wheel adjusts speed, Shift to exit</source>
-        <translation>第一人称模式：拖动鼠标转视角，W/A/S/D 行走，Ctrl 下降，Space 上升，滚轮调节速度，按 Shift 退出</translation>
+        <source>First-person mode: drag to look, W/A/S/D to walk, Q up, E down, wheel adjusts speed, Shift to exit</source>
+        <translation>第一人称模式：拖动鼠标转视角，W/A/S/D 行走，Q 上升，E 下降，滚轮调节速度，按 Shift 退出</translation>
     </message>
     <message>
         <location line="+185"/>
