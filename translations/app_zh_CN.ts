@@ -715,6 +715,10 @@
         <translation>未加载图</translation>
     </message>
     <message>
+        <source>Saving already in progress</source>
+        <translation>已有保存正在进行</translation>
+    </message>
+    <message>
         <location line="-661"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>

@@ -42,6 +42,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QDateTime>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -361,6 +363,18 @@ void MainWindow::setupUi() {
                              .arg(m_loadingText));
         m_loadingFrame = (m_loadingFrame + 1) % 4;
     });
+
+    // 异步保存完成 → 停止加载动画并通知结果
+    //（QFutureWatcher::finished 在启动 watcher 的线程回调，即 UI 线程）
+    connect(&m_saveWatcher, &QFutureWatcher<QString>::finished, this, [this]() {
+        stopLoadingSpinner();
+        m_isSaving = false;
+        const QString err = m_saveWatcher.result();
+        if (err.isEmpty())
+            statusBar()->showMessage(tr("Map saved: %1").arg(m_lastSaveDir), 5000);
+        else
+            statusBar()->showMessage(tr("Save failed: %1").arg(err), 5000);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -617,13 +631,18 @@ QString MainWindow::defaultSaveDir() const {
 /**
  * @brief 执行保存（统一入口）
  *
- * 1) 位姿图 → graph.g2o；2) 每帧点云及 data → 标准地图目录 + 尽力 LVBA；
+ * 参数校验与"目录非空"防御确认在 UI 线程同步完成；位姿图/关键帧/
+ * 全局点云的写盘重活放到后台线程（与 bag 导入同一 QtConcurrent 模式），
+ * 完成后经 QFutureWatcher 回 UI 线程通知状态栏，期间不阻塞界面。
+ *
+ * 1) 位姿图 → graph.g2o；2) 每帧点云及 data → 标准地图目录；
  * 3) 全局点云 → accumulated_cloud.pcd。各项按开关独立执行。
+ * （LVBA/all_pcd_body 导出已停用：无下游使用；saveLVBA 函数保留）
  *
  * 防御：目标目录既不是默认保存目录又非空时，弹窗确认"清空并保存"，
  * 防止与旧地图文件混存（同 bag 导入的清空语义）。
  *
- * @return 是否执行了保存（用户取消或无内容时为 false）
+ * @return 是否启动了保存（参数校验失败/已有保存进行中/用户取消为 false）
  */
 bool MainWindow::performSave(const QString& dir,
                              bool savePoseGraph, bool saveKeyframes,
@@ -634,6 +653,10 @@ bool MainWindow::performSave(const QString& dir,
     }
     if (!savePoseGraph && !saveKeyframes && !saveGlobalCloud) {
         statusBar()->showMessage(tr("Nothing selected to save"), 3000);
+        return false;
+    }
+    if (m_isSaving) {
+        statusBar()->showMessage(tr("Saving already in progress"), 3000);
         return false;
     }
 
@@ -657,47 +680,51 @@ bool MainWindow::performSave(const QString& dir,
         }
     }
 
-    try {
-        auto* graph = m_manager->graph();
+    // 记住本次内容勾选（下次快速保存/另存为复用）
+    QSettings settings("DAFTECH", "InteractiveSLAM");
+    settings.setValue("save_map/pose_graph", savePoseGraph);
+    settings.setValue("save_map/keyframes", saveKeyframes);
+    settings.setValue("save_map/global_cloud", saveGlobalCloud);
 
-        // 1) 保存位姿图（graph.g2o，固定位于地图目录根，与单帧目录同层）
-        if (savePoseGraph) {
-            std::string g2oPath = dir.toStdString() + "/graph.g2o";
-            graph->save(g2oPath);
-        }
+    m_isSaving = true;
+    m_lastSaveDir = dir;
+    startLoadingSpinner(tr("Saving..."));
 
-        // 2) 保存每帧点云及 data 文件（标准地图目录）+ 尽力 LVBA
-        if (saveKeyframes) {
-            graph->dump(dir.toStdString(), *m_manager->progress());
+    auto* graph = m_manager->graph();
+    auto* progress = m_manager->progress();
+    const std::string dirStd = dir.toStdString();
+    m_saveWatcher.setFuture(QtConcurrent::run(
+        [graph, progress, dirStd, savePoseGraph, saveKeyframes, saveGlobalCloud]()
+            -> QString {
             try {
-                graph->saveLVBA(dir.toStdString(), *m_manager->progress());
+                // 1) 保存位姿图（graph.g2o，固定位于地图目录根，与单帧目录同层）
+                if (savePoseGraph) {
+                    graph->save(dirStd + "/graph.g2o");
+                }
+
+                // 2) 保存每帧点云及 data 文件（标准地图目录）
+                //    （LVBA/all_pcd_body 导出已注释：无下游使用；saveLVBA 函数保留）
+                // if (saveKeyframes) {
+                //     graph->saveLVBA(dirStd, *progress);
+                // }
+                if (saveKeyframes) {
+                    graph->dump(dirStd, *progress);
+                }
+
+                // 3) 保存全局全量拼接点云地图（accumulated_cloud.pcd）
+                if (saveGlobalCloud &&
+                    !graph->save_pointcloud(dirStd + "/accumulated_cloud.pcd",
+                                            *progress)) {
+                    std::cerr << "[MainWindow] save_pointcloud returned false"
+                              << std::endl;
+                }
+
+                return {};  // 空串 = 成功
             } catch (const std::exception& e) {
-                std::cerr << "[MainWindow] LVBA conversion failed: "
-                          << e.what() << std::endl;
+                return QString::fromUtf8(e.what());
             }
-        }
-
-        // 3) 保存全局全量拼接点云地图（accumulated_cloud.pcd）
-        if (saveGlobalCloud) {
-            std::string cloudPath = dir.toStdString() + "/accumulated_cloud.pcd";
-            if (!graph->save_pointcloud(cloudPath, *m_manager->progress())) {
-                std::cerr << "[MainWindow] save_pointcloud returned false"
-                          << std::endl;
-            }
-        }
-
-        // 记住本次内容勾选（下次快速保存/另存为复用）
-        QSettings settings("DAFTECH", "InteractiveSLAM");
-        settings.setValue("save_map/pose_graph", savePoseGraph);
-        settings.setValue("save_map/keyframes", saveKeyframes);
-        settings.setValue("save_map/global_cloud", saveGlobalCloud);
-
-        statusBar()->showMessage(tr("Map saved: %1").arg(dir), 5000);
-        return true;
-    } catch (const std::exception& e) {
-        statusBar()->showMessage(tr("Save failed: %1").arg(e.what()), 5000);
-        return false;
-    }
+        }));
+    return true;
 }
 
 /**
@@ -709,6 +736,10 @@ bool MainWindow::performSave(const QString& dir,
 void MainWindow::onSaveMap() {
     if (!m_manager->isLoaded()) {
         statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+    if (m_isSaving) {
+        statusBar()->showMessage(tr("Saving already in progress"), 3000);
         return;
     }
 
@@ -734,6 +765,10 @@ void MainWindow::onSaveMap() {
 void MainWindow::onSaveMapAs() {
     if (!m_manager->isLoaded()) {
         statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+    if (m_isSaving) {
+        statusBar()->showMessage(tr("Saving already in progress"), 3000);
         return;
     }
 

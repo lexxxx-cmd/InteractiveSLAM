@@ -13,6 +13,7 @@
 #include <QMainWindow>
 #include <QStatusBar>
 #include <QMenuBar>
+#include <QFutureWatcher>
 
 #include "backend/project_manager.h"
 
@@ -87,8 +88,17 @@ private:
     void stopLoadingSpinner();                      ///< 停止并隐藏加载动画
 
     QString defaultSaveDir() const;  ///< 默认保存目录（项目数据目录，否则地图来源目录）
+    /**
+     * @brief 执行保存（含目录非空防御确认）
+     *
+     * 重活（位姿图/关键帧/全局点云写盘）放到后台线程执行，
+     * 结果经 QFutureWatcher 回到 UI 线程通知状态栏。
+     *
+     * @return 是否启动了保存（参数校验失败/已有保存进行中/用户取消
+     *         为 false；true 仅表示后台保存已启动，结果异步通知）
+     */
     bool performSave(const QString& dir,
-                     bool savePoseGraph, bool saveKeyframes, bool saveGlobalCloud); ///< 执行保存（含目录非空防御确认）
+                     bool savePoseGraph, bool saveKeyframes, bool saveGlobalCloud);
 
     GraphManager* m_manager;    ///< 图数据管理器，非拥有指针
     ViewportWidget* m_viewport; ///< 中央 3D 视口部件
@@ -131,4 +141,9 @@ private:
     QTimer* m_loadingTimer = nullptr;     ///< 旋转动画定时器
     int     m_loadingFrame = 0;           ///< 当前动画帧（0..3）
     QString m_loadingText;                ///< 加载中的基础文案（如"Loading map..."）
+
+    // === 异步保存 ===
+    QFutureWatcher<QString> m_saveWatcher; ///< 后台保存结果监视器（结果为空串 = 成功，否则为错误信息）
+    bool    m_isSaving = false;            ///< 是否已有后台保存进行中（防重入）
+    QString m_lastSaveDir;                 ///< 正在保存的目标目录（完成后状态栏显示）
 };
