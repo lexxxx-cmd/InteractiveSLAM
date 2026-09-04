@@ -51,7 +51,7 @@
  *   3. 提供可见性开关（顶点、边、点云各自独立控制）
  *   4. 支持点云 Z 轴裁剪和颜色范围控制
  *   5. 支持顶点选择高亮（高亮选中顶点附近的时序邻居帧）
- *   6. 支持回环检测可视化（搜索源为蓝色、候选为绿色）
+ *   6. 支持回环检测可视化（搜索源为深蓝、候选为品红）
  *   7. 支持隐藏指定边（通过 EdgeListPanel 交互）
  *
  * 性能考虑：
@@ -354,18 +354,21 @@ public:
      * @brief 轻量级播放高亮（不重建视锥体几何体）
      *
      * 用于播放轴功能，在滑块拖动或自动播放时调用。
-     * 仅更新两个视锥体的颜色数组（上一个恢复蓝色，当前变红色）
+     * 仅更新两个视锥体的颜色数组（上一个恢复默认色，当前变红色）
      * + 点云高亮，不触发完整的几何体重建。
      *
-     * 与 setSelectedVertex() 独立管理，两者互不干扰。
+     * 与 setSelectedVertex() 分工：播放通道只在播放会话期间生效，
+     * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
+     * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
      *
-     * @param id 顶点 ID（设为 -1 取消高亮）
+     * @param id 顶点 ID（-1 = 清理播放通道：仅恢复上一个播放帧的
+     *            视锥体颜色，不动点云高亮，避免抹掉刚建立的选择高亮）
      */
     void highlightPlaybackVertex(long id) {
-        const osg::Vec4 defaultColor(0.20f, 0.50f, 1.0f, 1.0f);  // 蓝色 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红色 —— 播放高亮
+        const osg::Vec4 defaultColor(0.0f, 0.80f, 0.20f, 1.0f);  // 绿 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红 —— 播放高亮
 
-        // 恢复上一个播放高亮视锥体为默认蓝色
+        // 恢复上一个播放高亮视锥体为默认色
         if (m_playbackPrevId >= 0 && m_sphereViz) {
             m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
         }
@@ -375,8 +378,9 @@ public:
         }
         m_playbackPrevId = id;
 
-        // 点云高亮（已很高效，只更新颜色数组）
-        if (m_cloudViz) {
+        // 点云高亮（已很高效，只更新颜色数组）；
+        // id < 0 仅清理播放通道，不动点云高亮
+        if (id >= 0 && m_cloudViz) {
             m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
         }
     }
@@ -565,10 +569,10 @@ private:
      * 为每个关键帧创建一个相机视锥体标记：锥顶位于顶点平移估计值
      * （相机光心），方向取关键帧局部位姿的旋转
      * （右-下-前坐标系，X右/Y下/Z前），沿局部 +Z（前方）展开。配色：
-     *   - 普通顶点：蓝色系
+     *   - 普通顶点：绿色系（与蓝色高程渐变点云互补）
      *   - 选中 / 播放高亮：红色系（2 倍尺寸）
      *   - 回环搜索源：深蓝色
-     *   - 回环候选：绿色
+     *   - 回环候选：品红
      *
      * 当采样步长 > 1 时，仅渲染 id % stride == 0 的标记，
      * 但特殊标记（选中、回环）始终渲染。
@@ -589,11 +593,12 @@ private:
         m_sphereCenters.clear();
         m_sphereCenters.reserve(graph->keyframes.size());
 
-        // 定义不同状态的标记颜色：普通蓝色系，高亮红色系
-        const osg::Vec4 defaultColor(0.20f, 0.50f, 1.0f, 1.0f);  // 蓝 —— 默认
+        // 定义不同状态的标记颜色：普通绿色系（与蓝色高程渐变点云互补），
+        // 高亮红色系
+        const osg::Vec4 defaultColor(0.25f, 0.80f, 0.30f, 1.0f);  // 绿 —— 默认
         const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红 —— 选中/播放高亮
         const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 深蓝 —— 回环搜索源
-        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // 绿 —— 回环候选
+        const osg::Vec4 loopCandColor(1.0f, 0.25f, 0.75f, 1.0f); // 品红 —— 回环候选
 
         // 遍历所有关键帧，创建顶点位姿标记
         for (auto& [id, kf] : graph->keyframes) {
@@ -664,6 +669,13 @@ private:
         m_cloudViz.reset();
         m_edgeLineViz.reset();
         m_hasGraph = false;
+
+        // 重置交互状态：顶点 ID 通常从 0 开始，旧地图的选中/播放/聚焦
+        // ID 残留到新地图几乎必然命中某个无辜顶点，导致其顶着
+        // 红色 2 倍高亮 / 聚焦淡化出现
+        m_selectedVertexId = -1;
+        m_playbackPrevId   = -1;
+        m_focusedVertexId  = -1;
     }
 
     /**

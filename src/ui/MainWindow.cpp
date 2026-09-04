@@ -319,12 +319,23 @@ void MainWindow::setupUi() {
             m_playbackOverlay->hide();
             m_viewport->updateOverlayPositions();
             if (m_playbackViewAction) m_playbackViewAction->setChecked(false);
+            // 关闭面板 = 播放会话结束：停止播放并清理播放高亮
+            if (m_playbackPanel) m_playbackPanel->pausePlayback();
+            m_viewport->highlightPlaybackVertex(-1);
         }
     });
 
     // 采样步长变化 → 通知 PlaybackPanel 重建帧列表
     connect(m_viewport, &ViewportWidget::sampleStrideChanged,
             m_playbackPanel, &PlaybackPanel::onSampleStrideChanged);
+
+    // 任何选中（Ctrl+Click / 程序化 selectVertex）→ 暂停播放轴并清理
+    // 播放通道高亮：用户主动选择时播放让位，避免两个红色标记并存。
+    // 面板自身的停下路径已先清理再选中，此处为幂等兜底。
+    connect(m_viewport, &ViewportWidget::vertexSelected, this, [this](long) {
+        if (m_playbackPanel) m_playbackPanel->pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
+    });
 
     // 隐藏边变化时刷新视口
     connect(m_edgeListPanel, &EdgeListPanel::hiddenEdgesChanged,

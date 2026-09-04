@@ -13,6 +13,12 @@
  * - 滑块拖动时使用 highlightPlaybackVertex() 增量更新球体颜色
  * - 配合 30ms 节流定时器防止过度重绘
  * - 滑块释放或按钮点击时调用完整 selectVertex()
+ *
+ * 高亮生命周期（单一状态源）：
+ * - 播放/拖动期间：highlightPlaybackVertex() 轻量红色高亮（会话进行中）
+ * - 暂停/单步/跳转/滑块释放/播完 = 会话结束：先 highlightPlaybackVertex(-1)
+ *   清理播放通道，再 selectVertex() 切换为选中高亮（红色让位给选中态）
+ * - 关闭面板/关闭地图：暂停并清理播放通道，场景不残留红色标记
  */
 
 #pragma once
@@ -49,6 +55,15 @@ public:
      * @param keyframeIds 所有关键帧的顶点 ID 列表（已排序）
      */
     void setKeyframeIds(const std::vector<long>& keyframeIds);
+
+    /**
+     * @brief 暂停播放（幂等，不改变当前帧、不做选中）
+     *
+     * 供外部在用户主动选择其他帧时调用（选择让位语义）：
+     * 停止定时器并复位播放按钮图标。播放高亮的清理由调用方
+     * highlightPlaybackVertex(-1) 完成，本方法不触碰视口。
+     */
+    void pausePlayback();
 
 public slots:
     /**

@@ -64,7 +64,7 @@ public slots:
      * @brief 程序化选中指定顶点（等价于 Ctrl+Click）
      *
      * 用于播放轴功能，效果与 Ctrl+Click 选中关键帧完全相同：
-     * 选中球体变橙色 + 邻域点云高亮 + 发射 vertexSelected 信号。
+     * 选中视锥体变红色（2 倍尺寸）+ 邻域点云高亮 + 发射 vertexSelected 信号。
      *
      * @param vertexId 要选中的顶点 ID（-1 取消选择）
      */

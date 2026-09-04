@@ -105,12 +105,10 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
         if (m_playbackFrames.empty()) return;
 
         if (m_isPlaying) {
-            // 暂停
-            m_isPlaying = false;
-            m_playBtn->setText(QStringLiteral("▶"));
-            m_playTimer->stop();
-
-            // 暂停时执行完整 selectVertex（更新点云高亮+球体重建+信号）
+            // 暂停 = 播放会话结束：清理播放通道（红色让位给选中态），
+            // 再执行完整 selectVertex（更新点云高亮+球体重建+信号）
+            pausePlayback();
+            m_viewport->highlightPlaybackVertex(-1);
             if (m_currentIndex >= 0 && m_currentIndex < (int)m_playbackFrames.size()) {
                 m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
             }
@@ -136,12 +134,9 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     // 上一帧
     connect(m_prevBtn, &QPushButton::clicked, this, [this]() {
         if (m_playbackFrames.empty()) return;
-        // 如果正在播放，先暂停
-        if (m_isPlaying) {
-            m_isPlaying = false;
-            m_playBtn->setText(QStringLiteral("▶"));
-            m_playTimer->stop();
-        }
+        // 会话结束：清理播放通道后再完整选中
+        pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
         int newIdx = m_currentIndex - 1;
         if (newIdx < 0) newIdx = 0;
         goToIndex(newIdx);
@@ -151,11 +146,8 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     // 下一帧
     connect(m_nextBtn, &QPushButton::clicked, this, [this]() {
         if (m_playbackFrames.empty()) return;
-        if (m_isPlaying) {
-            m_isPlaying = false;
-            m_playBtn->setText(QStringLiteral("▶"));
-            m_playTimer->stop();
-        }
+        pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
         int newIdx = m_currentIndex + 1;
         if (newIdx >= (int)m_playbackFrames.size()) newIdx = (int)m_playbackFrames.size() - 1;
         goToIndex(newIdx);
@@ -165,11 +157,8 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     // 跳转开头
     connect(m_skipStartBtn, &QPushButton::clicked, this, [this]() {
         if (m_playbackFrames.empty()) return;
-        if (m_isPlaying) {
-            m_isPlaying = false;
-            m_playBtn->setText(QStringLiteral("▶"));
-            m_playTimer->stop();
-        }
+        pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
         goToIndex(0);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
     });
@@ -177,11 +166,8 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     // 跳转末尾
     connect(m_skipEndBtn, &QPushButton::clicked, this, [this]() {
         if (m_playbackFrames.empty()) return;
-        if (m_isPlaying) {
-            m_isPlaying = false;
-            m_playBtn->setText(QStringLiteral("▶"));
-            m_playTimer->stop();
-        }
+        pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
         goToIndex((int)m_playbackFrames.size() - 1);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
     });
@@ -216,6 +202,13 @@ void PlaybackPanel::setKeyframeIds(const std::vector<long>& keyframeIds) {
     setEnabled(!m_playbackFrames.empty());
 }
 
+void PlaybackPanel::pausePlayback() {
+    if (!m_isPlaying) return;
+    m_isPlaying = false;
+    m_playBtn->setText(QStringLiteral("▶"));
+    m_playTimer->stop();
+}
+
 void PlaybackPanel::onSampleStrideChanged(int stride) {
     m_sampleStride = stride;
     rebuildFrameList();
@@ -223,12 +216,11 @@ void PlaybackPanel::onSampleStrideChanged(int stride) {
 
 void PlaybackPanel::onGraphClosed() {
     // 停止播放
-    if (m_isPlaying) {
-        m_isPlaying = false;
-        m_playBtn->setText(QStringLiteral("▶"));
-        m_playTimer->stop();
-    }
+    pausePlayback();
     m_throttleTimer->stop();
+
+    // 清理播放通道高亮（避免红色标记残留在场景中）
+    m_viewport->highlightPlaybackVertex(-1);
 
     // 清空数据
     m_allKeyframeIds.clear();
@@ -246,21 +238,17 @@ void PlaybackPanel::onGraphClosed() {
 
 void PlaybackPanel::onPlayTick() {
     if (m_playbackFrames.empty()) {
-        m_isPlaying = false;
-        m_playBtn->setText(QStringLiteral("▶"));
-        m_playTimer->stop();
+        pausePlayback();
         return;
     }
 
     int nextIdx = m_currentIndex + 1;
 
-    // 到达末尾 → 自动暂停
+    // 到达末尾 → 自动暂停 = 会话结束：清理播放通道，
+    // 停在最后一帧并切换为选中高亮
     if (nextIdx >= (int)m_playbackFrames.size()) {
-        m_isPlaying = false;
-        m_playBtn->setText(QStringLiteral("▶"));
-        m_playTimer->stop();
-
-        // 停在最后一帧并执行完整 selectVertex
+        pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
         goToIndex(m_currentIndex);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
         return;
@@ -288,12 +276,8 @@ void PlaybackPanel::onThrottleTick() {
 void PlaybackPanel::onSliderMoved(int pos) {
     if (m_playbackFrames.empty()) return;
 
-    // 如果正在播放，暂停
-    if (m_isPlaying) {
-        m_isPlaying = false;
-        m_playBtn->setText(QStringLiteral("▶"));
-        m_playTimer->stop();
-    }
+    // 如果正在播放，暂停（拖动期间播放通道持续由节流更新着色，不清理）
+    pausePlayback();
 
     // 记录待处理位置，启动 30ms 节流定时器
     m_throttlePendingIndex = pos;
@@ -311,7 +295,8 @@ void PlaybackPanel::onSliderReleased() {
         m_slider->setValue(m_currentIndex);
         updateLabel();
 
-        // 完整 selectVertex（含点云高亮 + 信号）
+        // 拖动结束 = 会话结束：清理播放通道后完整选中（含点云高亮 + 信号）
+        m_viewport->highlightPlaybackVertex(-1);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
     }
 }
