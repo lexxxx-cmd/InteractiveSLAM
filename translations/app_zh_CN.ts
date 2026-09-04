@@ -1571,8 +1571,8 @@ You can import data later in the main window.</source>
     </message>
     <message>
         <location line="+4"/>
-        <source>Show Vertices</source>
-        <translation>显示顶点</translation>
+        <source>Show Pose Frustums</source>
+        <translation>位姿视锥体</translation>
     </message>
     <message>
         <location line="+2"/>
@@ -1581,18 +1581,13 @@ You can import data later in the main window.</source>
     </message>
     <message>
         <location line="+2"/>
-        <source>Show Keyframe Clouds</source>
-        <translation>显示关键帧点云</translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>Show SE3 Edges</source>
-        <translation>显示 SE3 边</translation>
+        <source>Show Point Cloud</source>
+        <translation>点云</translation>
     </message>
     <message>
         <location line="+9"/>
-        <source>Sphere Radius:</source>
-        <translation>球体半径：</translation>
+        <source>Frustum Size:</source>
+        <translation>视锥体大小：</translation>
     </message>
     <message>
         <location line="+11"/>
@@ -1611,8 +1606,8 @@ You can import data later in the main window.</source>
     </message>
     <message>
         <location line="+11"/>
-        <source>Vertex Opacity:</source>
-        <translation>顶点透明度：</translation>
+        <source>Frustum Opacity:</source>
+        <translation>视锥体透明度：</translation>
     </message>
     <message>
         <location line="+11"/>

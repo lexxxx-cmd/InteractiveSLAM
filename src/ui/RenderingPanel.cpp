@@ -34,10 +34,8 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
             m_viewport, &ViewportWidget::setDrawEdges);
     connect(m_drawCloudsCb, &QCheckBox::toggled,
             m_viewport, &ViewportWidget::setDrawKeyframeClouds);
-    connect(m_drawSE3EdgesCb, &QCheckBox::toggled,
-            m_viewport, &ViewportWidget::setDrawSE3Edges);
 
-    // 球体半径滑块（值范围 1-100，对应实际半径 0.01-1.00）
+    // 视锥体大小滑块（值范围 1-100，对应实际半径 0.01-1.00）
     connect(m_sphereRadiusSlider, &QSlider::valueChanged, this, [this](int val) {
         float r = val / 100.0f;
         m_sphereRadiusLabel->setText(QString::number(r, 'f', 2));
@@ -68,7 +66,7 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->setVertexOpacity(val);
     });
 
-    // 采样步长 SpinBox
+    // 采样步长 SpinBox（名称待定，暂保留）
     connect(m_sampleStrideSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this](int val) {
         m_sampleStrideLabel->setText(QString::number(val));
@@ -79,7 +77,7 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
 /**
  * @brief 初始化 UI 布局
  *
- * 在 QGroupBox 中放置 4 个复选框和 4 个带标签的滑块。
+ * 在 QGroupBox 中放置 3 个复选框和 5 个带标签的滑块。
  */
 void RenderingPanel::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
@@ -89,22 +87,19 @@ void RenderingPanel::setupUi() {
     auto* renderLayout = new QVBoxLayout(renderGroup);
 
     // 显示开关复选框（默认全部启用）
-    m_drawVerticesCb = new QCheckBox(tr("Show Vertices"));
+    m_drawVerticesCb = new QCheckBox(tr("Show Pose Frustums"));
     m_drawVerticesCb->setChecked(true);
     m_drawEdgesCb = new QCheckBox(tr("Show Edges"));
     m_drawEdgesCb->setChecked(true);
-    m_drawCloudsCb = new QCheckBox(tr("Show Keyframe Clouds"));
+    m_drawCloudsCb = new QCheckBox(tr("Show Point Cloud"));
     m_drawCloudsCb->setChecked(true);
-    m_drawSE3EdgesCb = new QCheckBox(tr("Show SE3 Edges"));
-    m_drawSE3EdgesCb->setChecked(true);
 
     renderLayout->addWidget(m_drawVerticesCb);
     renderLayout->addWidget(m_drawEdgesCb);
     renderLayout->addWidget(m_drawCloudsCb);
-    renderLayout->addWidget(m_drawSE3EdgesCb);
 
-    // 球体半径滑块（1-100，默认 50 → 0.50）
-    renderLayout->addWidget(new QLabel(tr("Sphere Radius:")));
+    // 视锥体大小滑块（1-100，默认 50 → 0.50）
+    renderLayout->addWidget(new QLabel(tr("Frustum Size:")));
     m_sphereRadiusSlider = new QSlider(Qt::Horizontal);
     m_sphereRadiusSlider->setRange(1, 100);
     m_sphereRadiusSlider->setValue(50);
@@ -147,8 +142,8 @@ void RenderingPanel::setupUi() {
     opacityRow->addWidget(m_pointOpacityLabel);
     renderLayout->addLayout(opacityRow);
 
-    // 顶点标记不透明度滑块（10-100%，默认 100%）
-    renderLayout->addWidget(new QLabel(tr("Vertex Opacity:")));
+    // 视锥体不透明度滑块（10-100%，默认 100%）
+    renderLayout->addWidget(new QLabel(tr("Frustum Opacity:")));
     m_vertexOpacitySlider = new QSlider(Qt::Horizontal);
     m_vertexOpacitySlider->setRange(10, 100);
     m_vertexOpacitySlider->setValue(100);
