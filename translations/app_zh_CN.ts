@@ -959,11 +959,6 @@ for loop-closure matching (N=1 merges 3 frames):</source>
     </message>
     <message>
         <location line="+5"/>
-        <source>Open &amp;Bag File...</source>
-        <translation>打开 Bag 文件(&amp;B)...</translation>
-    </message>
-    <message>
-        <location line="+5"/>
         <source>&amp;Close Map</source>
         <translation>关闭地图(&amp;C)</translation>
     </message>
@@ -1011,64 +1006,10 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>打开地图目录</translation>
     </message>
     <message>
-        <location line="+17"/>
-        <source>Open ROS Bag File</source>
-        <translation>打开 ROS Bag 文件</translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>ROS Bag (*.bag);;All Files (*)</source>
-        <translation>ROS Bag 文件 (*.bag);;所有文件 (*)</translation>
-    </message>
-    <message>
-        <location line="+7"/>
-        <location line="+8"/>
-        <location line="+33"/>
-        <source>Open Bag</source>
-        <translation>打开 Bag</translation>
-    </message>
-    <message>
-        <location line="-40"/>
-        <source>Config file config/bag_import.yaml not found — using default parameters.
-Place it next to the executable or in the working directory to customize.</source>
-        <translation>未找到配置文件 config/bag_import.yaml — 使用默认参数。
-请将其放在可执行文件旁或工作目录中以自定义。</translation>
-    </message>
-    <message>
-        <location line="+8"/>
-        <source>Failed to read bag or no topics found:
-%1</source>
-        <translation>读取 Bag 失败或未找到话题：
-%1</translation>
-    </message>
-    <message>
         <location line="+20"/>
         <location line="+87"/>
         <source>Output Directory Not Empty</source>
         <translation>输出目录非空</translation>
-    </message>
-    <message>
-        <location line="-86"/>
-        <source>The output directory is not empty:
-%1
-
-Importing will permanently delete all existing content in this directory (cannot be undone).</source>
-        <translation>输出目录非空：
-%1
-
-导入将永久删除该目录中的所有现有内容（无法撤销）。</translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Clear &amp; Import</source>
-        <translation>清空并导入</translation>
-    </message>
-    <message>
-        <location line="+9"/>
-        <source>Failed to clear output directory:
-%1</source>
-        <translation>清空输出目录失败：
-%1</translation>
     </message>
     <message>
         <location line="+29"/>

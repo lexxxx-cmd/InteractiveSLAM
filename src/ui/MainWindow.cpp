@@ -20,7 +20,6 @@
 #include "ui/OverlayPanelWidget.h"
 #include "ui/PlaybackPanel.h"
 #include "ui/LoopClosureDialog.h"
-#include "ui/BagOpenDialog.h"
 #include "ui/AutoLoopClosureDialog.h"
 #include "ui/RenderingAdvancedDialogs.h"
 #include "ui/SaveMapDialog.h"
@@ -390,12 +389,6 @@ void MainWindow::setupMenus() {
     auto* openAction = fileMenu->addAction(tr("&Open Map..."));
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenMap);
 
-    // 打开 ROS1 bag 文件（解析为地图后自动加载）
-    // 注意：不设 Ctrl 系快捷键——第一人称模式下 Ctrl 为下降键，
-    // 按住 Ctrl 行走时再按字母会误触发（如 Ctrl+W 关地图、Ctrl+Q 退出）
-    auto* openBagAction = fileMenu->addAction(tr("Open &Bag File..."));
-    connect(openBagAction, &QAction::triggered, this, &MainWindow::onOpenBag);
-
     // 关闭当前地图
     auto* closeAction = fileMenu->addAction(tr("&Close Map"));
     connect(closeAction, &QAction::triggered, this, &MainWindow::onCloseMap);
@@ -581,50 +574,6 @@ void MainWindow::onOpenMap() {
     if (dir.isEmpty()) return;
 
     m_manager->openMapData(QUrl::fromLocalFile(dir));
-}
-
-/**
- * @brief 打开 ROS1 bag 文件（按 SCPGO 数据流解析）
- *
- * 流程：选择 .bag → 读取 bag 索引列出 topic → 弹配置对话框（topic/外参/
- * 抽稀/保存选项，以 config/bag_import.yaml 为默认预填）→ GraphManager::
- * openBagFile() 用弹窗返回的完整配置后台解析（输出到新建的临时地图目录）
- * → 自动加载生成的地图。
- */
-void MainWindow::onOpenBag() {
-    QString bagPath = QFileDialog::getOpenFileName(
-        this, tr("Open ROS Bag File"), QString(),
-        tr("ROS Bag (*.bag);;All Files (*)"));
-    if (bagPath.isEmpty()) return;
-
-    // 定位导入配置文件：优先可执行文件旁，其次当前工作目录，再其次用默认参数
-    const QString yamlPath = findBagImportConfigYaml();
-    if (yamlPath.isEmpty()) {
-        QMessageBox::information(
-            this, tr("Open Bag"),
-            tr("Config file config/bag_import.yaml not found — using default parameters.\n"
-               "Place it next to the executable or in the working directory to customize."));
-    }
-
-    // 读取 bag 索引（只读头部，速度快），列出可用 topic
-    auto topicsStd = hdl_graph_slam::BagImporter::listTopics(bagPath.toStdString());
-    if (topicsStd.empty()) {
-        QMessageBox::warning(this, tr("Open Bag"),
-                             tr("Failed to read bag or no topics found:\n%1").arg(bagPath));
-        return;
-    }
-    QStringList topics;
-    for (auto& t : topicsStd) topics << QString::fromStdString(t);
-
-    // 对话框：以 yaml 配置为默认值预填（topic + 外参 + 抽稀 + 保存选项），
-    // 用户可编辑导入参数；确认后返回完整配置供后台导入。
-    // 输出目录不在此设定：GraphManager 使用新建的临时地图目录
-    auto cfg = hdl_graph_slam::BagImporter::loadConfig(yamlPath.toStdString());
-    BagOpenDialog dlg(topics, cfg, this);
-    if (dlg.exec() != QDialog::Accepted) return;
-    cfg = dlg.config();
-
-    m_manager->openBagFile(QUrl::fromLocalFile(bagPath), cfg);
 }
 
 /**
