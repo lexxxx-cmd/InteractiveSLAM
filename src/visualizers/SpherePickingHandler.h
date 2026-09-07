@@ -6,7 +6,10 @@
 //       并提供右键上下文菜单支持。
 //
 // 交互方式：
-//   - Ctrl + 左键点击：拾取最近的顶点球体（触发选择回调）
+//   - Ctrl + 左键单击：拾取最近的顶点球体（触发选择回调）
+//   - 左键双击：射线柱拾取点云最近点作为视角焦点（触发居中回调）；
+//     未命中点云时回退为拾取最近顶点球体（旧行为，含空白取消聚焦）
+//   - Ctrl + 左键双击：拾取最近的顶点球体（触发帧视角回调）
 //   - 右键点击：拾取场景对象并触发上下文菜单回调（优先检测球体，后检测边线）
 //
 // 使用延迟提供者函数（lazy provider），确保处理器始终获取最新的
@@ -17,7 +20,9 @@
 
 #include <osgGA/GUIEventHandler>
 #include <osgViewer/Viewer>
+#include <osg/Geometry>
 #include <osgUtil/LineSegmentIntersector>
+#include <osgUtil/PolytopeIntersector>
 
 #include <functional>
 #include <vector>
@@ -70,7 +75,9 @@ class SpherePickingHandler : public osgGA::GUIEventHandler {
 public:
     using SelectionCallback   = std::function<void(long)>;           ///< 选择回调（参数为顶点 ID）
     using ContextMenuCallback = std::function<void(const PickingHit&)>; ///< 右键菜单回调
-    using DoubleClickCallback = std::function<void(long)>;           ///< 双击回调（参数为顶点 ID，未命中为 -1）
+    using DoubleClickCallback = std::function<void(long)>;           ///< 双击兜底回调（球体聚焦；-1 = 未命中）
+    using FocusPointCallback  = std::function<void(const osg::Vec3d&)>; ///< 双击点云命中回调（居中焦点，世界坐标）
+    using FrameViewCallback   = std::function<void(long)>;           ///< Ctrl+双击回调（帧视角；-1 = 未命中）
 
     /// 球心数据提供者：返回当前可拾取标记数据向量指针（可能为空）
     using SphereProvider = std::function<const std::vector<PickableCenter>*()>;
@@ -85,20 +92,26 @@ public:
      * @param sphereRadius    球体半径（用于拾取距离阈值判断）
      * @param onSelect        选中顶点时的回调函数
      * @param onContextMenu   右键上下文菜单回调函数
-     * @param onDoubleClick   双击球体时的回调函数（参数为顶点 ID，未命中为 -1）
+     * @param onDoubleClick   左键双击兜底回调（球体聚焦；-1 = 未命中/空白）
+     * @param onFocusPoint    双击点云命中回调（参数为焦点世界坐标）
+     * @param onFrameView     Ctrl+双击回调（切换到帧视角；-1 = 未命中）
      */
     SpherePickingHandler(SphereProvider sphereProvider,
                          EdgeProvider   edgeProvider,
                          float sphereRadius,
                          SelectionCallback onSelect,
                          ContextMenuCallback onContextMenu,
-                         DoubleClickCallback onDoubleClick = DoubleClickCallback())
+                         DoubleClickCallback onDoubleClick = DoubleClickCallback(),
+                         FocusPointCallback onFocusPoint = FocusPointCallback(),
+                         FrameViewCallback onFrameView = FrameViewCallback())
         : m_sphereProvider(std::move(sphereProvider))
         , m_edgeProvider(std::move(edgeProvider))
         , m_sphereRadius(sphereRadius)
         , m_onSelect(std::move(onSelect))
         , m_onContextMenu(std::move(onContextMenu))
         , m_onDoubleClick(std::move(onDoubleClick))
+        , m_onFocusPoint(std::move(onFocusPoint))
+        , m_onFrameView(std::move(onFrameView))
     {}
 
     /**
@@ -134,20 +147,46 @@ public:
             return true;
         }
 
-        // ---- 左键双击：聚焦到球体 ----
+        // ---- 左键双击：点云居中（Ctrl+双击：切换到帧视角） ----
         if (ea.getEventType() == osgGA::GUIEventAdapter::DOUBLECLICK &&
-            ea.getButton() == osgGA::GUIEventAdapter::LEFT_MOUSE_BUTTON &&
-            m_onDoubleClick) {
+            ea.getButton() == osgGA::GUIEventAdapter::LEFT_MOUSE_BUTTON) {
 
             auto* viewer = dynamic_cast<osgViewer::Viewer*>(&aa);
-            auto* centers = m_sphereProvider();
-            if (!viewer || !centers || centers->empty()) {
-                m_onDoubleClick(-1);
+
+            // Ctrl + 双击：拾取最近顶点 → 切换到该帧位姿视角
+            if (ea.getModKeyMask() & osgGA::GUIEventAdapter::MODKEY_CTRL) {
+                if (m_onFrameView) {
+                    long id = -1;
+                    auto* centers = m_sphereProvider();
+                    if (viewer && centers && !centers->empty()) {
+                        auto hits = raycast(ea.getX(), ea.getY(), viewer);
+                        if (!hits.empty()) id = nearestCenter(hits, *centers);
+                    }
+                    m_onFrameView(id);
+                }
                 return true;
             }
-            auto hits = raycast(ea.getX(), ea.getY(), viewer);
-            if (hits.empty()) { m_onDoubleClick(-1); return true; }
-            m_onDoubleClick(nearestCenter(hits, *centers));
+
+            // 普通双击：射线柱拾取点云 → 命中点作为居中焦点
+            if (m_onFocusPoint) {
+                osg::Vec3d pt;
+                if (viewer &&
+                    raycastCloudPoint(ea.getX(), ea.getY(), viewer, pt)) {
+                    m_onFocusPoint(pt);
+                    return true;
+                }
+            }
+
+            // 未命中点云 → 回退旧行为（双击球体聚焦 / 空白取消聚焦）
+            if (m_onDoubleClick) {
+                long id = -1;
+                auto* centers = m_sphereProvider();
+                if (viewer && centers && !centers->empty()) {
+                    auto hits = raycast(ea.getX(), ea.getY(), viewer);
+                    if (!hits.empty()) id = nearestCenter(hits, *centers);
+                }
+                m_onDoubleClick(id);
+            }
             return true;
         }
 
@@ -258,6 +297,69 @@ private:
     }
 
     /**
+     * @brief 射线柱拾取点云：双击位置发射带半径的射线柱（窗口坐标系
+     *        下以拾取点为中心的细长柱体），在与柱体相交的点云点中
+     *        返回距视线（射线）最近的一个
+     *
+     * 仅检查 POINTS 图元（点云），线/面图元不计。OSG 3.6 的
+     * LineSegmentIntersector 无带半径的构造，故用 PolytopeIntersector
+     * 的窗口矩形柱实现，并按"到视线直线的垂距"排序。
+     * 已知限制：柱体受投影近平面（0.1m）限定，相机贴得过近时
+     * 目标点可能落在近平面内导致拾取失效。
+     *
+     * @param x        屏幕 X 坐标（归一化）
+     * @param y        屏幕 Y 坐标（归一化）
+     * @param viewer   OSG 查看器
+     * @param outPoint 输出：命中的点云点（世界坐标）
+     * @return 是否命中点云
+     */
+    static bool raycastCloudPoint(float x, float y,
+                                  osgViewer::Viewer* viewer,
+                                  osg::Vec3d& outPoint) {
+        // 射线柱半径：归一化窗口坐标
+        const double kCloudPickRadius = 0.1;
+        osg::ref_ptr<osgUtil::PolytopeIntersector> picker =
+            new osgUtil::PolytopeIntersector(osgUtil::Intersector::WINDOW,
+                                             x - kCloudPickRadius,
+                                             y - kCloudPickRadius,
+                                             x + kCloudPickRadius,
+                                             y + kCloudPickRadius);
+        // 只检查点（0 维图元）：线/三角面片（网格、视锥体标记）不计
+        picker->setPrimitiveMask(osgUtil::PolytopeIntersector::POINT_PRIMITIVES);
+        osgUtil::IntersectionVisitor iv(picker.get());
+        viewer->getCamera()->accept(iv);
+        if (!picker->containsIntersections()) return false;
+
+        // 相机视线（世界坐标）：双击点窗口坐标 → NDC → 逆(view*proj)
+        // 反投影近/远两点得到射线，用于计算各命中点的垂距
+        const osg::Camera* cam = viewer->getCamera();
+        osg::Matrix invVP = osg::Matrix::inverse(
+            cam->getViewMatrix() * cam->getProjectionMatrix());
+        const double ndcX = x * 2.0 - 1.0;
+        const double ndcY = y * 2.0 - 1.0;
+        const osg::Vec3d rayStart = osg::Vec3d(ndcX, ndcY, -1.0) * invVP;
+        const osg::Vec3d rayEnd   = osg::Vec3d(ndcX, ndcY,  1.0) * invVP;
+        osg::Vec3d dir = rayEnd - rayStart;
+        if (dir.length2() < 1e-18) return false;
+        dir.normalize();
+
+        bool found = false;
+        double bestPerp = 0.0;
+        for (const auto& isect : picker->getIntersections()) {
+            // 世界坐标 = 局部命中点 × 绘制时参考矩阵（无矩阵即恒等）
+            osg::Vec3d world = isect.localIntersectionPoint;
+            if (isect.matrix.valid()) world = isect.localIntersectionPoint * (*isect.matrix);
+            const double perp = ((world - rayStart) ^ dir).length();
+            if (!found || perp < bestPerp) {
+                bestPerp = perp;
+                outPoint = world;
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    /**
      * @brief 查找离射线交点最近的边线段
      *
      * 计算点到线段的最短距离。如果点到线段投影超出端点范围，
@@ -313,5 +415,7 @@ private:
     float               m_sphereRadius;     ///< 球体半径（拾取距离阈值）
     SelectionCallback   m_onSelect;         ///< 选择回调
     ContextMenuCallback m_onContextMenu;    ///< 右键菜单回调
-    DoubleClickCallback m_onDoubleClick;    ///< 双击回调
+    DoubleClickCallback m_onDoubleClick;    ///< 双击兜底回调（球体聚焦）
+    FocusPointCallback  m_onFocusPoint;     ///< 双击点云命中回调（居中焦点）
+    FrameViewCallback   m_onFrameView;      ///< Ctrl+双击回调（帧视角）
 };

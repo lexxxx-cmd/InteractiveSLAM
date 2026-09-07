@@ -271,7 +271,7 @@ void ViewportWidget::initOsg() {
                     enriched.vtxAccumDist, enriched.vtxDegree);
             }, Qt::QueuedConnection);
         },
-        // --- 双击回调（左键双击球体 → 聚焦相机 + 聚焦淡化） ---
+        // --- 双击兜底回调（未命中点云：球体聚焦 / 空白取消聚焦淡化） ---
         [this](long vertexId) {
             QMetaObject::invokeMethod(this, [this, vertexId]() {
                 if (vertexId < 0) {
@@ -282,6 +282,18 @@ void ViewportWidget::initOsg() {
                     return;
                 }
                 focusOnVertex(vertexId);
+            }, Qt::QueuedConnection);
+        },
+        // --- 双击点云命中回调（命中点设为轨迹球旋转中心并居中） ---
+        [this](const osg::Vec3d& point) {
+            QMetaObject::invokeMethod(this, [this, point]() {
+                onFocusPoint(point);
+            }, Qt::QueuedConnection);
+        },
+        // --- Ctrl+双击回调（切换到该帧位姿视角） ---
+        [this](long vertexId) {
+            QMetaObject::invokeMethod(this, [this, vertexId]() {
+                onFrameView(vertexId);
             }, Qt::QueuedConnection);
         });
     viewer->addEventHandler(m_pickingHandler);
@@ -681,6 +693,73 @@ void ViewportWidget::focusOnVertex(long vertexId) {
         manip->setWheelZoomFactor(0.5);
     }
     // 聚焦淡化：全体标记透明度压到最低，目标锥体保持稍高不透明度
+    m_sceneViz->setFocusedVertex(vertexId);
+    m_osgWidget->update();
+}
+
+/**
+ * @brief 双击点云居中：轨迹球旋转中心移到命中的点云点
+ *
+ * 保持相机眼点与向上方向不变，仅把视线中心（= 轨迹球旋转中心）
+ * 移到命中点：该点随即位于屏幕中央，后续拖拽即绕该点公转，
+ * 旋转过程中该点恒居屏幕中心。同时恢复滚轮缩放系数
+ * （若此前处于聚焦缩小状态，避免缩放步长过细）。
+ */
+void ViewportWidget::onFocusPoint(const osg::Vec3d& point) {
+    if (m_fpActive) exitFirstPersonMode();  // 轨迹球操作，先退出第一人称
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!manip) return;
+
+    osg::Vec3d eye, center, up;
+    manip->getTransformation(eye, center, up);
+    manip->setTransformation(eye, point, up);
+    restoreWheelZoomFactor();
+    m_osgWidget->update();
+}
+
+/**
+ * @brief Ctrl+双击：切换到指定关键帧的位姿视角
+ *
+ * 相机眼点 = 关键帧位姿平移（相机光心），视线沿位姿局部 +Z（扫描
+ * 方向），up 取局部 −Y（Y 轴向下）。轨迹球中心放在前方 lookAhead
+ * 处，进入后拖拽绕其旋转；聚焦淡化与滚轮缩放语义与旧双击聚焦一致。
+ * 数学同 focusOnVertex：f=Z, up=−Y。
+ */
+void ViewportWidget::onFrameView(long vertexId) {
+    if (vertexId < 0 || !m_graph) return;
+    if (m_fpActive) exitFirstPersonMode();
+    auto it = m_graph->keyframes.find(vertexId);
+    if (it == m_graph->keyframes.end()) return;
+    const auto& pose = it->second->estimate();
+
+    osg::Vec3d eye(pose.translation().x(),
+                   pose.translation().y(),
+                   pose.translation().z());
+    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
+    osg::Vec3d forward(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(-dirY.x(), -dirY.y(), -dirY.z());
+    forward.normalize();
+    up.normalize();
+
+    // 轨迹球中心放在前方（帧视角下的注视点）
+    double radius = m_sceneViz->sphereRadius();
+    double lookAhead = (radius > 1e-6) ? radius * 10.0 : 5.0;
+    osg::Vec3d center = eye + forward * lookAhead;
+
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!manip) return;
+    manip->setTransformation(eye, center, up);
+    if (m_savedWheelZoomFactor < 0.0) {
+        m_savedWheelZoomFactor = manip->getWheelZoomFactor();
+    }
+    manip->setWheelZoomFactor(0.5);
     m_sceneViz->setFocusedVertex(vertexId);
     m_osgWidget->update();
 }

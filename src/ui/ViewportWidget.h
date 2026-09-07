@@ -141,6 +141,8 @@ public slots:
      * @param vertexId 目标顶点 ID
      */
     void focusOnVertex(long vertexId);
+    void onFocusPoint(const osg::Vec3d& point);  ///< 双击点云居中（旋转中心=命中点）
+    void onFrameView(long vertexId);             ///< Ctrl+双击：切换到帧位姿视角
 
     // === Z 裁剪 + 高程颜色范围 ===
     void setZClipping(bool enabled);          ///< 启用/禁用 Z 裁剪
