@@ -394,9 +394,6 @@ public:
     /** @brief 获取包含标记的 OSG 节点 */
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
 
-    /** @brief 顶点 ID → 分区范围映射（只读，供外部查询标记当前缩放等） */
-    const std::unordered_map<long, SphereRange>& ranges() const { return m_sphereRanges; }
-
     /**
      * @brief 清除所有数据（用于重建）
      */

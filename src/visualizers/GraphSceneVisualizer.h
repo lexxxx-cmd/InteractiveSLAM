@@ -353,52 +353,33 @@ public:
     /**
      * @brief 轻量级播放高亮（不重建视锥体几何体）
      *
-     * 用于播放轴功能，在滑块拖动或自动播放时调用。
-     * 仅更新两个视锥体的颜色 + 尺寸（上一个恢复默认色和 1 倍尺寸，
-     * 当前变红色）+ 点云高亮，不触发完整的几何体重建。
-     * 尺寸经 updateSphereScale() 原地缩放，颜色与尺寸始终同步变化，
-     * 不会出现"绿色大帧 / 红色小帧"的杂交状态。
+     * 播放通道的逻辑只有三步：更新 m_playbackPrevId 状态，然后对
+     * "上一帧"与"当前帧"两个标记按 markerStyleFor() 重算并落地样式
+     * （颜色 + 尺寸 + 拾取半径一次同步生效），最后更新点云高亮。
      *
-     * 尺寸语义（与重建路径一致）：
+     * 样式由"状态 → 样式"的纯函数唯一推导（markerStyleFor 是唯一
+     * 事实来源，与 rebuildSpheres 共用），因此任何状态组合
+     * （普通/播放/选中/回环）下颜色与尺寸都不可能错位，也无需
+     * 针对选中帧、恢复色等写特判分支——上一帧恢复成什么样完全由
+     * 它当前的状态决定。
+     *
+     * 三种视觉状态：
      *   - 普通帧：绿色、1 倍
      *   - 播放高亮：红色、1 倍（连续播放中的小高亮）
-     *   - 选中帧：红色、2 倍（仅 setSelectedVertex 全量重建路径产生，
-     *     播放轻量路径划过选中帧时保持其大尺寸不动）
+     *   - 选中帧：红色、2 倍（播放划过选中帧时保持大红不动）
      *
      * 与 setSelectedVertex() 分工：播放通道只在播放会话期间生效，
      * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
      * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
      *
      * @param id 顶点 ID（-1 = 清理播放通道：仅恢复上一个播放帧的
-     *            视锥体颜色和尺寸，不动点云高亮，避免抹掉刚建立的选择高亮）
+     *            视觉样式，不动点云高亮，避免抹掉刚建立的选择高亮）
      */
     void highlightPlaybackVertex(long id) {
-        const osg::Vec4 defaultColor(0.0f, 0.80f, 0.20f, 1.0f);  // 绿 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红 —— 播放高亮
-        const float normalScale = 1.0f;   // 普通/播放高亮帧尺寸
-        const float selectedScale = 2.0f; // 选中帧尺寸（与 rebuildSpheres 一致）
-
-        // 恢复上一个播放高亮视锥体为默认态（颜色 + 尺寸同步恢复；
-        // 若它同时是选中帧则恢复红色 2 倍的选中态）
-        if (m_playbackPrevId >= 0 && m_playbackPrevId != id && m_sphereViz) {
-            if (m_playbackPrevId == m_selectedVertexId) {
-                m_sphereViz->updateSphereColor(m_playbackPrevId, selectedColor);
-                m_sphereViz->updateSphereScale(m_playbackPrevId, selectedScale);
-            } else {
-                m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
-                m_sphereViz->updateSphereScale(m_playbackPrevId, normalScale);
-            }
-            updatePickRadius(m_playbackPrevId);
-        }
-        // 设置新播放帧为红色小高亮（选中帧保持 2 倍不动）
-        if (id >= 0 && m_sphereViz) {
-            m_sphereViz->updateSphereColor(id, selectedColor);
-            if (id != m_selectedVertexId) {
-                m_sphereViz->updateSphereScale(id, normalScale);
-                updatePickRadius(id);
-            }
-        }
-        m_playbackPrevId = id;
+        long prev = m_playbackPrevId;
+        m_playbackPrevId = id;  // 先更新状态，再由状态推导两个标记的样式
+        applyMarkerState(prev);
+        applyMarkerState(id);
 
         // 点云高亮（已很高效，只更新颜色数组）；
         // id < 0 仅清理播放通道，不动点云高亮
@@ -408,14 +389,54 @@ public:
     }
 
 private:
-    /** @brief 同步 m_sphereCenters 中指定标记的拾取半径与其当前缩放 */
-    void updatePickRadius(long id) {
-        if (!m_sphereViz) return;
+    /**
+     * @brief 单个标记的视觉样式（颜色 + 尺寸缩放）
+     */
+    struct MarkerStyle {
+        osg::Vec4 color;  ///< 基色（着色层再做线框提亮与纵向渐变）
+        float scale;      ///< 尺寸缩放（1 = 全局默认，2 = 选中放大）
+    };
+
+    /**
+     * @brief 单个标记的视觉样式 = f(交互状态) —— 唯一事实来源
+     *
+     * rebuildSpheres（全量重建）与 applyMarkerState（轻量路径）都从
+     * 这里取样式，两条路径的视觉语义由同一份代码保证，永不脱节。
+     * 优先级：选中 > 回环源 > 回环候选 > 播放高亮 > 默认。
+     */
+    MarkerStyle markerStyleFor(long id) const {
+        const osg::Vec4 defaultColor(0.25f, 0.80f, 0.30f, 1.0f);  // 绿 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f);  // 红 —— 选中/播放高亮
+        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f);  // 深蓝 —— 回环搜索源
+        const osg::Vec4 loopCandColor(1.0f, 0.25f, 0.75f, 1.0f);  // 品红 —— 回环候选
+        constexpr float kNormalScale   = 1.0f;
+        constexpr float kSelectedScale = 2.0f;
+
+        if (id == m_selectedVertexId)     return {selectedColor, kSelectedScale};
+        if (id == m_loopSourceId)         return {loopSourceColor, kNormalScale};
+        if (m_loopCandidateIds.count(id)) return {loopCandColor, kNormalScale};
+        if (id == m_playbackPrevId)       return {selectedColor, kNormalScale};
+        return {defaultColor, kNormalScale};
+    }
+
+    /**
+     * @brief 按当前交互状态把某标记的样式落地到场景（轻量路径）
+     *
+     * 颜色、尺寸、拾取半径三者一次同步更新；id < 0 或标记不存在时
+     * 静默跳过。配合"先改状态、后调本函数"的次序使用。
+     */
+    void applyMarkerState(long id) {
+        if (id < 0 || !m_sphereViz) return;
+        const MarkerStyle st = markerStyleFor(id);
+        m_sphereViz->updateSphereColor(id, st.color);
+        m_sphereViz->updateSphereScale(id, st.scale);
+        updatePickRadius(id, st.scale);
+    }
+
+    /** @brief 同步可拾取缓存中指定标记的拾取半径（与样式缩放成比例） */
+    void updatePickRadius(long id, float scale) {
         for (auto& c : m_sphereCenters) {
             if (c.vertexId == id) {
-                auto it = m_sphereViz->ranges().find(id);
-                float scale =
-                    (it != m_sphereViz->ranges().end()) ? it->second.scale : 1.0f;
                 c.pickRadius = 2.5f * m_sphereRadius * scale;
                 break;
             }
@@ -607,11 +628,12 @@ private:
      *
      * 为每个关键帧创建一个相机视锥体标记：锥顶位于顶点平移估计值
      * （相机光心），方向取关键帧局部位姿的旋转
-     * （右-下-前坐标系，X右/Y下/Z前），沿局部 +Z（前方）展开。配色：
-     *   - 普通顶点：绿色系（与蓝色高程渐变点云互补）
-     *   - 选中：红色系（2 倍尺寸）
-     *   - 播放高亮：红色系（1 倍尺寸，与轻量路径一致；
-     *     若同时是选中帧则为红色 2 倍）
+     * （右-下-前坐标系，X右/Y下/Z前），沿局部 +Z（前方）展开。
+     * 颜色与尺寸由 markerStyleFor(id) 统一推导（唯一事实来源，
+     * 与轻量路径 applyMarkerState 同源）：
+     *   - 普通顶点：绿色系、1 倍
+     *   - 播放高亮：红色系、1 倍
+     *   - 选中：红色系、2 倍
      *   - 回环搜索源：深蓝色
      *   - 回环候选：品红
      *
@@ -634,13 +656,6 @@ private:
         m_sphereCenters.clear();
         m_sphereCenters.reserve(graph->keyframes.size());
 
-        // 定义不同状态的标记颜色：普通绿色系（与蓝色高程渐变点云互补），
-        // 高亮红色系
-        const osg::Vec4 defaultColor(0.25f, 0.80f, 0.30f, 1.0f);  // 绿 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红 —— 选中/播放高亮
-        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 深蓝 —— 回环搜索源
-        const osg::Vec4 loopCandColor(1.0f, 0.25f, 0.75f, 1.0f); // 品红 —— 回环候选
-
         // 遍历所有关键帧，创建顶点位姿标记
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
@@ -662,22 +677,13 @@ private:
             // 标记尖端沿局部 +Z（前方）方向
             Eigen::Matrix3f rot = pose.linear().cast<float>();
 
-            // 根据状态选择颜色和尺寸（造型统一为相机视锥体）。
-            // 尺寸语义：仅选中帧放大 2 倍；播放高亮保持 1 倍
-            // （与轻量路径 highlightPlaybackVertex 一致，避免播放会话中
-            // 触发重建时播放帧"突然变大"）
-            osg::Vec4 color = defaultColor;
-            float customRadius = -1.0f;  // < 0 表示使用全局默认尺寸
-            if (id == m_selectedVertexId) {
-                color = selectedColor;
-                customRadius = m_sphereRadius * 2.0f;
-            } else if (id == m_loopSourceId) {
-                color = loopSourceColor;
-            } else if (m_loopCandidateIds.count(id)) {
-                color = loopCandColor;
-            } else if (id == m_playbackPrevId) {
-                color = selectedColor;
-            }
+            // 颜色和尺寸由统一的状态→样式映射给出（与轻量路径
+            // applyMarkerState 同源，重建后所有标记样式即当前状态）；
+            // scale > 1 的选中帧按比例放大几何体
+            const MarkerStyle style = markerStyleFor(id);
+            float customRadius = (style.scale > 1.0f)
+                                     ? m_sphereRadius * style.scale
+                                     : -1.0f;  // < 0 表示使用全局默认尺寸
 
             // 缓存可拾取标记（用于鼠标拾取）—— 仅采样后的标记；
             // 视锥体远平面四角距锥顶最远约 2.3 倍特征尺寸
@@ -687,7 +693,7 @@ private:
             float renderRadius = (customRadius > 0.0f) ? customRadius : m_sphereRadius;
             m_sphereCenters.push_back({center, id, 2.5f * renderRadius});
 
-            m_sphereViz->appendFrustum(center, rot, color, id, customRadius);
+            m_sphereViz->appendFrustum(center, rot, style.color, id, customRadius);
         }
         // 聚焦淡化状态：目标标记在重建后仍保持稍高的不透明度
         if (m_focusedVertexId >= 0) {
