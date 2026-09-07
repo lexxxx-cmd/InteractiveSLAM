@@ -81,7 +81,7 @@ public:
      *               投影屏 16:9：半宽 = radius、半高 = 0.5625 × radius，
      *               约 53° 水平视场角）
      */
-    explicit VertexSphereVisualizer(float radius = 1.0f)
+    explicit VertexSphereVisualizer(float radius = 0.1f)
         : m_radius(radius) {
 
         m_geom = new osg::Geometry;
@@ -417,11 +417,11 @@ private:
     static constexpr float kHalfWidth  = 1.0f;    ///< 投影屏半宽（16:9）
     static constexpr float kHalfHeight = 0.5625f; ///< 投影屏半高（9/16 × 半宽）
     // —— 纵向渐变（沿局部"下"方向标明朝向：上面深、下面浅） ——
-    static constexpr float kTopShade    = 0.55f;  ///< 图像上方（局部 -Y）亮度系数
-    static constexpr float kBottomShade = 1.15f;  ///< 图像下方（局部 +Y）亮度系数
+    static constexpr float kTopShade    = 1.25f;  ///< 图像上方（局部 -Y）亮度系数
+    static constexpr float kBottomShade = 0.55f;  ///< 图像下方（局部 +Y）亮度系数
     // —— 分区 alpha（再乘全局不透明度） ——
-    static constexpr float kPlaneAlpha = 0.55f;  ///< 投影屏填充面：较实
-    static constexpr float kLineAlpha  = 0.95f;  ///< 线框：最亮
+    static constexpr float kPlaneAlpha = 0.95f;  ///< 投影屏填充面：较实
+    static constexpr float kLineAlpha  = 0.55f;  ///< 线框：最亮
     // —— 每标记固定顶点布局（appendFrustum 的推入顺序） ——
     static constexpr int kPlaneVerts = 4;        ///< 投影屏四角
     static constexpr int kLineVerts  = 5;        ///< 线框锥顶 + 四角

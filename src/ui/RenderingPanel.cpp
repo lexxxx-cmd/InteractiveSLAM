@@ -98,12 +98,12 @@ void RenderingPanel::setupUi() {
     renderLayout->addWidget(m_drawEdgesCb);
     renderLayout->addWidget(m_drawCloudsCb);
 
-    // 视锥体大小滑块（1-100，默认 50 → 0.50）
+    // 视锥体大小滑块（1-100，默认 10 → 0.10）
     renderLayout->addWidget(new QLabel(tr("Frustum Size:")));
     m_sphereRadiusSlider = new QSlider(Qt::Horizontal);
     m_sphereRadiusSlider->setRange(1, 100);
-    m_sphereRadiusSlider->setValue(50);
-    m_sphereRadiusLabel = new QLabel("0.50");
+    m_sphereRadiusSlider->setValue(10);
+    m_sphereRadiusLabel = new QLabel("0.10");
     auto* sphereRow = new QHBoxLayout;
     sphereRow->addWidget(m_sphereRadiusSlider);
     sphereRow->addWidget(m_sphereRadiusLabel);
@@ -120,12 +120,12 @@ void RenderingPanel::setupUi() {
     edgeRow->addWidget(m_edgeWidthLabel);
     renderLayout->addLayout(edgeRow);
 
-    // 点大小滑块（1-10，默认 3）
+    // 点大小滑块（1-10，默认 2）
     renderLayout->addWidget(new QLabel(tr("Point Size:")));
     m_pointSizeSlider = new QSlider(Qt::Horizontal);
     m_pointSizeSlider->setRange(1, 10);
-    m_pointSizeSlider->setValue(3);
-    m_pointSizeLabel = new QLabel("3");
+    m_pointSizeSlider->setValue(2);
+    m_pointSizeLabel = new QLabel("2");
     auto* sizeRow = new QHBoxLayout;
     sizeRow->addWidget(m_pointSizeSlider);
     sizeRow->addWidget(m_pointSizeLabel);
@@ -156,7 +156,7 @@ void RenderingPanel::setupUi() {
     // 采样步长 SpinBox（1-100，默认 1）
     renderLayout->addWidget(new QLabel(tr("Sample Stride:")));
     m_sampleStrideSpin = new QSpinBox;
-    m_sampleStrideSpin->setRange(1, 100);
+    m_sampleStrideSpin->setRange(1, 1000);
     m_sampleStrideSpin->setValue(1);
     m_sampleStrideSpin->setToolTip(tr("Render every Nth keyframe (1 = all)"));
     m_sampleStrideLabel = new QLabel("1");
