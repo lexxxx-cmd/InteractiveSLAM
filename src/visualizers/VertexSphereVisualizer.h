@@ -54,6 +54,27 @@
 class VertexSphereVisualizer {
 public:
     /**
+     * @brief 单个标记在颜色数组中的分区范围
+     *
+     * 顶点按"投影屏 → 线框"连续排布，记录各段长度即可在
+     * updateSphereColor()/setOpacity() 中按分区应用不同的
+     * alpha 与线框提亮，避免遍历所有标记。
+     * 定义于类前部：ranges() 的返回类型在声明处解析，
+     * 需先于其出现。
+     */
+    struct SphereRange {
+        unsigned int startIndex;  ///< 在 m_colors 中的起始索引
+        int planeCount = 0;       ///< 投影屏顶点数（4）
+        int lineCount  = 0;       ///< 线框顶点数（锥顶 + 四角 = 5）
+        unsigned int vertexStartIndex = 0; ///< 在 m_verts 中的起始索引（标记顶点连续排布）
+        osg::Vec3d apex;          ///< 锥顶世界坐标（updateSphereScale 的缩放原点）
+        float scale = 1.0f;       ///< 当前缩放系数（updateSphereScale 增量缩放用）
+        unsigned int axisStartIndex = 0; ///< 在 m_axesColors 中的起始索引
+        int axisCount = 0;        ///< 局部坐标轴顶点数（6；未启用为 0）
+    };
+
+public:
+    /**
      * @brief 构造函数
      *
      * @param radius 标记特征尺寸（默认 1.0；视锥体深度 = 2 × radius，
@@ -392,24 +413,6 @@ public:
     }
 
 private:
-    /**
-     * @brief 单个标记在颜色数组中的分区范围
-     *
-     * 顶点按"投影屏 → 线框"连续排布，记录各段长度即可在
-     * updateSphereColor()/setOpacity() 中按分区应用不同的
-     * alpha 与线框提亮，避免遍历所有标记。
-     */
-    struct SphereRange {
-        unsigned int startIndex;  ///< 在 m_colors 中的起始索引
-        int planeCount = 0;       ///< 投影屏顶点数（4）
-        int lineCount  = 0;       ///< 线框顶点数（锥顶 + 四角 = 5）
-        unsigned int vertexStartIndex = 0; ///< 在 m_verts 中的起始索引（标记顶点连续排布）
-        osg::Vec3d apex;          ///< 锥顶世界坐标（updateSphereScale 的缩放原点）
-        float scale = 1.0f;       ///< 当前缩放系数（updateSphereScale 增量缩放用）
-        unsigned int axisStartIndex = 0; ///< 在 m_axesColors 中的起始索引
-        int axisCount = 0;        ///< 局部坐标轴顶点数（6；未启用为 0）
-    };
-
     // —— 视锥体造型参数（单位 = 特征尺寸 R） ——
     static constexpr float kDepth      = 0.5f;    ///< 视锥体深度（沿局部 +Z）
     static constexpr float kHalfWidth  = 1.0f;    ///< 投影屏半宽（16:9）
