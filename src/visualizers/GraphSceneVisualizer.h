@@ -354,27 +354,49 @@ public:
      * @brief 轻量级播放高亮（不重建视锥体几何体）
      *
      * 用于播放轴功能，在滑块拖动或自动播放时调用。
-     * 仅更新两个视锥体的颜色数组（上一个恢复默认色，当前变红色）
-     * + 点云高亮，不触发完整的几何体重建。
+     * 仅更新两个视锥体的颜色 + 尺寸（上一个恢复默认色和 1 倍尺寸，
+     * 当前变红色）+ 点云高亮，不触发完整的几何体重建。
+     * 尺寸经 updateSphereScale() 原地缩放，颜色与尺寸始终同步变化，
+     * 不会出现"绿色大帧 / 红色小帧"的杂交状态。
+     *
+     * 尺寸语义（与重建路径一致）：
+     *   - 普通帧：绿色、1 倍
+     *   - 播放高亮：红色、1 倍（连续播放中的小高亮）
+     *   - 选中帧：红色、2 倍（仅 setSelectedVertex 全量重建路径产生，
+     *     播放轻量路径划过选中帧时保持其大尺寸不动）
      *
      * 与 setSelectedVertex() 分工：播放通道只在播放会话期间生效，
      * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
      * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
      *
      * @param id 顶点 ID（-1 = 清理播放通道：仅恢复上一个播放帧的
-     *            视锥体颜色，不动点云高亮，避免抹掉刚建立的选择高亮）
+     *            视锥体颜色和尺寸，不动点云高亮，避免抹掉刚建立的选择高亮）
      */
     void highlightPlaybackVertex(long id) {
         const osg::Vec4 defaultColor(0.0f, 0.80f, 0.20f, 1.0f);  // 绿 —— 默认
         const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f); // 红 —— 播放高亮
+        const float normalScale = 1.0f;   // 普通/播放高亮帧尺寸
+        const float selectedScale = 2.0f; // 选中帧尺寸（与 rebuildSpheres 一致）
 
-        // 恢复上一个播放高亮视锥体为默认色
-        if (m_playbackPrevId >= 0 && m_sphereViz) {
-            m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
+        // 恢复上一个播放高亮视锥体为默认态（颜色 + 尺寸同步恢复；
+        // 若它同时是选中帧则恢复红色 2 倍的选中态）
+        if (m_playbackPrevId >= 0 && m_playbackPrevId != id && m_sphereViz) {
+            if (m_playbackPrevId == m_selectedVertexId) {
+                m_sphereViz->updateSphereColor(m_playbackPrevId, selectedColor);
+                m_sphereViz->updateSphereScale(m_playbackPrevId, selectedScale);
+            } else {
+                m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
+                m_sphereViz->updateSphereScale(m_playbackPrevId, normalScale);
+            }
+            updatePickRadius(m_playbackPrevId);
         }
-        // 设置新视锥体为红色
+        // 设置新播放帧为红色小高亮（选中帧保持 2 倍不动）
         if (id >= 0 && m_sphereViz) {
             m_sphereViz->updateSphereColor(id, selectedColor);
+            if (id != m_selectedVertexId) {
+                m_sphereViz->updateSphereScale(id, normalScale);
+                updatePickRadius(id);
+            }
         }
         m_playbackPrevId = id;
 
@@ -384,6 +406,23 @@ public:
             m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
         }
     }
+
+private:
+    /** @brief 同步 m_sphereCenters 中指定标记的拾取半径与其当前缩放 */
+    void updatePickRadius(long id) {
+        if (!m_sphereViz) return;
+        for (auto& c : m_sphereCenters) {
+            if (c.vertexId == id) {
+                auto it = m_sphereViz->ranges().find(id);
+                float scale =
+                    (it != m_sphereViz->ranges().end()) ? it->second.scale : 1.0f;
+                c.pickRadius = 2.5f * m_sphereRadius * scale;
+                break;
+            }
+        }
+    }
+
+public:
 
     /**
      * @brief 设置高亮窗口半宽
@@ -570,7 +609,9 @@ private:
      * （相机光心），方向取关键帧局部位姿的旋转
      * （右-下-前坐标系，X右/Y下/Z前），沿局部 +Z（前方）展开。配色：
      *   - 普通顶点：绿色系（与蓝色高程渐变点云互补）
-     *   - 选中 / 播放高亮：红色系（2 倍尺寸）
+     *   - 选中：红色系（2 倍尺寸）
+     *   - 播放高亮：红色系（1 倍尺寸，与轻量路径一致；
+     *     若同时是选中帧则为红色 2 倍）
      *   - 回环搜索源：深蓝色
      *   - 回环候选：品红
      *
@@ -621,7 +662,10 @@ private:
             // 标记尖端沿局部 +Z（前方）方向
             Eigen::Matrix3f rot = pose.linear().cast<float>();
 
-            // 根据状态选择颜色和尺寸（造型统一为相机视锥体）
+            // 根据状态选择颜色和尺寸（造型统一为相机视锥体）。
+            // 尺寸语义：仅选中帧放大 2 倍；播放高亮保持 1 倍
+            // （与轻量路径 highlightPlaybackVertex 一致，避免播放会话中
+            // 触发重建时播放帧"突然变大"）
             osg::Vec4 color = defaultColor;
             float customRadius = -1.0f;  // < 0 表示使用全局默认尺寸
             if (id == m_selectedVertexId) {
@@ -632,10 +676,7 @@ private:
             } else if (m_loopCandidateIds.count(id)) {
                 color = loopCandColor;
             } else if (id == m_playbackPrevId) {
-                // 播放轴高亮标记同样放大 2 倍（仅在完整重建时生效）
-                // 轻量级 highlightPlaybackVertex 路径仅更新颜色，不做几何重建
                 color = selectedColor;
-                customRadius = m_sphereRadius * 2.0f;
             }
 
             // 缓存可拾取标记（用于鼠标拾取）—— 仅采样后的标记；

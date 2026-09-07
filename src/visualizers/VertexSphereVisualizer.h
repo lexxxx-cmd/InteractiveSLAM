@@ -191,7 +191,7 @@ public:
         // 调试：锥顶局部 RGB 坐标轴（可选）
         if (m_drawLocalAxes) appendLocalAxes(center, rot, R, vertexId);
 
-        endAppend(vertexId);
+        endAppend(vertexId, center);
     }
 
     /**
@@ -213,7 +213,9 @@ public:
         const auto& range = it->second;
 
         osg::Vec4 base = newColor;
-        base.a() = m_opacity;  // 颜色更新不破坏整体不透明度
+        // 颜色更新不破坏整体不透明度；存在按标记 alpha 覆盖（聚焦淡化）
+        // 时优先使用覆盖值
+        base.a() = alphaFor(vertexId);
 
         // 按与 appendFrustum 相同的顶点顺序重放方向渐变
         unsigned int idx = range.startIndex;
@@ -228,10 +230,57 @@ public:
     }
 
     /**
+     * @brief 按顶点 ID 原地缩放单个标记（不重建几何体）
+     *
+     * 以锥顶（相机光心）为缩放原点，对该标记的全部顶点（投影屏 +
+     * 线框）做等比缩放：newPos = apex + (oldPos - apex) × scale/旧scale。
+     * 用于高亮尺寸变化的轻量路径（如播放高亮与选中态切换），
+     * O(标记顶点数) 复杂度，与总关键帧数无关。
+     *
+     * 调试局部坐标轴（若启用）同步缩放。缩放后 dirtyBound()
+     * 防止放大后的标记被包围球剔除。
+     *
+     * @param vertexId 顶点 ID（需已在 appendFrustum 中添加过）
+     * @param scale    目标缩放系数（1.0 = 全局默认尺寸）
+     */
+    void updateSphereScale(long vertexId, float scale) {
+        auto it = m_sphereRanges.find(vertexId);
+        if (it == m_sphereRanges.end()) return;
+        SphereRange& range = it->second;
+        if (std::abs(range.scale - scale) < 1e-6f) return;
+
+        float ratio = scale / range.scale;
+        range.scale = scale;
+
+        // 标记自身顶点：绕锥顶等比缩放
+        for (unsigned int i = 0; i < range.planeCount + range.lineCount; ++i) {
+            osg::Vec3f& p = (*m_verts)[range.vertexStartIndex + i];
+            osg::Vec3d off(p.x() - range.apex.x(),
+                           p.y() - range.apex.y(),
+                           p.z() - range.apex.z());
+            p.set(range.apex.x() + off.x() * ratio,
+                  range.apex.y() + off.y() * ratio,
+                  range.apex.z() + off.z() * ratio);
+        }
+        // 调试坐标轴（独立数组，锥顶即缩放原点）同步缩放
+        for (int i = 0; i < range.axisCount; ++i) {
+            osg::Vec3f& p = (*m_axesVerts)[range.axisStartIndex + i];
+            p.set(range.apex.x() + (p.x() - range.apex.x()) * ratio,
+                  range.apex.y() + (p.y() - range.apex.y()) * ratio,
+                  range.apex.z() + (p.z() - range.apex.z()) * ratio);
+        }
+        m_verts->dirty();
+        m_axesVerts->dirty();
+        m_geom->dirtyBound();
+        m_axesGeom->dirtyBound();
+    }
+
+    /**
      * @brief 按顶点 ID 更新单个标记的 alpha（不重建几何体）
      *
      * 用于双击聚焦等场景：整体压低透明度后单独抬升目标标记，
-     * 使其在淡化环境中仍可辨认。
+     * 使其在淡化环境中仍可辨认。覆盖值被记录，后续 updateSphereColor()
+     * 与 setOpacity() 会保留该按标记覆盖，直到再次调用本方法或 clear()。
      *
      * @param vertexId 顶点 ID（需已在 appendFrustum 中添加过）
      * @param alpha    该标记的不透明度（0.0 ~ 1.0）
@@ -239,6 +288,7 @@ public:
     void updateSphereOpacity(long vertexId, float alpha) {
         auto it = m_sphereRanges.find(vertexId);
         if (it == m_sphereRanges.end()) return;
+        m_alphaOverrides[vertexId] = alpha;
         const auto& range = it->second;
         int total = range.planeCount + range.lineCount;
         for (int i = 0; i < total; ++i)
@@ -268,11 +318,14 @@ public:
      * 按顶点 alpha 系数表重写当前颜色数组中的 alpha 值
      * （投影屏 × kPlaneAlpha、线框 × kLineAlpha）；
      * 后续 appendFrustum() 新增的标记也会使用该不透明度。
+     * 手动设置整体不透明度视为退出聚焦淡化：清除所有按标记的
+     * alpha 覆盖。
      *
      * @param opacity 不透明度（0.0 全透明 ~ 1.0 不透明）
      */
     void setOpacity(float opacity) {
         m_opacity = opacity;
+        m_alphaOverrides.clear();
         if (m_sphereRanges.empty()) {
             // 无分区记录时退化为整体统一 alpha
             for (unsigned int i = 0; i < m_colors->size(); ++i)
@@ -320,6 +373,9 @@ public:
     /** @brief 获取包含标记的 OSG 节点 */
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
 
+    /** @brief 顶点 ID → 分区范围映射（只读，供外部查询标记当前缩放等） */
+    const std::unordered_map<long, SphereRange>& ranges() const { return m_sphereRanges; }
+
     /**
      * @brief 清除所有数据（用于重建）
      */
@@ -332,6 +388,7 @@ public:
         m_axesColors->clear();
         m_axesIndices->clear();
         m_sphereRanges.clear();
+        m_alphaOverrides.clear();
     }
 
 private:
@@ -346,6 +403,9 @@ private:
         unsigned int startIndex;  ///< 在 m_colors 中的起始索引
         int planeCount = 0;       ///< 投影屏顶点数（4）
         int lineCount  = 0;       ///< 线框顶点数（锥顶 + 四角 = 5）
+        unsigned int vertexStartIndex = 0; ///< 在 m_verts 中的起始索引（标记顶点连续排布）
+        osg::Vec3d apex;          ///< 锥顶世界坐标（updateSphereScale 的缩放原点）
+        float scale = 1.0f;       ///< 当前缩放系数（updateSphereScale 增量缩放用）
         unsigned int axisStartIndex = 0; ///< 在 m_axesColors 中的起始索引
         int axisCount = 0;        ///< 局部坐标轴顶点数（6；未启用为 0）
     };
@@ -388,15 +448,26 @@ private:
         }
     }
 
+    /** @brief 该标记当前应使用的不透明度：按标记覆盖（聚焦淡化）优先，
+     *         否则全局不透明度 */
+    float alphaFor(long vertexId) const {
+        auto it = m_alphaOverrides.find(vertexId);
+        return (it != m_alphaOverrides.end()) ? it->second : m_opacity;
+    }
+
     /** @brief appendFrustum 公共后置：按固定布局回填分区顶点数 */
-    void endAppend(long vertexId) {
+    void endAppend(long vertexId, const osg::Vec3d& center) {
         if (vertexId < 0) return;
         auto& range = m_sphereRanges[vertexId];
         int total = static_cast<int>(m_colors->size()) - range.startIndex;
         range.planeCount = kPlaneVerts;
         range.lineCount  = total - kPlaneVerts;
+        // 顶点在 m_verts 中也连续排布，记录起始索引与锥顶位置，
+        // 供 updateSphereScale() 原地缩放使用
+        range.vertexStartIndex =
+            static_cast<unsigned int>(m_verts->size()) - total;
+        range.apex = center;
     }
-
     /** @brief 同色系提亮：RGB 各 × 0.5 + 0.5（用于线框勾边） */
     static osg::Vec4 lightened(const osg::Vec4& c) {
         return osg::Vec4(c.r() * 0.5f + 0.5f,
@@ -495,4 +566,8 @@ private:
     /** @brief 顶点 ID → 颜色数组分区范围的映射（用于增量颜色更新）
      *         由 beginAppend()/endAppend() 在添加标记时填充 */
     std::unordered_map<long, SphereRange> m_sphereRanges;
+
+    /** @brief 按标记的 alpha 覆盖（聚焦淡化目标标记），updateSphereColor()
+     *         与 setOpacity() 保留该覆盖，避免轻量路径冲掉聚焦效果 */
+    std::unordered_map<long, float> m_alphaOverrides;
 };
