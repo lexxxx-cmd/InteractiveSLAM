@@ -366,7 +366,12 @@ public:
      * 三种视觉状态：
      *   - 普通帧：绿色、1 倍
      *   - 播放高亮：红色、1 倍（连续播放中的小高亮）
-     *   - 选中帧：红色、2 倍（播放划过选中帧时保持大红不动）
+     *   - 选中帧：红色、2 倍（仅存在于无播放会话时，见下方接管语义）
+     *
+     * 播放通道接管标记高亮：会话开始/推进（id >= 0）时清除上一轮
+     * 遗留的选中高亮（按普通态轻量恢复，不触发重建），避免旧的大红
+     * 标记残留在场景中、播放划过它时被二次放大。会话清理（id = -1）
+     * 不动选中态——暂停路径随后的 selectVertex() 会建立新选中。
      *
      * 与 setSelectedVertex() 分工：播放通道只在播放会话期间生效，
      * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
@@ -377,7 +382,11 @@ public:
      */
     void highlightPlaybackVertex(long id) {
         long prev = m_playbackPrevId;
-        m_playbackPrevId = id;  // 先更新状态，再由状态推导两个标记的样式
+        long oldSelected = m_selectedVertexId;
+        m_playbackPrevId = id;  // 先更新状态，再由状态推导标记样式
+        if (id >= 0) m_selectedVertexId = -1;  // 播放接管：清除旧选中
+
+        applyMarkerState(oldSelected);  // 旧选中恢复普通态（若已被清除）
         applyMarkerState(prev);
         applyMarkerState(id);
 

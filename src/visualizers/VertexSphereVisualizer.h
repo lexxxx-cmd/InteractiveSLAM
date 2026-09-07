@@ -212,7 +212,9 @@ public:
         // 调试：锥顶局部 RGB 坐标轴（可选）
         if (m_drawLocalAxes) appendLocalAxes(center, rot, R, vertexId);
 
-        endAppend(vertexId, center);
+        // 实际烘焙进几何体的缩放（选中帧按 2R 构建时为 2.0）
+        endAppend(vertexId, center,
+                  (m_radius > 1e-6f) ? (R / m_radius) : 1.0f);
     }
 
     /**
@@ -456,7 +458,7 @@ private:
     }
 
     /** @brief appendFrustum 公共后置：按固定布局回填分区顶点数 */
-    void endAppend(long vertexId, const osg::Vec3d& center) {
+    void endAppend(long vertexId, const osg::Vec3d& center, float bakedScale) {
         if (vertexId < 0) return;
         auto& range = m_sphereRanges[vertexId];
         int total = static_cast<int>(m_colors->size()) - range.startIndex;
@@ -467,6 +469,10 @@ private:
         range.vertexStartIndex =
             static_cast<unsigned int>(m_verts->size()) - total;
         range.apex = center;
+        // 记录 append 时烘焙进几何体的实际缩放（如选中帧按 2R 构建
+        // 则为 2.0），保证后续 updateSphereScale() 以真实尺寸为基准
+        // 增量缩放，不会把已放大的标记再乘一遍
+        range.scale = bakedScale;
     }
     /** @brief 同色系提亮：RGB 各 × 0.5 + 0.5（用于线框勾边） */
     static osg::Vec4 lightened(const osg::Vec4& c) {
