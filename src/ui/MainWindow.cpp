@@ -18,6 +18,7 @@
 #include "ui/RenderingPanel.h"
 #include "ui/EdgeListPanel.h"
 #include "ui/OverlayPanelWidget.h"
+#include "ui/LoadingOverlayWidget.h"
 #include "ui/PlaybackPanel.h"
 #include "ui/LoopClosureDialog.h"
 #include "ui/AutoLoopClosureDialog.h"
@@ -75,10 +76,29 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
     connect(m_manager, &GraphManager::lastMessageChanged,
             this, &MainWindow::onLogMessage);
 
-    // 点云全部渲染完成后停止加载动画（spinner 持续到 LOD 分块上传完毕，
-    // 而非数据加载完成就消失）
+    // --- 后端进度 → 加载遮罩 ---
+    // ProgressReporter 的信号此前无 UI 消费；后端已把工作线程的进度
+    // 跨线程转发到主线程，此处直接连接到全屏加载遮罩
+    //（m_loadingOverlay 已在 setupUi() 末尾创建，此处非空）
+    connect(m_manager->progress(), &ProgressReporter::titleChanged,
+            m_loadingOverlay, &LoadingOverlayWidget::setTitle);
+    connect(m_manager->progress(), &ProgressReporter::textChanged,
+            m_loadingOverlay, &LoadingOverlayWidget::setText);
+    connect(m_manager->progress(), &ProgressReporter::progressChanged,
+            m_loadingOverlay, [this](int current, int maximum) {
+        if (maximum > 0)
+            m_loadingOverlay->setProgress(current, maximum);
+        else
+            m_loadingOverlay->setIndeterminate();
+    });
+
+    // 点云全部渲染完成后停止加载动画并隐藏遮罩（spinner/遮罩持续到
+    // LOD 分块上传完毕，而非数据加载完成就消失）
     connect(m_viewport, &ViewportWidget::cloudRenderFinished,
-            this, &MainWindow::stopLoadingSpinner);
+            this, [this]() {
+        stopLoadingSpinner();
+        m_loadingOverlay->hideOverlay();
+    });
 
     // 选中顶点的反馈：在状态栏显示顶点 ID
     connect(m_viewport, &ViewportWidget::vertexSelected,
@@ -374,6 +394,11 @@ void MainWindow::setupUi() {
         else
             statusBar()->showMessage(tr("Save failed: %1").arg(err), 5000);
     });
+
+    // 加载遮罩进度覆盖层：铺满主窗口的最上层子控件（初始隐藏），
+    // 显示期间冻结底层交互；由加载生命周期回调与后端进度信号驱动
+    m_loadingOverlay = new LoadingOverlayWidget(this);
+    m_loadingOverlay->raise();
 }
 
 // ---------------------------------------------------------------------------
@@ -831,6 +856,12 @@ void MainWindow::onLoadingStarted() {
     statusBar()->showMessage(tr("Loading map..."));
     // 通用加载文案（地图加载与 bag 导入共用）
     startLoadingSpinner(tr("Loading..."));
+    // 全屏加载遮罩：忙碌模式直到后端报告具体进度，期间冻结底层交互；
+    // 先清空上一轮残留文案，等待后端进度信号填充
+    m_loadingOverlay->setTitle(QString());
+    m_loadingOverlay->setText(QString());
+    m_loadingOverlay->setIndeterminate();
+    m_loadingOverlay->showOverlay();
 }
 
 /**
@@ -862,6 +893,10 @@ void MainWindow::stopLoadingSpinner() {
 void MainWindow::onLoadingSucceeded() {
     // 注意：此处不停止加载动画——点云（含 LOD 分块）仍在后台构建/渐进上传，
     // spinner 由 cloudRenderFinished 信号在点云全部渲染完成后停止
+    // 遮罩同理不隐藏：数据加载完成但点云仍在后台构建，切换文案为构建
+    // 提示并转回忙碌模式，等 cloudRenderFinished 才消失
+    m_loadingOverlay->setText(tr("Building point clouds..."));
+    m_loadingOverlay->setIndeterminate();
     m_loopBeginVertexId = -1;
     // Bag 导入随加载一并成功 → 回写项目状态 completed
     if (m_activeIsImport && !m_activeProjectDir.isEmpty()) {
@@ -901,6 +936,7 @@ void MainWindow::onLoadingSucceeded() {
  */
 void MainWindow::onLoadingFailed(const QString& error) {
     stopLoadingSpinner();
+    m_loadingOverlay->hideOverlay();
     // Bag 导入失败 → 回写项目状态 failed（保留 processing 前的状态信息）
     if (m_activeIsImport && !m_activeProjectDir.isEmpty()) {
         ProjectManager::setStatus(m_activeProjectDir, "failed");

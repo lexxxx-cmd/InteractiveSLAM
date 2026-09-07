@@ -108,6 +108,7 @@ set(UI_SOURCES
     src/ui/EdgeListPanel.cpp                              # 边列表面板
     src/ui/PlaybackPanel.cpp                              # 播放轴面板
     src/ui/OverlayPanelWidget.cpp                         # 叠加面板控件
+    src/ui/LoadingOverlayWidget.cpp                       # 加载遮罩进度覆盖层
 )
 
 # ============================================================================

@@ -28,6 +28,7 @@ class AutoLoopClosurePanel;
 class EdgeListPanel;
 class OverlayPanelWidget;
 class PlaybackPanel;
+class LoadingOverlayWidget;
 // 高级设置对话框（前向声明必须位于命名空间作用域，不能写在类体内，
 // 否则会变成 MainWindow 的嵌套类声明，导致不完整类型报错）
 class AutoLoopClosureDialog;
@@ -140,6 +141,8 @@ private:
     QTimer* m_loadingTimer = nullptr;     ///< 旋转动画定时器
     int     m_loadingFrame = 0;           ///< 当前动画帧（0..3）
     QString m_loadingText;                ///< 加载中的基础文案（如"Loading map..."）
+
+    LoadingOverlayWidget* m_loadingOverlay = nullptr;  ///< 全屏加载遮罩进度覆盖层
 
     // === 异步保存 ===
     QFutureWatcher<QString> m_saveWatcher; ///< 后台保存结果监视器（结果为空串 = 成功，否则为错误信息）
