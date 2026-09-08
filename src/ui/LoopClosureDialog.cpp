@@ -31,6 +31,8 @@
 #include <QtConcurrent/QtConcurrent>
 
 #include <algorithm>
+#include <optional>
+#include <utility>
 
 #include <pcl/common/transforms.h>
 #include <pcl/registration/registration.h>
@@ -40,6 +42,35 @@
 // ---------------------------------------------------------------------------
 // mergeAdjacentClouds — 自由函数
 // ---------------------------------------------------------------------------
+
+/**
+ * @brief 查找两顶点间已有的 SE3 边，返回"终点在起点坐标系下"的测量位姿
+ *
+ * 边的测量值语义为 vertices()[1] 在 vertices()[0] 坐标系下的位姿：
+ *   - 边方向与对话框一致（v0=起点, v1=终点）→ 直接返回测量值
+ *   - 边方向相反（v0=终点, v1=起点）→ 返回测量值的逆
+ *
+ * @param beginNode 起点顶点（对话框参考系）
+ * @param endNode   终点顶点
+ * @return 测量位姿（end 在 begin 坐标系下）；两顶点间无 SE3 边时为空
+ */
+static std::optional<Eigen::Isometry3d> existingEdgeRelative(
+    g2o::VertexSE3* beginNode, g2o::VertexSE3* endNode) {
+    if (!beginNode || !endNode) return std::nullopt;
+    for (auto* edge : beginNode->edges()) {
+        auto* se3 = dynamic_cast<g2o::EdgeSE3*>(edge);
+        if (!se3) continue;
+        const auto& verts = se3->vertices();
+        if (verts.size() < 2 || !verts[0] || !verts[1]) continue;
+        if (verts[0] == beginNode && verts[1] == endNode) {
+            return se3->measurement();
+        }
+        if (verts[0] == endNode && verts[1] == beginNode) {
+            return se3->measurement().inverse();
+        }
+    }
+    return std::nullopt;
+}
 
 /**
  * @brief 合并与指定顶点相邻关键帧的点云到该顶点的局部坐标系
@@ -134,6 +165,18 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
 
     m_beginPose    = itBegin->second->estimate();
     m_endPoseInit  = itEnd->second->estimate();
+
+    // 已有边连接时，初始预览直接采用该边的测量位姿（配准解/人工校准
+    // 的结果），比两顶点当前估计的相对位姿更接近真实约束；无边时
+    // 退回当前估计的相对位姿
+    if (auto edgeRelative = existingEdgeRelative(itBegin->second->node,
+                                                 itEnd->second->node)) {
+        // 边测量值语义为 vertices()[1] 在 vertices()[0] 坐标系下的位姿；
+        // 对话框以起点为参考系（relative = begin⁻¹ · end），方向不一致
+        // 时求逆换算
+        m_endPoseInit = m_beginPose * (*edgeRelative);
+    }
+
     m_endPose      = m_endPoseInit;
 
     m_regMethods = std::make_unique<hdl_graph_slam::RegistrationMethods>();
