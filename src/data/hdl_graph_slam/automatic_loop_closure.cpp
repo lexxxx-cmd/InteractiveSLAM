@@ -159,6 +159,10 @@ void AutomaticLoopClosure::refresh_sorted_ids() {
     }
     std::sort(m_sorted_ids.begin(), m_sorted_ids.end());
     m_cached_stride = stride;
+    // 记录全量帧数（非采样池大小）：主循环据此判断图是否新增了
+    // 关键帧——采样时池大小恒小于全量数，拿它比较会导致每轮
+    // 误判"过期"并重置遍历索引（顺序模式卡死在第一帧）
+    m_last_keyframe_count = m_graph->keyframes.size();
 }
 
 // ── BFS 候选搜索 ─────────────────────────────────────────────────────────────
@@ -330,7 +334,9 @@ void AutomaticLoopClosure::loop_detection() {
         }
 
         // ── 步骤 1：关键帧数量或采样步长变化时，刷新排序缓存 ──
-        if (m_sorted_ids.size() != m_graph->keyframes.size() ||
+        //（用缓存时的全量帧数比较；池大小在采样模式下恒小于全量数，
+        // 不可作判据，否则每轮误刷新并重置 m_current_index）
+        if (m_graph->keyframes.size() != m_last_keyframe_count ||
             m_cached_stride != sample_stride()) {
             refresh_sorted_ids();
             m_current_index = 0;  // 源帧池变化，从头遍历避免索引越界跳帧

@@ -72,6 +72,7 @@ public:
      * 的源帧与候选帧均限定在 id % stride == 0 的采样子集内。
      * 数据层已创建则立即推送（运行中下一迭代生效），否则缓存，
      * 待 onStartStop() 延迟创建后同步。
+     * 同时刷新采样帧间距统计标签（供用户参考调整距离阈值）。
      */
     void setSampleStride(int stride);
 
@@ -89,6 +90,7 @@ private:
     void setupUi();                        ///< 创建 UI 控件（仅开始/停止+状态）
     void syncParamsToLoop();               ///< 将 params 推送到数据层
     void updateStatusStyle(bool running);  ///< 根据运行状态更新状态标签样式
+    void refreshStrideDistances();         ///< 统计采样帧间直线距离并更新标签
 
     GraphManager* m_manager;  ///< 图数据管理器（非拥有指针）
 
@@ -111,6 +113,7 @@ private:
     QLabel* m_candidatesLabel = nullptr;   ///< 候选顶点数标签
     QLabel* m_edgesInsertedLabel = nullptr;///< 已插入边数标签
     QLabel* m_lastMatchLabel = nullptr;    ///< 最后匹配信息标签
+    QLabel* m_strideDistLabel = nullptr;   ///< 采样帧间距统计标签（参考调距离阈值）
 
     // ---- 轮询 ----
     QTimer* m_pollTimer = nullptr;                ///< 状态轮询定时器（100ms）

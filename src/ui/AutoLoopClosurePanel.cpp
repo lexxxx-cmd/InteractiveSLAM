@@ -18,6 +18,11 @@
 #include <QFormLayout>
 #include <QMessageBox>
 
+#include <algorithm>
+#include <limits>
+#include <utility>
+#include <vector>
+
 // ---- 构造 / 析构 ----
 
 AutoLoopClosurePanel::AutoLoopClosurePanel(GraphManager* manager, QWidget* parent)
@@ -76,6 +81,8 @@ void AutoLoopClosurePanel::setSampleStride(int stride) {
     if (m_autoLoop) {
         m_autoLoop->set_sample_stride(stride);
     }
+    // 刷新采样帧间距统计（参考调整距离阈值）
+    refreshStrideDistances();
 }
 
 // ---- UI 设置 ----
@@ -112,6 +119,15 @@ void AutoLoopClosurePanel::setupUi() {
     m_lastMatchLabel = new QLabel(tr("Last: —"));
     statusForm->addRow(tr("Last match:"), m_lastMatchLabel);
 
+    // 采样帧间距统计：相邻采样帧（id % stride == 0）位姿直线距离的
+    // 最小/平均/最大值，供用户参考调整搜索距离阈值（候选帧与源帧的
+    // 空间距离上限必须大于典型帧间距才可能有候选）
+    m_strideDistLabel = new QLabel(tr("Stride dist: —"));
+    m_strideDistLabel->setToolTip(tr(
+        "Euclidean distances between consecutive sampled keyframes "
+        "(min / avg / max). Use as reference for the distance threshold."));
+    statusForm->addRow(tr("Stride dist:"), m_strideDistLabel);
+
     mainLayout->addWidget(statusGroup);
     mainLayout->addStretch();
 }
@@ -139,6 +155,58 @@ void AutoLoopClosurePanel::syncParamsToLoop() {
 }
 
 // ---- 私有辅助 ----
+
+/**
+ * @brief 统计采样帧间直线距离并更新标签
+ *
+ * 按 id 升序取采样集（id % stride == 0）内相邻两帧的位姿平移
+ * （xyz）计算欧氏距离，显示最小/平均/最大值（米，保留 2 位小数）。
+ * 供用户参考调整自动回环的搜索距离阈值：候选帧与源帧的空间距离
+ * 上限（distance_thresh）明显小于典型帧间距时候选会恒为空。
+ * 图未加载或采样帧不足 2 帧时显示占位符。
+ */
+void AutoLoopClosurePanel::refreshStrideDistances() {
+    if (!m_strideDistLabel) return;
+
+    auto* graph = m_manager ? m_manager->graph() : nullptr;
+    if (!graph || graph->keyframes.size() < 2) {
+        m_strideDistLabel->setText(tr("Stride dist: —"));
+        return;
+    }
+
+    // 收集采样帧的位姿平移，按 id 升序（相邻采样帧 = 序列上前后帧）
+    std::vector<std::pair<long, Eigen::Vector3d>> sampled;
+    sampled.reserve(graph->keyframes.size());
+    for (const auto& [id, kf] : graph->keyframes) {
+        if (m_sampleStride > 1 && id % m_sampleStride != 0) continue;
+        if (!kf) continue;
+        sampled.emplace_back(id, Eigen::Vector3d(kf->estimate().translation()));
+    }
+
+    if (sampled.size() < 2) {
+        m_strideDistLabel->setText(tr("Stride dist: —"));
+        return;
+    }
+    std::sort(sampled.begin(), sampled.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    // 相邻采样帧间直线距离统计
+    double minD = std::numeric_limits<double>::max();
+    double maxD = 0.0;
+    double sumD = 0.0;
+    for (size_t i = 1; i < sampled.size(); ++i) {
+        double d = (sampled[i].second - sampled[i - 1].second).norm();
+        minD = std::min(minD, d);
+        maxD = std::max(maxD, d);
+        sumD += d;
+    }
+    double avgD = sumD / static_cast<double>(sampled.size() - 1);
+
+    m_strideDistLabel->setText(tr("Stride dist: %1 / %2 / %3 m")
+        .arg(minD, 0, 'f', 2)
+        .arg(avgD, 0, 'f', 2)
+        .arg(maxD, 0, 'f', 2));
+}
 
 void AutoLoopClosurePanel::updateStatusStyle(bool running) {
     if (running) {
@@ -170,6 +238,8 @@ void AutoLoopClosurePanel::onStartStop() {
         m_loopGraph = graph;
         // 数据层重建后补同步缓存的采样步长
         m_autoLoop->set_sample_stride(m_sampleStride);
+        // 图可能在此前未加载时空转过（统计显示占位符），启动时重算
+        refreshStrideDistances();
     }
 
     if (m_autoLoop->is_running()) {
