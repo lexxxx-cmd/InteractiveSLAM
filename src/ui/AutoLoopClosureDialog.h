@@ -33,6 +33,14 @@ public:
     void stopAutoLoop();
 
     /**
+     * @brief 设置采样步长（内部变量，UI 无对应控件）
+     *
+     * 跟随渲染采样步长，转发给内嵌面板；stride > 1 时自动回环的
+     * 源帧与候选帧均限定在采样关键帧子集内。
+     */
+    void setSampleStride(int stride);
+
+    /**
      * @brief 查询"插入回环边后是否执行优化"
      *
      * MainWindow 据此决定自动回环插边后是否需要重建点云：

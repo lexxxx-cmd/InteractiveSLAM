@@ -69,6 +69,15 @@ void AutoLoopClosurePanel::setParams(const LoopClosureParams& params) {
     }
 }
 
+void AutoLoopClosurePanel::setSampleStride(int stride) {
+    if (stride < 1) stride = 1;
+    m_sampleStride = stride;
+    // 数据层存在即推送（运行中由检测线程在下一迭代感知并重建源帧池）
+    if (m_autoLoop) {
+        m_autoLoop->set_sample_stride(stride);
+    }
+}
+
 // ---- UI 设置 ----
 
 /**
@@ -159,6 +168,8 @@ void AutoLoopClosurePanel::onStartStop() {
     if (!m_autoLoop || m_loopGraph != graph) {
         m_autoLoop = std::make_unique<hdl_graph_slam::AutomaticLoopClosure>(graph);
         m_loopGraph = graph;
+        // 数据层重建后补同步缓存的采样步长
+        m_autoLoop->set_sample_stride(m_sampleStride);
     }
 
     if (m_autoLoop->is_running()) {

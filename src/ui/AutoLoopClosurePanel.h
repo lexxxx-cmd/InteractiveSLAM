@@ -65,6 +65,16 @@ public:
     /** @brief 写入参数（高级设置对话框确定时调用；未运行时生效） */
     void setParams(const LoopClosureParams& params);
 
+    /**
+     * @brief 设置采样步长（内部变量，UI 无对应控件）
+     *
+     * 跟随 RenderingPanel 的渲染采样步长：stride > 1 时自动回环
+     * 的源帧与候选帧均限定在 id % stride == 0 的采样子集内。
+     * 数据层已创建则立即推送（运行中下一迭代生效），否则缓存，
+     * 待 onStartStop() 延迟创建后同步。
+     */
+    void setSampleStride(int stride);
+
 signals:
     /// 新闭环边插入时发出 — MainWindow 刷新视口
     void loopEdgeInserted();
@@ -88,6 +98,9 @@ private:
 
     // ---- 参数（由高级设置对话框读写） ----
     LoopClosureParams m_params;
+
+    // ---- 采样步长（内部变量，跟随渲染采样；数据层未创建时缓存） ----
+    int m_sampleStride = 1;
 
     // ---- 动作按钮 ----
     QPushButton* m_startStopBtn = nullptr;  ///< 开始/停止按钮

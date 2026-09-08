@@ -349,6 +349,12 @@ void MainWindow::setupUi() {
     connect(m_viewport, &ViewportWidget::sampleStrideChanged,
             m_playbackPanel, &PlaybackPanel::onSampleStrideChanged);
 
+    // 采样步长变化 → 同步自动回环检测（内部变量，对话框可能尚未创建）
+    connect(m_viewport, &ViewportWidget::sampleStrideChanged,
+            this, [this](int stride) {
+        if (m_autoLoopDialog) m_autoLoopDialog->setSampleStride(stride);
+    });
+
     // 任何选中（Ctrl+Click / 程序化 selectVertex）→ 暂停播放轴并清理
     // 播放通道高亮：用户主动选择时播放让位，避免两个红色标记并存。
     // 面板自身的停下路径已先清理再选中，此处为幂等兜底。
@@ -521,6 +527,9 @@ void MainWindow::setupMenus() {
     connect(autoLoopAction, &QAction::triggered, this, [this]() {
         if (!m_autoLoopDialog) {
             m_autoLoopDialog = new AutoLoopClosureDialog(m_manager, this);
+            // 采样步长为内部变量（UI 无控件）：对话框创建时同步当前
+            // 渲染采样值，保证"先改步长后开对话框"语义一致
+            m_autoLoopDialog->setSampleStride(m_viewport->sampleStride());
             // 自动回环信号（内嵌面板转发）→ 刷新视口 / 高亮
             connect(m_autoLoopDialog,
                     &AutoLoopClosureDialog::loopEdgeInserted,

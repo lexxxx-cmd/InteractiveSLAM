@@ -45,6 +45,10 @@ void AutoLoopClosureDialog::stopAutoLoop() {
     if (m_autoLoopPanel) m_autoLoopPanel->stopDetection();
 }
 
+void AutoLoopClosureDialog::setSampleStride(int stride) {
+    if (m_autoLoopPanel) m_autoLoopPanel->setSampleStride(stride);
+}
+
 bool AutoLoopClosureDialog::optimizeAfterInsert() const {
     if (!m_autoLoopPanel) return true;  // 保守默认：视为会优化
     return m_autoLoopPanel->getParams().optimizeAfterInsert;
