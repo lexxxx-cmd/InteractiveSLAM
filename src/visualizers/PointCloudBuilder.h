@@ -85,6 +85,7 @@ struct LodLevel {
  */
 struct BuildOptions {
     bool lodEnabled = false;    ///< 是否生成第一层 LOD（渲染固定为全量 + 第一层）
+    bool showOriginalLayer = false; ///< 是否生成原始层（里程计位姿点云，参照底图）
 
     // —— 孤立杂点滤波（全局体素占据计数，见 build() 阶段 2.5） ——
     bool  outlierFilterEnabled = true;  ///< 是否启用孤立杂点滤波
@@ -116,6 +117,13 @@ struct PointCloudBuildResult {
     std::vector<osg::ref_ptr<osg::Vec4Array>> colorChunks;   ///< 主级别分块颜色数组
 
     std::vector<LodLevel> lodLevels;        ///< LOD 级别（不含主级别，至多一级）
+
+    // —— 原始层（里程计位姿变换的点云，参照底图，可选） ——
+    // allOdomWorldPoints 与 allWorldPoints 逐点对齐（同一帧、同一局部点顺序），
+    // 因此各级渲染索引可直接复用优化层的选取结果。
+    std::vector<Eigen::Vector3d,
+                Eigen::aligned_allocator<Eigen::Vector3d>> allOdomWorldPoints; ///< 里程计位姿世界坐标点
+    std::vector<LodLevel> odomLevels;       ///< 原始层各级别（[0]=主级别镜像，其后与 lodLevels 一一对应）
 
     float zMin =  std::numeric_limits<float>::max();  ///< 数据 Z 最小值
     float zMax = -std::numeric_limits<float>::max();  ///< 数据 Z 最大值
@@ -171,7 +179,8 @@ public:
         // ---- 阶段 1：加锁快照（毫秒级，不长时间占用图锁） ----
         struct FrameSnapshot {
             long id;  ///< 关键帧对应的顶点 ID
-            Eigen::Isometry3d pose;
+            Eigen::Isometry3d pose;        ///< 当前优化估计位姿
+            Eigen::Isometry3d odomPose;    ///< 里程计（原始）位姿
             pcl::PointCloud<PointT>::ConstPtr cloud;
         };
         std::vector<FrameSnapshot, Eigen::aligned_allocator<FrameSnapshot>> frames;
@@ -180,15 +189,18 @@ public:
             for (auto& [id, kf] : graph->keyframes) {
                 auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
                 if (!v || !kf->cloud || kf->cloud->empty()) continue;
-                frames.push_back({id, v->estimate(), kf->cloud});
+                frames.push_back({id, v->estimate(), kf->odom, kf->cloud});
             }
         }
 
         // ---- 阶段 2：无锁变换到世界坐标系 ----
+        // 优化层（estimate 位姿）与原始层（odom 位姿）逐点同步生成，
+        // 两层点序完全一致——原始层无需独立的索引体系。
         for (const auto& frame : frames) {
             size_t start = r.allWorldPoints.size();
             for (const auto& pt : frame.cloud->points) {
-                Eigen::Vector3d wp = frame.pose * Eigen::Vector3d(pt.x, pt.y, pt.z);
+                Eigen::Vector3d local(pt.x, pt.y, pt.z);
+                Eigen::Vector3d wp = frame.pose * local;
                 float wz = static_cast<float>(wp.z());
                 if (wz < r.zMin) r.zMin = wz;
                 if (wz > r.zMax) r.zMax = wz;
@@ -199,6 +211,9 @@ public:
                 if (wp.y() > r.bMax.y()) r.bMax.y() = wp.y();
                 if (wp.z() > r.bMax.z()) r.bMax.z() = wp.z();
                 r.allWorldPoints.push_back(wp);
+                if (options.showOriginalLayer) {
+                    r.allOdomWorldPoints.push_back(frame.odomPose * local);
+                }
             }
             r.cloudRanges.push_back({start, r.allWorldPoints.size() - start, frame.id});
         }
@@ -302,10 +317,80 @@ public:
             }
         }
 
+        // ---- 阶段 6：原始层（里程计位姿点云，参照底图） ----
+        // 与优化层逐点对齐，直接复用优化层的各级渲染索引/范围，
+        // 仅以里程计世界坐标生成顶点/颜色数组。固定浅灰色，
+        // 作为"未优化原始状态"的参照底图。
+        if (options.showOriginalLayer && !r.allOdomWorldPoints.empty()) {
+            r.odomLevels.reserve(1 + r.lodLevels.size());
+            // 主级别镜像
+            r.odomLevels.push_back(
+                buildOdomLevel(r.allOdomWorldPoints, r.renderIndices, r.renderFullRes,
+                               r.renderRanges, options));
+            // LOD 级别镜像（与 r.lodLevels 一一对应）
+            for (const auto& lod : r.lodLevels) {
+                r.odomLevels.push_back(
+                    buildOdomLevel(r.allOdomWorldPoints, lod.renderIndices,
+                                   lod.renderFullRes, lod.renderRanges, options));
+            }
+        }
+
         return r;
     }
 
 private:
+    /**
+     * @brief 构建原始层单个级别（复用优化层的渲染索引，换用里程计世界坐标）
+     *
+     * @param odomPoints    里程计位姿世界坐标点（与优化层全量点逐点对齐）
+     * @param renderIndices 优化层该级别的渲染索引（renderFullRes 时忽略）
+     * @param renderFullRes 优化层该级别是否全量直通
+     * @param renderRanges  优化层该级别的逐帧渲染范围（原样复制）
+     *
+     * 原始层不参与降采样计算——降采样索引属于"选哪些点"的决策，
+     * 两层点序一致故直接共享；颜色固定为浅灰色半透明参照底图。
+     */
+    static LodLevel buildOdomLevel(
+        const std::vector<Eigen::Vector3d,
+                          Eigen::aligned_allocator<Eigen::Vector3d>>& odomPoints,
+        const std::vector<size_t>& renderIndices,
+        bool renderFullRes,
+        const std::vector<CloudRange>& renderRanges,
+        const BuildOptions& options) {
+        LodLevel lod;
+        lod.renderIndices = renderIndices;  // 复制（levels 持有自己的索引）
+        lod.renderRanges = renderRanges;
+        lod.renderFullRes = renderFullRes;
+
+        const size_t count = renderFullRes ? odomPoints.size() : renderIndices.size();
+        if (count == 0) return lod;
+
+        // 浅灰色参照底图（与优化层 Turbo 着色形成视觉区分）
+        const osg::Vec4 gray(0.62f, 0.64f, 0.68f, options.opacity * 0.35f);
+
+        const size_t chunkCount = (count + kChunkPoints - 1) / kChunkPoints;
+        lod.vertexChunks.reserve(chunkCount);
+        lod.colorChunks.reserve(chunkCount);
+        for (size_t c = 0; c < chunkCount; ++c) {
+            const size_t begin = c * kChunkPoints;
+            const size_t end   = std::min(count, begin + kChunkPoints);
+            auto* varr = new osg::Vec3Array;
+            auto* carr = new osg::Vec4Array;
+            varr->reserve(end - begin);
+            carr->reserve(end - begin);
+            for (size_t i = begin; i < end; ++i) {
+                const Eigen::Vector3d& wp = odomPoints[renderFullRes ? i : renderIndices[i]];
+                varr->push_back(osg::Vec3(static_cast<float>(wp.x()),
+                                          static_cast<float>(wp.y()),
+                                          static_cast<float>(wp.z())));
+                carr->push_back(gray);
+            }
+            lod.vertexChunks.push_back(varr);
+            lod.colorChunks.push_back(carr);
+        }
+        return lod;
+    }
+
     /**
      * @brief 体素键哈希（FNV-1a 64 位）
      *

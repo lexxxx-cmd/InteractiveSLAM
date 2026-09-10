@@ -46,6 +46,7 @@ private:
     QCheckBox* m_drawVerticesCb;    ///< "位姿视锥体"复选框
     QCheckBox* m_drawEdgesCb;       ///< "显示边"复选框
     QCheckBox* m_drawCloudsCb;      ///< "点云"复选框
+    QCheckBox* m_odomLayerCb;       ///< "原始层"复选框（里程计位姿参照底图）
 
     QSlider* m_sphereRadiusSlider;  ///< 视锥体大小滑块
     QLabel*  m_sphereRadiusLabel;   ///< 视锥体大小数值标签

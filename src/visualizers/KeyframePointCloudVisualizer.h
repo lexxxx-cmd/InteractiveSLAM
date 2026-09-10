@@ -95,6 +95,11 @@ public:
         // 默认隐藏，选中时才显示
         m_highlightGeom->setNodeMask(0);
         m_geode->addDrawable(m_highlightGeom);
+
+        // 原始层 geode：里程计位姿点云（参照底图），独立于优化层 geode，
+        // 可见性整体开关；默认隐藏（开关打开且有数据时显示）
+        m_odomGeode = new osg::Geode;
+        m_odomGeode->setNodeMask(0);
     }
 
     /** @brief 析构：清空场景图（geode 持有 ref_ptr，自动释放） */
@@ -180,6 +185,39 @@ public:
             }
         }
 
+        // 原始层（里程计位姿点云）：与 m_lodLevels 逐级对应，独立 geode，
+        // 不参与渐进上传（打开开关时直接整体显示，参照底图无需渐进）。
+        // 渲染索引/范围与优化层共享语义，仅顶点坐标不同。
+        m_odomLevels.clear();
+        if (m_odomGeode.valid() && !m_odomAllChunkGeoms.empty()) {
+            for (auto& chunk : m_odomAllChunkGeoms) {
+                m_odomGeode->removeDrawable(chunk);
+            }
+        }
+        m_odomAllChunkGeoms.clear();
+        if (!result.odomLevels.empty()) {
+            m_odomLevels.reserve(result.odomLevels.size());
+            for (auto& lod : result.odomLevels) {
+                m_odomLevels.emplace_back();
+                LodLevelGeoms& lg = m_odomLevels.back();
+                lg.renderIndices.swap(lod.renderIndices);
+                lg.renderRanges.swap(lod.renderRanges);
+                lg.renderFullRes = lod.renderFullRes;
+                lg.totalPoints = 0;
+                for (size_t c = 0; c < lod.vertexChunks.size(); ++c) {
+                    osg::ref_ptr<osg::Vec3Array> v = lod.vertexChunks[c];
+                    if (!v.valid()) v = new osg::Vec3Array;
+                    osg::ref_ptr<osg::Vec4Array> col;
+                    if (c < lod.colorChunks.size()) col = lod.colorChunks[c];
+                    if (!col.valid()) col = new osg::Vec4Array;
+                    addOdomChunk(lg, v, col);
+                }
+            }
+        }
+        // 原始层与优化层使用相同的激活级别（构建后为 0），同步可见性
+        m_odomActiveLevel = m_activeLodLevel;
+        applyOdomVisibility();
+
         m_activeLodLevel = 0;
         m_levelUploaded.assign(m_lodLevels.size(), false);
 
@@ -262,7 +300,20 @@ public:
         // 未改动时颜色已由 builder 生成，直接使用（零遍历）
         if (!m_colorParamsValid) recolorAll();
         if (!m_highlightIds.empty()) applyHighlight();
+
+        // 原始层跟随当前 LOD 级别（两层渲染索引语义一致，直接镜像级别号）
+        m_odomActiveLevel = level;
+        applyOdomVisibility();
     }
+
+    /** @brief 原始层开关（true = 显示里程计位姿参照底图） */
+    void setOdomLayerVisible(bool visible) {
+        m_odomLayerVisible = visible;
+        applyOdomVisibility();
+    }
+
+    /** @brief 查询原始层开关状态 */
+    bool odomLayerVisible() const { return m_odomLayerVisible; }
 
     /** @brief 当前激活的 LOD 级别 */
     int currentLodLevel() const { return m_activeLodLevel; }
@@ -327,6 +378,14 @@ public:
         m_uploadChunk = 0;
         m_levelUploaded.clear();
         m_activeLodLevel = 0;
+        // 原始层：清空各级数据与几何体，整体隐藏
+        m_odomLevels.clear();
+        for (auto& chunk : m_odomAllChunkGeoms) {
+            m_odomGeode->removeDrawable(chunk);
+        }
+        m_odomAllChunkGeoms.clear();
+        m_odomGeode->setNodeMask(0);
+        m_odomActiveLevel = 0;
         m_highlightVertices->clear();
         m_highlightColors->clear();
         m_highlightGeom->setNodeMask(0);
@@ -435,6 +494,9 @@ public:
     /** @brief 获取 OSG 节点 */
     osg::ref_ptr<osg::Geode> getNode() const { return m_geode; }
 
+    /** @brief 获取原始层 OSG 节点（里程计位姿参照底图，调用方挂到场景） */
+    osg::ref_ptr<osg::Geode> getOdomNode() const { return m_odomGeode; }
+
     /** @brief 返回点云中的渲染点数（当前 LOD 级别） */
     int pointCount() const {
         if (m_activeLodLevel < 0 || (size_t)m_activeLodLevel >= m_lodLevels.size())
@@ -522,6 +584,52 @@ private:
         for (auto& chunk : m_allChunkGeoms) {
             chunk->setNodeMask(0);
         }
+        applyOdomVisibility();
+    }
+
+    /**
+     * @brief 应用原始层可见性（主线程调用）
+     *
+     * 原始层跟随开关状态与激活级别：开关打开时显示当前级别的全部块
+     * （整体显示，不参与渐进上传），关闭或无数据时整体隐藏。
+     * 由 hideAllChunks / setLodLevel / setOdomLayerVisible / commitBuild 调用。
+     */
+    void applyOdomVisibility() {
+        if (m_odomGeode.valid())
+            m_odomGeode->setNodeMask(
+                (m_odomLayerVisible && !m_odomLevels.empty()) ? ~0u : 0u);
+    }
+
+    /**
+     * @brief 为原始层添加一个分块几何体
+     *
+     * 与 addChunk 类似但不入块池（原始层颜色固定灰色、随构建整体更换，
+     * 无需跨构建复用 BufferObject），挂到独立的 m_odomGeode 上，
+     * 可见性由 geode 的 NodeMask 整体控制。
+     */
+    void addOdomChunk(LodLevelGeoms& lg, osg::ref_ptr<osg::Vec3Array> v,
+                      osg::ref_ptr<osg::Vec4Array> col) {
+        CloudChunk chunk;
+        chunk.vertices = v;
+        chunk.colors = col;
+        chunk.renderStart = lg.totalPoints;
+        chunk.renderCount = v->size();
+        lg.totalPoints += v->size();
+
+        auto* geom = new osg::Geometry;
+        geom->setUseDisplayList(false);
+        geom->setUseVertexBufferObjects(true);
+        geom->setUseVertexArrayObject(true);
+        geom->setDataVariance(osg::Object::STATIC);
+        geom->setVertexArray(v);
+        geom->setColorArray(col, osg::Array::BIND_PER_VERTEX);
+        geom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, v->size()));
+        geom->setStateSet(m_cloudStateSet);   // 共享着色器状态（点大小/Z 裁剪）
+
+        chunk.geom = geom;
+        lg.chunks.push_back(chunk);
+        m_odomAllChunkGeoms.push_back(geom);
+        m_odomGeode->addDrawable(geom);
     }
 
     /**
@@ -687,6 +795,13 @@ private:
     std::vector<LodLevelGeoms> m_lodLevels;  ///< 全部级别（level0 = 主级别）
     int m_activeLodLevel = 0;                ///< 当前激活的 LOD 级别索引
     std::vector<bool> m_levelUploaded;       ///< 各级别是否已完整上传（切回时直接显示）
+
+    // —— 原始层（里程计位姿参照底图） ——
+    osg::ref_ptr<osg::Geode> m_odomGeode;    ///< 原始层叶节点（可见性整体控制）
+    std::vector<LodLevelGeoms> m_odomLevels; ///< 原始层各级别（与 m_lodLevels 逐级对应）
+    std::vector<osg::ref_ptr<osg::Geometry>> m_odomAllChunkGeoms; ///< 原始层全部几何体（清理用）
+    int  m_odomActiveLevel   = 0;            ///< 原始层跟随的级别号（镜像 m_activeLodLevel）
+    bool m_odomLayerVisible  = false;        ///< 原始层开关（默认关闭）
     int  m_uploadLevel = -1;                 ///< 渐进上传中的级别（-1 = 无）
     size_t m_uploadChunk = 0;                ///< 渐进上传中下一个要显示的块
 

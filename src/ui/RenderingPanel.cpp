@@ -34,6 +34,9 @@ RenderingPanel::RenderingPanel(ViewportWidget* viewport, QWidget* parent)
             m_viewport, &ViewportWidget::setDrawEdges);
     connect(m_drawCloudsCb, &QCheckBox::toggled,
             m_viewport, &ViewportWidget::setDrawKeyframeClouds);
+    // 原始层开关 → ViewportWidget（首次打开触发含原始层的后台重建）
+    connect(m_odomLayerCb, &QCheckBox::toggled,
+            m_viewport, &ViewportWidget::setOdomLayerEnabled);
 
     // 视锥体大小滑块（值范围 1-100，对应实际半径 0.01-1.00）
     connect(m_sphereRadiusSlider, &QSlider::valueChanged, this, [this](int val) {
@@ -93,10 +96,16 @@ void RenderingPanel::setupUi() {
     m_drawEdgesCb->setChecked(true);
     m_drawCloudsCb = new QCheckBox(tr("Show Point Cloud"));
     m_drawCloudsCb->setChecked(true);
+    m_odomLayerCb = new QCheckBox(tr("Show Original Cloud (odometry)"));
+    m_odomLayerCb->setChecked(false);
+    m_odomLayerCb->setToolTip(
+        tr("Overlay the point cloud transformed by raw odometry poses "
+           "(gray) for comparison with the optimized cloud"));
 
     renderLayout->addWidget(m_drawVerticesCb);
     renderLayout->addWidget(m_drawEdgesCb);
     renderLayout->addWidget(m_drawCloudsCb);
+    renderLayout->addWidget(m_odomLayerCb);
 
     // 视锥体大小滑块（1-100，默认 10 → 0.10）
     renderLayout->addWidget(new QLabel(tr("Frustum Size:")));
