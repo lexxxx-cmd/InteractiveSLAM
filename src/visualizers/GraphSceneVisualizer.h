@@ -109,6 +109,21 @@ public:
         m_cloudGroup->setNodeMask(v ? ~0u : 0u);
     }
 
+    /**
+     * @brief 设置原始层（里程计位姿参照底图）开关
+     *
+     * 打开后显示按里程计位姿变换的点云（浅灰半透明），
+     * 与优化层叠加对比优化前后的差异。首次打开会触发点云
+     * 后台重建（生成原始层数据），之后仅做可见性切换。
+     */
+    void setOdomLayerEnabled(bool enabled) {
+        m_odomLayerEnabled = enabled;
+        if (m_cloudViz) m_cloudViz->setOdomLayerVisible(enabled);
+    }
+
+    /** @brief 查询原始层开关状态 */
+    bool odomLayerEnabled() const { return m_odomLayerEnabled; }
+
     /** @brief 设置点云中点的大小 */
     void setPointSize(float size) {
         m_pointSize = size;
@@ -377,8 +392,9 @@ public:
      * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
      * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
      *
-     * @param id 顶点 ID（-1 = 清理播放通道：仅恢复上一个播放帧的
-     *            视觉样式，不动点云高亮，避免抹掉刚建立的选择高亮）
+     * @param id 顶点 ID（-1 = 清理播放通道：恢复上一个播放帧的视觉样式
+     *            并清空累积留存集合，不动其他点云高亮，避免抹掉刚建立的
+     *            选择高亮）
      */
     void highlightPlaybackVertex(long id) {
         long prev = m_playbackPrevId;
@@ -391,13 +407,56 @@ public:
         applyMarkerState(id);
 
         // 点云高亮（已很高效，只更新颜色数组）；
-        // id < 0 仅清理播放通道，不动点云高亮
-        if (id >= 0 && m_cloudViz) {
-            m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
+        // id < 0 清理播放通道：会话结束，累积留存集合一并清空
+        //（随后的 selectVertex 会建立新的选中高亮，不受影响）
+        if (id < 0) {
+            clearRetainedHighlight();
+            return;
+        }
+        if (m_cloudViz) {
+            // 累积模式：历史帧的时序邻居保留在高亮集合中（不随播放消失）
+            if (m_playbackRetain) {
+                if (prev >= 0) {
+                    for (long nid : getTemporalNeighbors(prev))
+                        m_retainedHighlightIds.insert(nid);
+                }
+                std::set<long> combined = m_retainedHighlightIds;
+                for (long nid : getTemporalNeighbors(id))
+                    combined.insert(nid);
+                m_cloudViz->recolorHighlight(combined);
+            } else {
+                m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
+            }
         }
     }
 
+    /**
+     * @brief 设置播放累积高亮开关（"播放包点云留存"）
+     *
+     * 打开后，播放过程中每帧的时序邻居点云保留为白色高亮，
+     * 历史帧不随播放推进消失，形成"已播放区域留存"的视觉效果。
+     * 关闭或会话结束（highlightPlaybackVertex(-1)）时清空留存集合。
+     *
+     * @param retain true = 累积模式；false = 仅当前帧高亮（默认）
+     */
+    void setPlaybackRetain(bool retain) {
+        m_playbackRetain = retain;
+        if (!retain && m_cloudViz) {
+            // 关闭时若正处于播放会话，立即恢复为仅当前帧高亮
+            if (m_playbackPrevId >= 0) {
+                m_cloudViz->recolorHighlight(getTemporalNeighbors(m_playbackPrevId));
+            }
+            m_retainedHighlightIds.clear();
+        }
+    }
+
+    /** @brief 查询播放累积高亮开关状态 */
+    bool playbackRetain() const { return m_playbackRetain; }
+
 private:
+    /** @brief 清空累积高亮留存集合（会话结束路径调用） */
+    void clearRetainedHighlight() { m_retainedHighlightIds.clear(); }
+
     /**
      * @brief 单个标记的视觉样式（颜色 + 尺寸缩放）
      */
@@ -566,6 +625,9 @@ public:
             m_cloudViz->setPointSize(m_pointSize);
             m_cloudViz->setOpacity(m_pointOpacity);
             m_cloudGroup->addChild(m_cloudViz->getNode());
+            // 原始层 geode 挂到同一组（可见性由 geode 自身 NodeMask 控制）
+            m_cloudGroup->addChild(m_cloudViz->getOdomNode());
+            m_cloudViz->setOdomLayerVisible(m_odomLayerEnabled);
         }
 
         // 保存用户当前的 Z 轴裁剪和颜色范围设置
@@ -815,4 +877,7 @@ private:
     float m_pointSize     = 2.0f; ///< 点云点大小（像素）
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
     bool  m_lodEnabled    = true; ///< LOD 渲染开关（渲染固定为全量 + 第一层两种）
+    bool  m_odomLayerEnabled = false; ///< 原始层（里程计位姿参照底图）开关（默认关闭）
+    bool  m_playbackRetain   = false; ///< 播放累积高亮开关（历史帧点云留存）
+    std::set<long> m_retainedHighlightIds; ///< 累积模式下已播放帧的留存高亮集合
 };

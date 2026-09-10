@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QTimer>
 #include <vector>
 
@@ -106,6 +107,7 @@ private:
     QSlider*     m_slider = nullptr;        ///< 位置滑块
     QLabel*      m_frameLabel = nullptr;    ///< 帧号标签 "42 / 15000"
     QComboBox*   m_speedCombo = nullptr;    ///< 倍速选择
+    QCheckBox*   m_retainCloudCb = nullptr; ///< "留存已播放点云"复选框
 
     // ── 播放状态 ──
     ViewportWidget* m_viewport = nullptr;   ///< 关联的 3D 视口

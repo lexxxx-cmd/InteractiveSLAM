@@ -76,6 +76,15 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     infoLayout->addStretch();
     infoLayout->addWidget(m_speedCombo);
 
+    // ── 留存选项 ──
+    m_retainCloudCb = new QCheckBox(tr("Retain played cloud"), this);
+    m_retainCloudCb->setToolTip(
+        tr("Keep played frames' point cloud highlighted (white) "
+           "instead of fading out as playback advances"));
+    connect(m_retainCloudCb, &QCheckBox::toggled, this, [this](bool checked) {
+        m_viewport->setPlaybackRetain(checked);
+    });
+
     // ── 滑块 ──
     m_slider = new QSlider(Qt::Horizontal, this);
     m_slider->setRange(0, 0);
@@ -88,6 +97,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     mainLayout->addLayout(btnLayout);
     mainLayout->addLayout(infoLayout);
     mainLayout->addWidget(m_slider);
+    mainLayout->addWidget(m_retainCloudCb);
 
     // ── 定时器 ──
     m_playTimer = new QTimer(this);
@@ -129,9 +139,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
             int interval = BASE_PLAY_INTERVAL_MS / SPEED_MULTIPLIERS[speedIdx];
             m_playTimer->start(interval);
         }
-    });
-
-    // 上一帧
+    });    // 上一帧
     connect(m_prevBtn, &QPushButton::clicked, this, [this]() {
         if (m_playbackFrames.empty()) return;
         // 会话结束：清理播放通道后再完整选中
@@ -221,6 +229,11 @@ void PlaybackPanel::onGraphClosed() {
 
     // 清理播放通道高亮（避免红色标记残留在场景中）
     m_viewport->highlightPlaybackVertex(-1);
+    // 复位留存选项（累积高亮随地图关闭一并清空）
+    m_retainCloudCb->blockSignals(true);
+    m_retainCloudCb->setChecked(false);
+    m_retainCloudCb->blockSignals(false);
+    m_viewport->setPlaybackRetain(false);
 
     // 清空数据
     m_allKeyframeIds.clear();

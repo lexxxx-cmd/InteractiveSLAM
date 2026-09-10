@@ -369,6 +369,18 @@ void ViewportWidget::setDrawKeyframeClouds(bool v) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setOdomLayerEnabled(bool enabled) {
+    m_flags.odom_layer_enabled = enabled;
+    bool wasEnabled = m_sceneViz->odomLayerEnabled();
+    m_sceneViz->setOdomLayerEnabled(enabled);
+    // 原始层数据按需生成：首次打开时触发后台重建（含里程计位姿点云）；
+    // 关闭仅隐藏几何体，无需重建
+    if (enabled && !wasEnabled && m_graph && m_sceneViz->hasPointCloud()) {
+        requestCloudBuild();
+    }
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setDrawSE3Edges(bool v) {
     m_flags.draw_se3_edges = v;
     // SE3 边是常规边集合的一部分
@@ -806,6 +818,8 @@ void ViewportWidget::startCloudBuild() {
     auto graph = m_graph;
     hdl_graph_slam::BuildOptions options;
     options.lodEnabled = m_sceneViz->lodEnabled();
+    // 原始层开关：打开时 builder 额外生成里程计位姿点云（参照底图）
+    options.showOriginalLayer = m_sceneViz->odomLayerEnabled();
     // 传入当前颜色参数：builder 在后台生成与当前设置一致的颜色，
     // 主线程 commit 时零遍历（避免全量重着色卡顿）
     options.useAutoColorRange = m_sceneViz->isAutoColorRange();
@@ -999,6 +1013,11 @@ void ViewportWidget::selectVertex(long vertexId) {
 
 void ViewportWidget::highlightPlaybackVertex(long vertexId) {
     m_sceneViz->highlightPlaybackVertex(vertexId);
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setPlaybackRetain(bool retain) {
+    m_sceneViz->setPlaybackRetain(retain);
     m_osgWidget->update();
 }
 

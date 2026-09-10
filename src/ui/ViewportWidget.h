@@ -81,6 +81,16 @@ public slots:
     void highlightPlaybackVertex(long vertexId);
 
     /**
+     * @brief 设置播放累积高亮开关（"播放点云留存"）
+     *
+     * 打开后播放过的帧点云保留白色高亮（不随播放推进消失），
+     * 关闭或播放会话结束时清空留存。
+     *
+     * @param retain true = 累积留存模式
+     */
+    void setPlaybackRetain(bool retain);
+
+    /**
      * @brief 图谱加载完成后的回调
      * @param graph 加载的图谱对象（共享指针）
      */
@@ -112,6 +122,7 @@ public slots:
     void setPointSize(int size);             ///< 设置点云点大小
     void setPointOpacity(int opacity);       ///< 设置点云不透明度（0-100）
     void setLodEnabled(bool enabled);        ///< 设置 LOD 多级渲染开关
+    void setOdomLayerEnabled(bool enabled);  ///< 设置原始层（里程计位姿参照底图）开关
 
     /**
      * @brief 设置 LOD 切换模式
