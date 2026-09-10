@@ -29,11 +29,15 @@ LodSettingsDialog::LodSettingsDialog(ViewportWidget* viewport, QWidget* parent)
         m_lodLevelCombo->blockSignals(true);
         m_lodLevelCombo->clear();
         for (int i = 0; i < levelCount; ++i) {
-            m_lodLevelCombo->addItem(
-                i == 0 ? tr("Level 0 (full)") : tr("Level %1").arg(i));
+            m_lodLevelCombo->addItem(i == 0 ? tr("Level 0 (full)")
+                                            : tr("Level 1 (decimated)"));
         }
         m_lodLevelCombo->setCurrentIndex(qBound(0, level, levelCount - 1));
         m_lodLevelCombo->blockSignals(false);
+
+        m_lodLevelLabel->setText(
+            levelCount > 1 ? tr("%1 / %2").arg(level).arg(levelCount)
+                           : tr("off"));
 
         m_lodLevelLabel->setText(
             levelCount > 1 ? tr("%1 / %2").arg(level).arg(levelCount)
@@ -56,6 +60,7 @@ void LodSettingsDialog::setupUi() {
 
     m_lodLevelCombo = new QComboBox;
     m_lodLevelCombo->addItem(tr("Level 0 (full)"));
+    m_lodLevelCombo->addItem(tr("Level 1 (decimated)"));
     connect(m_lodLevelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) { m_viewport->setLodManualLevel(idx); });
     form->addRow(tr("Level:"), m_lodLevelCombo);

@@ -411,7 +411,7 @@ void ViewportWidget::setPointOpacity(int opacity) {
 void ViewportWidget::setLodEnabled(bool enabled) {
     m_flags.lod_enabled = enabled;
     m_sceneViz->setLodEnabled(enabled);
-    // 已有点云数据时触发后台异步重建（生成/移除多级 LOD）
+    // 已有点云数据时触发后台异步重建（生成/移除第一层 LOD）
     if (m_graph && m_sceneViz->hasPointCloud()) {
         requestCloudBuild();
     }
@@ -928,8 +928,8 @@ void ViewportWidget::updateScene() {
     if (!m_graph) return;
 
     // LOD 级别切换：手动模式固定层级，否则按相机到点云包围球的距离
-    // 自动选择级别（带迟滞防抖）。级别 0 = 全量（最近），级别越高点数越少。
-    // 级间比例 2×：升级阈值 dist > R×2×2^k，降级阈值 dist < R×1.5×2^(k-1)，
+    // 自动切换（带迟滞防抖）。级别 0 = 全量（近处），级别 1 = 第一层
+    // 降采样（远处）。升级阈值 dist > R×2，降级阈值 dist < R×1.5，
     // 两阈值之间存在死区，避免相机在边界来回导致频繁切换。
     if (!m_lodManualMode && m_sceneViz->lodEnabled() &&
         m_sceneViz->lodLevelCount() > 1) {
@@ -944,9 +944,9 @@ void ViewportWidget::updateScene() {
                 int cur = m_sceneViz->currentLodLevel();
                 int maxLevel = m_sceneViz->lodLevelCount() - 1;
                 int target = cur;
-                if (cur < maxLevel && dist > R * 2.0 * std::pow(2.0, cur)) {
+                if (cur < maxLevel && dist > R * 2.0) {
                     target = cur + 1;  // 拉远 → 低分辨率
-                } else if (cur > 0 && dist < R * 1.5 * std::pow(2.0, cur - 1)) {
+                } else if (cur > 0 && dist < R * 1.5) {
                     target = cur - 1;  // 拉近 → 高分辨率
                 }
                 if (target != cur) {

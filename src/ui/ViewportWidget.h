@@ -122,7 +122,7 @@ public slots:
 
     /**
      * @brief 手动指定 LOD 层级（仅手动模式下生效）
-     * @param level 目标级别（0 = 全量，越大点数越少）
+     * @param level 目标级别（0 = 全量，1 = 第一层降采样）
      */
     void setLodManualLevel(int level);
     void setBackgroundColor(const QColor& color);  ///< 设置背景色
@@ -283,7 +283,7 @@ private:
 
     // LOD 模式状态
     bool m_lodManualMode = true;  ///< true = 手动固定层级（默认手动，不随距离自动切换）
-    int  m_lodManualLevel = 1;    ///< 手动模式下固定的目标层级（默认 level 1 = 1/2 点数）
+    int  m_lodManualLevel = 1;    ///< 手动模式下固定的目标层级（默认 level 1 = 第一层降采样）
 
     // 双击聚焦状态
     double m_savedWheelZoomFactor = -1.0; ///< 聚焦前的滚轮缩放系数（-1 = 未修改）

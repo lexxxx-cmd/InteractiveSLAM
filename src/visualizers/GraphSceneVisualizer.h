@@ -127,10 +127,10 @@ public:
     /**
      * @brief 设置 LOD 多级渲染开关
      *
-     * 开启后 PointCloudBuilder 在后台构建多级降采样，
+     * 开启后 PointCloudBuilder 在后台构建第一层降采样（目标点数 N/2），
      * ViewportWidget 按相机距离自动切换级别或手动固定层级：
      * 近处全量细节，远处低分辨率轮廓，减少远距离顶点处理量。
-     * 渲染固定为"全量 + LOD"（点预算档位已移除）。
+     * 渲染固定为"全量 + 第一层"两种（点预算档位已移除）。
      */
     void setLodEnabled(bool enabled) {
         m_lodEnabled = enabled;
@@ -814,5 +814,5 @@ private:
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
     float m_pointSize     = 2.0f; ///< 点云点大小（像素）
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
-    bool  m_lodEnabled    = true; ///< LOD 多级渲染开关（渲染固定为全量 + LOD）
+    bool  m_lodEnabled    = true; ///< LOD 渲染开关（渲染固定为全量 + 第一层两种）
 };

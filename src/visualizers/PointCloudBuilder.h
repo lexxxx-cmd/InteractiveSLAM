@@ -17,10 +17,9 @@
 //      点占据的格子判为杂点（多帧重叠互证）。全量数组与 cloudRanges
 //      保持完整（索引锚点，选中高亮仍用全量），滤波只体现在派生的
 //      主级别渲染索引/范围上——存活的点按原顺序组成升序子序列；
-//   4. 主级别（全量或滤波后存活点）+ 多级 LOD：当 lodEnabled 时，在
-//      主级别子集上按递增体素边长生成 level1~5（目标点数 N/2、N/4、
-//      N/8、N/16、N/32，级间 2×，每级不低于 5 万点），每级都映射回
-//      同一个全量点数组，供相机距离自动切换或手动选择使用；
+//   4. 主级别（全量或滤波后存活点）+ 一级 LOD：当 lodEnabled 时，在
+//      主级别子集上生成第一层降采样（目标点数 N/2，不低于 5 万点），
+//      同样映射回同一个全量点数组——渲染固定为"全量 + 第一层"两种；
 //   5. 构建渲染顶点数组（osg::Vec3Array，仅普通容器填充，无 GL 调用）。
 //
 // 输出 PointCloudBuildResult 由主线程 KeyframePointCloudVisualizer::
@@ -85,7 +84,7 @@ struct LodLevel {
  * @brief 点云构建选项
  */
 struct BuildOptions {
-    bool lodEnabled = false;    ///< 是否生成多级 LOD（渲染固定为全量 + LOD）
+    bool lodEnabled = false;    ///< 是否生成第一层 LOD（渲染固定为全量 + 第一层）
 
     // —— 孤立杂点滤波（全局体素占据计数，见 build() 阶段 2.5） ——
     bool  outlierFilterEnabled = true;  ///< 是否启用孤立杂点滤波
@@ -116,7 +115,7 @@ struct PointCloudBuildResult {
     std::vector<osg::ref_ptr<osg::Vec3Array>> vertexChunks;  ///< 主级别分块顶点数组
     std::vector<osg::ref_ptr<osg::Vec4Array>> colorChunks;   ///< 主级别分块颜色数组
 
-    std::vector<LodLevel> lodLevels;        ///< LOD 级别（不含主级别，仅全量模式生成）
+    std::vector<LodLevel> lodLevels;        ///< LOD 级别（不含主级别，至多一级）
 
     float zMin =  std::numeric_limits<float>::max();  ///< 数据 Z 最小值
     float zMax = -std::numeric_limits<float>::max();  ///< 数据 Z 最大值
@@ -286,22 +285,20 @@ public:
         r.colorZMaxUsed = options.useAutoColorRange ? r.zMax : options.colorZMax;
         r.opacityUsed   = options.opacity;
 
-        // ---- 阶段 5：多级 LOD ----
-        // 目标点数 N/2、N/4、…、N/32（级间 2×，最多 5 级；每级不低于 minLodPoints）
-        // 级间 2× 使相机距离切换过渡平滑，避免 4× 时"差一级就跳回全量"的突兀感。
-        // 以主级别（滤波后存活点）为基数，在子集上继续抽稀
+        // ---- 阶段 5：第一层 LOD ----
+        // 目标点数 N/2（不低于 minLodPoints），仅生成一个降采样级别——
+        // 渲染固定为"全量 + 第一层"两种。以主级别（滤波后存活点）为
+        // 基数，在子集上抽稀；基数本就不大于目标点数时不生成任何级别。
         if (options.lodEnabled) {
             const size_t minLodPoints = 50000;
-            const int    maxLodLevels = 5;
             const size_t baseCount = r.renderFullRes ? n : r.renderIndices.size();
             size_t target = baseCount / 2;
-            while (target >= minLodPoints && (int)r.lodLevels.size() < maxLodLevels) {
+            if (target >= minLodPoints) {
                 r.lodLevels.push_back(
                     buildLodLevel(r.allWorldPoints, r.renderRanges,
                                   r.renderIndices, r.renderFullRes,
                                   r.bMin, r.bMax,
                                   target, options, r.zMin, r.zMax));
-                target /= 2;
             }
         }
 

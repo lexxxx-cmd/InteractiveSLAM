@@ -105,7 +105,7 @@ public:
      *
      * 将 PointCloudBuilder 构建结果换入本可视化器：
      *   - 全量世界点 / 全量范围 / Z 值范围与包围盒统计
-     *   - 主级别渲染数据 + 多级 LOD（全量模式生成）
+     *   - 主级别渲染数据 + 第一层 LOD（全量模式生成）
      * 顶点/颜色数组已由 builder 分块并着色，主线程零遍历；
      * 提交后逐帧显示各块（渐进上传，见 advanceChunkUpload()）。
      *
@@ -162,7 +162,7 @@ public:
             addChunk(l0, v, col);
         }
 
-        // LOD 级别 1..n
+        // LOD 级别 1..n（当前至多一级：第一层降采样）
         for (auto& lod : result.lodLevels) {
             m_lodLevels.emplace_back();
             LodLevelGeoms& lg = m_lodLevels.back();
