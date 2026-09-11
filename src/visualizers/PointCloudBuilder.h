@@ -319,7 +319,7 @@ public:
 
         // ---- 阶段 6：原始层（里程计位姿点云，参照底图） ----
         // 与优化层逐点对齐，直接复用优化层的各级渲染索引/范围，
-        // 仅以里程计世界坐标生成顶点/颜色数组。固定浅灰色，
+        // 仅以里程计世界坐标生成顶点/颜色数组。固定淡橙色，
         // 作为"未优化原始状态"的参照底图。
         if (options.showOriginalLayer && !r.allOdomWorldPoints.empty()) {
             r.odomLevels.reserve(1 + r.lodLevels.size());
@@ -348,7 +348,7 @@ private:
      * @param renderRanges  优化层该级别的逐帧渲染范围（原样复制）
      *
      * 原始层不参与降采样计算——降采样索引属于"选哪些点"的决策，
-     * 两层点序一致故直接共享；颜色固定为浅灰色半透明参照底图。
+     * 两层点序一致故直接共享；颜色固定为淡橙色半透明参照底图。
      */
     static LodLevel buildOdomLevel(
         const std::vector<Eigen::Vector3d,
@@ -365,8 +365,8 @@ private:
         const size_t count = renderFullRes ? odomPoints.size() : renderIndices.size();
         if (count == 0) return lod;
 
-        // 浅灰色参照底图（与优化层 Turbo 着色形成视觉区分）
-        const osg::Vec4 gray(0.62f, 0.64f, 0.68f, options.opacity * 0.35f);
+        // 淡橙色参照底图（与优化层 Turbo 着色形成色相区分）
+        const osg::Vec4 gray(0.98f, 0.72f, 0.45f, options.opacity * 0.35f);
 
         const size_t chunkCount = (count + kChunkPoints - 1) / kChunkPoints;
         lod.vertexChunks.reserve(chunkCount);
