@@ -111,6 +111,13 @@ set(UI_SOURCES
     src/ui/LoadingOverlayWidget.cpp                       # 加载遮罩进度覆盖层
 )
 
+# --- 可视化层源文件 ---
+# 说明：src/visualizers/ 下绝大多数可视化器是纯头文件（模板式内联实现），
+#       不参与编译单元列表；此处只登记确实需要独立编译单元的少数文件。
+set(VISUALIZER_SOURCES
+    src/visualizers/CloudPerfLog.cpp                      # 性能日志 + NVML 显存查询（基线测量用）
+)
+
 # ============================================================================
 # 第三方子项目
 # ============================================================================
@@ -136,6 +143,7 @@ qt_add_executable(appInteractiveSLAM
     ${DATA_SOURCES}           # 数据层源文件
     ${BACKEND_SOURCES}        # 后端桥接层源文件
     ${UI_SOURCES}             # UI 层源文件
+    ${VISUALIZER_SOURCES}     # 可视化层源文件（需要独立编译单元的）
     src/ui/ui_resources.qrc   # Qt 资源文件（暗色主题 QSS）
 )
 

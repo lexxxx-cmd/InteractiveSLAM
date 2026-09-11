@@ -33,6 +33,7 @@
 #include "backend/graph_manager.hpp"
 #include "visualizers/SpherePickingHandler.h"
 #include "visualizers/PointCloudBuilder.h"
+#include "visualizers/CloudPerfLog.h"
 #include "ui/FirstPersonManipulator.h"
 #include "ui/OverlayPanelWidget.h"
 
@@ -796,9 +797,23 @@ void ViewportWidget::refreshScene() {
  * 若已有构建任务在运行，仅标记 pending，当前任务完成后自动再启动一次，
  * 避免多次连续触发（自动回环插入边、图优化等）导致并行构建竞争。
  */
+void ViewportWidget::armPerfCycle() {
+    if (m_perfCycleActive) return;  // 幂等：一轮周期内只有首个入口生效
+    m_perfCycleActive = true;
+    m_perfRequestAt = std::chrono::steady_clock::now();
+    const hdl_graph_slam::GpuMemory::Info vram = hdl_graph_slam::GpuMemory::query();
+    m_perfVRAMBeforeMiB = vram.valid ? vram.usedMiB : 0;
+}
+
 void ViewportWidget::requestCloudBuild() {
     if (!m_graph) return;
     m_cloudBuildPending = true;
+
+    // Phase 0：一轮构建周期从"用户/图变化发出的首个请求"开始计时。
+    // 构建期间可能因优化完成/预算变化被合并出多次请求，只有首个请求
+    // 刷新起点，才能反映用户感知的端到端延迟。
+    armPerfCycle();
+
     if (m_cloudBuildRunning) return;  // 已有任务在跑，完成后再处理
     startCloudBuild();
 }
@@ -814,6 +829,10 @@ void ViewportWidget::startCloudBuild() {
     m_cloudBuildRunning = true;
     m_cloudBuildPending = false;
     m_cloudBuildActiveSeq = m_cloudBuildSeq;
+
+    // Phase 0：链式构建（上一轮结束后直接续跑，不经过 requestCloudBuild）
+    // 也要保证计时已就绪；已武装时本调用无副作用。
+    armPerfCycle();
 
     auto graph = m_graph;
     hdl_graph_slam::BuildOptions options;
@@ -842,7 +861,13 @@ void ViewportWidget::onCloudBuildFinished() {
 
     if (m_cloudBuildActiveSeq == m_cloudBuildSeq) {
         auto result = m_cloudBuildWatcher->result();
+        // Phase 0：阶段统计随 result 一起被 move 进场景，先留一份给日志
+        const hdl_graph_slam::BuildTimings buildTimings = result.timings;
+
         m_sceneViz->commitPointCloudBuild(std::move(result));
+        m_perfCommitAt = std::chrono::steady_clock::now();
+
+        logCloudBuildPerf(buildTimings);  // Phase 0 基线日志
 
         // 发射数据范围信号供 UI 面板初始化/更新
         emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
@@ -864,16 +889,92 @@ void ViewportWidget::onCloudBuildFinished() {
         // 若本次构建无分块（空点云）则立即通知完成，避免加载指示卡死
         m_chunkUploadWasPending = m_sceneViz->chunkUploadPending();
         if (!m_chunkUploadWasPending) {
+            // Phase 0：本次构建无分块（空点云）→ 无渐进上传阶段，直接结束计时
+            m_perfCycleActive = false;
             emit cloudRenderFinished();
         }
     } else {
         // 构建被丢弃（图已更换/关闭）：没有新点云要渲染，立即通知完成
+        m_perfCycleActive = false;  // Phase 0：本轮无有效结果，结束计时
         emit cloudRenderFinished();
     }
 
     // 构建期间有新请求（预算变化/优化完成等）→ 用最新状态再构建一次
     if (m_cloudBuildPending) {
         startCloudBuild();
+    }
+}
+
+/**
+ * @brief 输出一次点云构建周期的基线日志（Phase 0 测量）
+ *
+ * 说明：本项目是 WIN32 GUI 程序，没有文件日志也没有 message handler，
+ * qInfo 在无调试器时不可见，因此这里统一写入 CloudPerfLog
+ * （<exe目录>/cloud_perf.log），同时转发 qInfo。
+ *
+ * 关注三个数：
+ *   1. 后台构建阶段耗时与合计——优化后"重建"的 CPU 成本；
+ *   2. 请求→换入延迟——用户感知的卡顿长度（Phase 2 要把它压到 ms 级）；
+ *   3. VBO 数组字节与显存占用——双份点云的实际显存代价。
+ */
+void ViewportWidget::logCloudBuildPerf(const hdl_graph_slam::BuildTimings& t) {
+    // 注意：KeyframePointCloudVisualizer 声明在**全局命名空间**（不在
+    // hdl_graph_slam 里），所以此处不能加 hdl_graph_slam:: 前缀
+    const KeyframePointCloudVisualizer::CommitStats c =
+        m_sceneViz->lastCloudCommitStats();
+
+    const double endToEndMs = std::chrono::duration<double, std::milli>(
+                                  m_perfCommitAt - m_perfRequestAt)
+                                  .count();
+
+    auto mib = [](size_t bytes) {
+        return QString::number(static_cast<double>(bytes) / (1024.0 * 1024.0), 'f', 1);
+    };
+
+    hdl_graph_slam::CloudPerfLog& log = hdl_graph_slam::CloudPerfLog::instance();
+    log.write(QStringLiteral("=== 点云构建周期（后台构建 + 主线程换入） ==="));
+    log.write(QStringLiteral("  规模: 关键帧=%1  全量点=%2  主级别渲染点=%3  "
+                             "第一层LOD点=%4  原始层点=%5")
+                  .arg(t.frameCount)
+                  .arg(static_cast<qulonglong>(t.totalPoints))
+                  .arg(static_cast<qulonglong>(t.mainRenderPoints))
+                  .arg(static_cast<qulonglong>(t.lodPoints))
+                  .arg(static_cast<qulonglong>(t.odomPoints)));
+    log.write(QStringLiteral("  后台阶段(ms): 快照=%1 变换=%2 滤波=%3 主数组=%4 "
+                             "LOD=%5 原始层=%6 | 合计=%7")
+                  .arg(t.snapshotMs, 0, 'f', 1)
+                  .arg(t.transformMs, 0, 'f', 1)
+                  .arg(t.outlierMs, 0, 'f', 1)
+                  .arg(t.mainArraysMs, 0, 'f', 1)
+                  .arg(t.lodMs, 0, 'f', 1)
+                  .arg(t.odomMs, 0, 'f', 1)
+                  .arg(t.totalMs, 0, 'f', 1));
+    log.write(QStringLiteral("  端到端: 请求→换入=%1 ms").arg(endToEndMs, 0, 'f', 1));
+    log.write(QStringLiteral("  落地: 级别=%1  主层块=%2  原始层块=%3  "
+                             "数组池化复用=%4  新建=%5")
+                  .arg(static_cast<qulonglong>(c.levels))
+                  .arg(static_cast<qulonglong>(c.chunks))
+                  .arg(static_cast<qulonglong>(c.odomChunks))
+                  .arg(static_cast<qulonglong>(c.pooledReuse))
+                  .arg(static_cast<qulonglong>(c.freshArrays)));
+    log.write(QStringLiteral("  数组字节: builder 主=%1 MiB LOD=%2 MiB 原始层=%3 MiB "
+                             "合计=%4 MiB | 落地 主=%5 MiB 原始层=%6 MiB")
+                  .arg(mib(t.mainVboBytes), mib(t.lodVboBytes), mib(t.odomVboBytes),
+                       mib(t.totalVboBytes()), mib(c.arrayBytes),
+                       mib(c.odomArrayBytes)));
+
+    const hdl_graph_slam::GpuMemory::Info vram = hdl_graph_slam::GpuMemory::query();
+    if (vram.valid) {
+        log.write(QStringLiteral("  显存: %1  used=%2 MiB / total=%3 MiB  "
+                                 "(构建请求前 used=%4 MiB)")
+                      .arg(vram.deviceName.isEmpty() ? QStringLiteral("(unknown)")
+                                                     : vram.deviceName)
+                      .arg(vram.usedMiB)
+                      .arg(vram.totalMiB)
+                      .arg(m_perfVRAMBeforeMiB));
+    } else {
+        log.write(QStringLiteral("  显存: 查询不可用（%1）")
+                      .arg(hdl_graph_slam::GpuMemory::summaryLine()));
     }
 }
 
@@ -908,6 +1009,16 @@ void ViewportWidget::updateScene() {
     {
         const bool pending = m_sceneViz->chunkUploadPending();
         if (m_chunkUploadWasPending && !pending) {
+            // Phase 0：分块渐进上传全部落地，这才是"点云真的画完了"的时刻
+            if (m_perfCycleActive) {
+                const double totalMs = std::chrono::duration<double, std::milli>(
+                                           std::chrono::steady_clock::now() - m_perfRequestAt)
+                                           .count();
+                hdl_graph_slam::CloudPerfLog::instance().write(
+                    QStringLiteral("  分块渐进上传完成: 请求→全部可见=%1 ms")
+                        .arg(totalMs, 0, 'f', 1));
+                m_perfCycleActive = false;
+            }
             emit cloudRenderFinished();
         }
         m_chunkUploadWasPending = pending;

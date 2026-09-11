@@ -30,6 +30,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -100,6 +101,46 @@ struct BuildOptions {
 };
 
 /**
+ * @brief 构建阶段耗时与规模统计（Phase 0 基线测量用）
+ *
+ * 纯计时/计数，不参与渲染，也不改变任何构建行为。由 build() 在工作线程填充，
+ * 随结果一起交给主线程写日志。时间单位毫秒，来源 steady_clock（单调时钟，
+ * 不受系统时间调整影响）。
+ *
+ * 阶段编号与 build() 内的注释一致：
+ *   1 加锁快照 → 2 变换到世界系 → 2.5 孤立杂点滤波 → 4 主级别数组
+ *   → 5 第一层 LOD → 6 原始层
+ */
+struct BuildTimings {
+    // —— 各阶段耗时（毫秒） ——
+    double snapshotMs   = 0.0;  ///< 阶段 1：加锁快照（位姿 + 点云指针）
+    double transformMs  = 0.0;  ///< 阶段 2：变换到世界系 + Z/包围盒统计
+    double outlierMs    = 0.0;  ///< 阶段 2.5：全局体素孤立杂点滤波
+    double mainArraysMs = 0.0;  ///< 阶段 4：主级别分块顶点/颜色数组
+    double lodMs        = 0.0;  ///< 阶段 5：第一层 LOD（体素降采样 + 分块）
+    double odomMs       = 0.0;  ///< 阶段 6：原始层各级数组
+    double totalMs      = 0.0;  ///< 整个 build() 的墙钟耗时
+
+    // —— 规模计数 ——
+    int    frameCount       = 0;  ///< 有效关键帧数（有位姿且点云非空）
+    size_t totalPoints      = 0;  ///< 全量世界点总数（优化层锚点数组）
+    size_t mainRenderPoints = 0;  ///< 主级别渲染点数（滤波后）
+    size_t lodPoints        = 0;  ///< 第一层 LOD 点数（未生成时为 0）
+    size_t odomPoints       = 0;  ///< 原始层点数（未启用时为 0）
+    size_t mainChunks       = 0;  ///< 主级别分块数
+    size_t lodChunks        = 0;  ///< 第一层 LOD 分块数
+    size_t odomChunks       = 0;  ///< 原始层分块总数（各级求和）
+
+    // —— 显存占用估算（顶点 + 颜色数组，按 osg::Array::getTotalDataSize 实测） ——
+    size_t mainVboBytes = 0;  ///< 主级别顶点+颜色字节数
+    size_t lodVboBytes  = 0;  ///< 第一层 LOD 顶点+颜色字节数
+    size_t odomVboBytes = 0;  ///< 原始层顶点+颜色字节数
+
+    /** @brief 三层 VBO 字节数合计 */
+    size_t totalVboBytes() const { return mainVboBytes + lodVboBytes + odomVboBytes; }
+};
+
+/**
  * @brief 点云构建结果（纯数据，可在线程间移动）
  *
  * 由 PointCloudBuilder::build() 在工作线程生成，
@@ -135,6 +176,8 @@ struct PointCloudBuildResult {
     float colorZMinUsed = 0.0f;  ///< 构建时的颜色映射 Z 下限
     float colorZMaxUsed = 1.0f;  ///< 构建时的颜色映射 Z 上限
     float opacityUsed   = 1.0f;  ///< 构建时的透明度
+
+    BuildTimings timings;        ///< 阶段耗时与规模统计（不参与渲染）
 };
 
 /**
@@ -176,6 +219,15 @@ public:
 
         if (!graph) return r;
 
+        // —— Phase 0 计时：单调时钟，单位毫秒 ——
+        using PerfClock = std::chrono::steady_clock;
+        const auto buildStart = PerfClock::now();
+        const auto msSince = [](const PerfClock::time_point& t0) {
+            return std::chrono::duration<double, std::milli>(PerfClock::now() - t0)
+                .count();
+        };
+        auto stageStart = buildStart;
+
         // ---- 阶段 1：加锁快照（毫秒级，不长时间占用图锁） ----
         struct FrameSnapshot {
             long id;  ///< 关键帧对应的顶点 ID
@@ -192,6 +244,9 @@ public:
                 frames.push_back({id, v->estimate(), kf->odom, kf->cloud});
             }
         }
+        r.timings.snapshotMs = msSince(stageStart);
+        r.timings.frameCount = static_cast<int>(frames.size());
+        stageStart = PerfClock::now();
 
         // ---- 阶段 2：无锁变换到世界坐标系 ----
         // 优化层（estimate 位姿）与原始层（odom 位姿）逐点同步生成，
@@ -217,10 +272,14 @@ public:
             }
             r.cloudRanges.push_back({start, r.allWorldPoints.size() - start, frame.id});
         }
+        r.timings.transformMs = msSince(stageStart);
+        r.timings.totalPoints = r.allWorldPoints.size();
+        stageStart = PerfClock::now();
 
         if (r.allWorldPoints.empty()) {
             r.vertexChunks.emplace_back(new osg::Vec3Array);  // 空结果也提供空块
             r.colorChunks.emplace_back(new osg::Vec4Array);
+            r.timings.totalMs = msSince(buildStart);
             return r;
         }
 
@@ -281,6 +340,8 @@ public:
                 }
             }
         }
+        r.timings.outlierMs = msSince(stageStart);
+        stageStart = PerfClock::now();
 
         // ---- 阶段 3：主级别（全量或滤波后的存活点，LOD 分级在阶段 5 生成） ----
         r.renderRanges = mainRanges.empty() ? r.cloudRanges : mainRanges;
@@ -300,6 +361,13 @@ public:
         r.colorZMaxUsed = options.useAutoColorRange ? r.zMax : options.colorZMax;
         r.opacityUsed   = options.opacity;
 
+        r.timings.mainArraysMs    = msSince(stageStart);
+        r.timings.mainRenderPoints = r.renderFullRes ? r.allWorldPoints.size()
+                                                     : r.renderIndices.size();
+        r.timings.mainChunks      = r.vertexChunks.size();
+        r.timings.mainVboBytes    = levelBytes(r.vertexChunks, r.colorChunks);
+        stageStart = PerfClock::now();
+
         // ---- 阶段 5：第一层 LOD ----
         // 目标点数 N/2（不低于 minLodPoints），仅生成一个降采样级别——
         // 渲染固定为"全量 + 第一层"两种。以主级别（滤波后存活点）为
@@ -316,6 +384,14 @@ public:
                                   target, options, r.zMin, r.zMax));
             }
         }
+        r.timings.lodMs = msSince(stageStart);
+        for (const auto& lod : r.lodLevels) {
+            r.timings.lodPoints += lod.renderFullRes ? r.timings.mainRenderPoints
+                                                     : lod.renderIndices.size();
+            r.timings.lodChunks += lod.vertexChunks.size();
+            r.timings.lodVboBytes += levelBytes(lod.vertexChunks, lod.colorChunks);
+        }
+        stageStart = PerfClock::now();
 
         // ---- 阶段 6：原始层（里程计位姿点云，参照底图） ----
         // 与优化层逐点对齐，直接复用优化层的各级渲染索引/范围，
@@ -334,11 +410,37 @@ public:
                                    lod.renderFullRes, lod.renderRanges, options));
             }
         }
+        r.timings.odomMs = msSince(stageStart);
+        for (const auto& lvl : r.odomLevels) {
+            r.timings.odomPoints += lvl.renderFullRes ? r.allOdomWorldPoints.size()
+                                                      : lvl.renderIndices.size();
+            r.timings.odomChunks += lvl.vertexChunks.size();
+            r.timings.odomVboBytes += levelBytes(lvl.vertexChunks, lvl.colorChunks);
+        }
 
+        r.timings.totalMs = msSince(buildStart);
         return r;
     }
 
 private:
+    /**
+     * @brief 统计一组分块数组的字节数（顶点 + 颜色）
+     *
+     * 按 osg::Array::getTotalDataSize() 实测（元素数 × 元素字节），
+     * 是"这批数据一次性上传到显存"的真实体积，不含 OSG BufferObject 开销。
+     */
+    static size_t levelBytes(const std::vector<osg::ref_ptr<osg::Vec3Array>>& vertices,
+                             const std::vector<osg::ref_ptr<osg::Vec4Array>>& colors) {
+        size_t bytes = 0;
+        for (const auto& a : vertices) {
+            if (a.valid()) bytes += a->getTotalDataSize();
+        }
+        for (const auto& a : colors) {
+            if (a.valid()) bytes += a->getTotalDataSize();
+        }
+        return bytes;
+    }
+
     /**
      * @brief 构建原始层单个级别（复用优化层的渲染索引，换用里程计世界坐标）
      *

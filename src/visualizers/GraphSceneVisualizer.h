@@ -691,6 +691,16 @@ public:
     /** @brief 最近一次构建场景所用的图（供后台点云构建使用） */
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> lastGraph() const { return m_lastGraph; }
 
+    /**
+     * @brief 最近一次点云落地的规模与上传统计（Phase 0 基线测量用）
+     *
+     * 未创建点云可视化器时返回全零统计，调用方无需判空。
+     */
+    KeyframePointCloudVisualizer::CommitStats lastCloudCommitStats() const {
+        return m_cloudViz ? m_cloudViz->lastCommitStats()
+                          : KeyframePointCloudVisualizer::CommitStats{};
+    }
+
     /** @brief 清除整个场景 */
     void clear() {
         clearGraph();

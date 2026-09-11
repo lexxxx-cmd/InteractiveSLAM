@@ -147,6 +147,7 @@ public:
         m_allChunkGeoms.clear();
         m_lodLevels.clear();
         m_chunkGlobalIndex = 0;  // 池化数组按块全局索引复用
+        m_lastCommit = CommitStats{};  // 重置本次落地的统计
 
         // 构建 LOD 级别列表：level 0 = 主级别，其后为 builder 生成的远级别
         m_lodLevels.reserve(1 + result.lodLevels.size());
@@ -217,6 +218,8 @@ public:
         // 原始层与优化层使用相同的激活级别（构建后为 0），同步可见性
         m_odomActiveLevel = m_activeLodLevel;
         applyOdomVisibility();
+
+        m_lastCommit.levels = m_lodLevels.size();  // 统计：级别数（含主级别）
 
         m_activeLodLevel = 0;
         m_levelUploaded.assign(m_lodLevels.size(), false);
@@ -553,6 +556,31 @@ public:
         return static_cast<int>(m_lodLevels[m_activeLodLevel].totalPoints);
     }
 
+    // ========================================================================
+    // 落地统计（Phase 0 基线测量用）
+    // ========================================================================
+
+    /**
+     * @brief 一次 commitBuild 换入场景后的规模与上传统计
+     *
+     * 用途：回答"优化后重建到底要往显存里送多少字节"这一问题。
+     * `pooledReuse` 与 `freshArrays` 的区别是关键——命中数组池的块其
+     * OSG BufferObject 跨构建保持，上传走 glBufferSubData 增量更新；
+     * 而新建数组的块必须走 glBufferData 完整分配。
+     */
+    struct CommitStats {
+        size_t levels         = 0;  ///< LOD 级别数（含主级别）
+        size_t chunks         = 0;  ///< 主层分块几何体总数（各级求和）
+        size_t odomChunks     = 0;  ///< 原始层分块几何体总数（各级求和）
+        size_t arrayBytes     = 0;  ///< 主层顶点+颜色数组字节数（各级求和）
+        size_t odomArrayBytes = 0;  ///< 原始层顶点+颜色数组字节数
+        size_t pooledReuse    = 0;  ///< 命中数组池的块数（增量上传）
+        size_t freshArrays    = 0;  ///< 新建数组的块数（完整分配）
+    };
+
+    /** @brief 最近一次 commitBuild 的落地统计 */
+    const CommitStats& lastCommitStats() const { return m_lastCommit; }
+
 private:
     /** @brief 单个分块几何体 */
     struct CloudChunk {
@@ -598,9 +626,11 @@ private:
             m_chunkColorPool[m_chunkGlobalIndex]->dirty();
             v   = m_chunkVertexPool[m_chunkGlobalIndex];
             col = m_chunkColorPool[m_chunkGlobalIndex];
+            m_lastCommit.pooledReuse++;   // 命中池：上传走 glBufferSubData
         } else {
             m_chunkVertexPool.push_back(v);
             m_chunkColorPool.push_back(col);
+            m_lastCommit.freshArrays++;   // 新建：上传走 glBufferData 完整分配
         }
 
         CloudChunk chunk;
@@ -626,6 +656,11 @@ private:
         m_allChunkGeoms.push_back(geom);
         m_geode->addDrawable(geom);
         m_chunkGlobalIndex++;
+
+        m_lastCommit.chunks++;
+        m_lastCommit.arrayBytes +=
+            static_cast<size_t>(v->getTotalDataSize()) +
+            static_cast<size_t>(col->getTotalDataSize());
     }
 
     /** @brief 隐藏所有分块几何体 */
@@ -679,6 +714,11 @@ private:
         lg.chunks.push_back(chunk);
         m_odomAllChunkGeoms.push_back(geom);
         m_odomGeode->addDrawable(geom);
+
+        m_lastCommit.odomChunks++;
+        m_lastCommit.odomArrayBytes +=
+            static_cast<size_t>(v->getTotalDataSize()) +
+            static_cast<size_t>(col->getTotalDataSize());
     }
 
     /**
@@ -898,4 +938,7 @@ private:
     float m_colorZMax = 1.0f;   ///< 颜色映射 Z 最大值
     bool  m_useAutoColorRange = true; ///< 是否使用自动颜色范围
     bool  m_colorParamsValid = true;  ///< 各级颜色是否仍与构建时参数一致（false 时切换级别需重着色）
+
+    // —— 落地统计（Phase 0 基线测量；由 commitBuild/addChunk 填充） ——
+    CommitStats m_lastCommit;
 };

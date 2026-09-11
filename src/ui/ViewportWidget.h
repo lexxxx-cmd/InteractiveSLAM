@@ -19,6 +19,7 @@
 #include <QWidget>
 #include <QTimer>
 #include <QFutureWatcher>
+#include <chrono>
 #include <memory>
 #include <set>
 #include <vector>
@@ -263,6 +264,25 @@ private:
     // === 异步点云构建调度 ===
     void requestCloudBuild();   ///< 请求一次点云构建（运行中则合并为一次）
     void startCloudBuild();     ///< 启动后台构建任务
+
+    /**
+     * @brief 输出一次点云构建周期的基线日志（Phase 0 测量）
+     *
+     * 汇总后台构建的阶段耗时与规模、主线程落地的分块/上传统计、端到端
+     * 请求→换入延迟与显存占用，写入 <exe目录>/cloud_perf.log。
+     *
+     * @param t 后台构建返回的阶段耗时与规模统计（须在 result 被 move 前取出）
+     */
+    void logCloudBuildPerf(const hdl_graph_slam::BuildTimings& t);
+
+    /**
+     * @brief 开始一轮构建周期计时（Phase 0，幂等）
+     *
+     * 记录首个构建请求的时刻与当时的显存占用；已处于一轮周期中时无副作用。
+     * 由 requestCloudBuild()（用户/图变化发起）与 startCloudBuild()（链式续跑）
+     * 共同调用，保证任何路径下周期都已被武装。
+     */
+    void armPerfCycle();
     osgQOpenGLWidget* m_osgWidget = nullptr;                      ///< OSG 嵌入 Qt 的 OpenGL 部件
     std::unique_ptr<GraphSceneVisualizer> m_sceneViz;             ///< 场景可视化器
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;    ///< 当前加载的图谱
@@ -291,6 +311,14 @@ private:
     bool m_cloudBuildRunning = false; ///< 是否有构建任务正在运行
     bool m_cloudBuildPending = false; ///< 构建期间是否收到新的构建请求（合并用）
     bool m_chunkUploadWasPending = false; ///< 上一帧是否有点云分块在渐进上传（完成检测用）
+
+    // —— Phase 0 基线计时（steady_clock 单调时钟） ——
+    // 记录"用户/图变化发起构建请求 → 后台构建完成 → 提交换入 → 分块渐进上传结束"
+    // 的端到端耗时，以及各阶段显存占用，输出到 <exe目录>/cloud_perf.log。
+    std::chrono::steady_clock::time_point m_perfRequestAt{};  ///< 本轮首个构建请求时刻
+    std::chrono::steady_clock::time_point m_perfCommitAt{};   ///< 本轮 commit 换入完成时刻
+    bool  m_perfCycleActive = false;  ///< 是否处于一轮待统计的构建周期
+    quint64 m_perfVRAMBeforeMiB = 0;  ///< 本轮构建发起前的显存占用（0 = 查询不可用）
 
     // LOD 模式状态
     bool m_lodManualMode = true;  ///< true = 手动固定层级（默认手动，不随距离自动切换）
