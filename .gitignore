@@ -90,3 +90,7 @@ vcpkg_installed/
 
 # Qt autogen
 *.autogen
+*.ps1
+/.zcode
+*.md
+/docs/point_cloud_budget_downsampling_report.md
