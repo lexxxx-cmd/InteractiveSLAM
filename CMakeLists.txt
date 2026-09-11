@@ -127,6 +127,12 @@ set(ISF_SOURCES
     src/pointcloud/isf/IsfReader.cpp                      # .isf/.isf.idx 读取器（mmap + 顺序读兜底）
 )
 
+# --- 位姿表 + 渲染分块（Phase 2 数据侧） ---
+# 无 OSG / 无 Qt 依赖，因此既能进主程序，也能被无头自检工具链接。
+set(RENDER_DATA_SOURCES
+    src/visualizers/CloudRenderData.cpp                   # CloudPoseTable + buildChunks + 世界 AABB
+)
+
 # ============================================================================
 # 第三方子项目
 # ============================================================================
@@ -259,6 +265,35 @@ target_link_libraries(isf_pack PRIVATE
 )
 if(MSVC)
     target_compile_options(isf_pack PRIVATE /W3 /wd4996)
+endif()
+
+# ============================================================================
+# Phase 2 数据侧无头自检（不需要 GPU / Qt / GUI）
+# ============================================================================
+
+# 验证"位姿上移着色器"架构的可测量论断：位姿表正确性、优化更新只重写位姿槽
+# （与点数无关）、分块帧号映射、LOD 索引合法性、位姿变化后世界 AABB 仍正确、
+# 双层共享 = 1× 顶点显存。
+add_executable(cloud_selftest
+    tools/cloud_selftest.cpp      # 自检主体
+    ${DATA_SOURCES}               # 地图加载
+    ${RENDER_DATA_SOURCES}        # 位姿表 + 渲染分块
+)
+target_include_directories(cloud_selftest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${EIGEN3_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${G2O_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(cloud_selftest PRIVATE
+    ${PCL_LIBRARIES}
+    ${G2O_LIBRARIES}
+    Boost::filesystem
+    yaml-cpp
+)
+if(MSVC)
+    target_compile_options(cloud_selftest PRIVATE /W3 /wd4996)
 endif()
 
 # ============================================================================
