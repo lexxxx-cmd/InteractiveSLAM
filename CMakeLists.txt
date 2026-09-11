@@ -307,6 +307,36 @@ if(MSVC)
 endif()
 
 # ============================================================================
+# Phase 4 拾取无头自检（不需要 GPU / Qt / 窗口）
+# ============================================================================
+
+# 验证 pose-aware 拾取：射线是世界系、顶点是帧局部系，这条变换链最容易
+# "看起来对、实际错"，所以用合成数据做精确数值断言 + 真实地图往返验证。
+# 需要 OSG（osgUtil 的 IntersectionVisitor / Intersector 体系），但不需要 GL 上下文。
+add_executable(cloud_pick_selftest
+    tools/cloud_pick_selftest.cpp # 自检主体（合成数据 + 真实地图往返）
+    ${DATA_SOURCES}               # 地图加载
+    ${RENDER_DATA_SOURCES}        # 位姿表 + 渲染分块
+)
+target_include_directories(cloud_pick_selftest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${EIGEN3_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${G2O_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(cloud_pick_selftest PRIVATE
+    ${PCL_LIBRARIES}
+    ${G2O_LIBRARIES}
+    Boost::filesystem
+    yaml-cpp
+    ${OPENSCENEGRAPH_LIBRARIES}   # osgUtil（相交器框架）；同时带入 OSG 头文件路径
+)
+if(MSVC)
+    target_compile_options(cloud_pick_selftest PRIVATE /W3 /wd4996)
+endif()
+
+# ============================================================================
 # 安装规则
 # ============================================================================
 
