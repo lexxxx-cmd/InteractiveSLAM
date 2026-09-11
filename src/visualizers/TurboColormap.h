@@ -21,21 +21,20 @@
 #include <algorithm>
 
 /**
- * @brief Turbo 颜色映射函数
+ * @brief Turbo 256 项 RGB 查表（每项取值 [0,1]）
  *
- * 将输入的标量值 z 在 [zMin, zMax] 范围内映射到 Turbo 颜色空间。
- * 返回 RGBA 颜色向量。
+ * 数据来源与含义见本文件头部注释。之所以把它从 turboColor() 内部提出来单独暴露，
+ * 是为了让 GPU 侧能用**同一份**数据构造一张 256×1 的 LUT 纹理：顶点着色器按世界 Z
+ * 采样该纹理即可得到与 CPU turboColor() 逐位一致的颜色，从而把颜色从逐顶点数据里
+ * 去掉（1 亿点省 400 MB），并让"颜色范围"退化为一次 uniform 更新而不是 O(N) 重着色。
  *
- * @param z     待映射的标量值（通常为点云的高程/深度）
- * @param zMin  映射范围下限（对应颜色映射的起始颜色）
- * @param zMax  映射范围上限（对应颜色映射的结束颜色）
- * @return osg::Vec4 颜色向量 (R, G, B, A)，Alpha 始终为 1.0
+ * 注意：CPU 侧 turboColor() 的取色是 idx = clamp(int(t*255), 0, 255) 的最近邻查表，
+ * 因此 GPU 侧纹理必须用 NEAREST 过滤，才能保证两者逐位一致（线性过滤会插值出
+ * 中间色，与 CPU 结果不同）。
  *
- * 当范围过小（zMax <= zMin）时，返回灰色 (0.5, 0.5, 0.5, 1.0)
+ * @return 指向 256×3 浮点数组的指针
  */
-inline osg::Vec4 turboColor(float z, float zMin, float zMax) {
-    // —— Turbo 颜色查找表（256 个 RGB 条目） ——
-    // 数据按从低值到高值排列，涵盖整个可见光谱
+inline const float (*turboTable())[3] {
     static const float turbo[256][3] = {
         {0.18995f,0.07176f,0.23217f},{0.19483f,0.08339f,0.26149f},{0.19956f,0.09498f,0.29024f},{0.20415f,0.10652f,0.31844f},
         {0.20860f,0.11802f,0.34607f},{0.21291f,0.12947f,0.37314f},{0.21708f,0.14087f,0.39964f},{0.22111f,0.15223f,0.42558f},
@@ -102,6 +101,27 @@ inline osg::Vec4 turboColor(float z, float zMin, float zMax) {
         {0.57103f,0.04474f,0.00529f},{0.55852f,0.04028f,0.00579f},{0.54583f,0.03593f,0.00638f},{0.53295f,0.03169f,0.00705f},
         {0.51989f,0.02756f,0.00780f},{0.50664f,0.02354f,0.00863f},{0.49321f,0.01963f,0.00955f},{0.47960f,0.01583f,0.01055f}
     };
+    return turbo;
+}
+
+/**
+ * @brief Turbo 颜色映射函数
+ *
+ * 将输入的标量值 z 在 [zMin, zMax] 范围内映射到 Turbo 颜色空间。
+ * 返回 RGBA 颜色向量。
+ *
+ * @param z     待映射的标量值（通常为点云的高程/深度）
+ * @param zMin  映射范围下限（对应颜色映射的起始颜色）
+ * @param zMax  映射范围上限（对应颜色映射的结束颜色）
+ * @return osg::Vec4 颜色向量 (R, G, B, A)，Alpha 始终为 1.0
+ *
+ * 当范围过小（zMax <= zMin）时，返回灰色 (0.5, 0.5, 0.5, 1.0)
+ */
+inline osg::Vec4 turboColor(float z, float zMin, float zMax) {
+    // —— Turbo 颜色查找表（256 个 RGB 条目） ——
+    // 数据按从低值到高值排列，涵盖整个可见光谱
+    // 查表数据由 turboTable() 统一提供（GPU 侧 LUT 纹理也用同一份）
+    const float (*turbo)[3] = turboTable();
 
     // 范围检查：如果范围为零或负值，返回灰色
     float range = zMax - zMin;

@@ -133,6 +133,15 @@ set(RENDER_DATA_SOURCES
     src/visualizers/CloudRenderData.cpp                   # CloudPoseTable + buildChunks + 世界 AABB
 )
 
+# --- 点云渲染几何体与位姿纹理（Phase 2b，OSG 侧原语） ---
+# 只依赖 OSG 核心（不需要 GL 上下文即可构造），随主程序一起编译以便尽早暴露
+# 编译错误；但**尚未接入渲染路径**（接线属 Phase 2b 后半，且需与 Phase 4 的
+# CloudRayIntersector 同时落地，理由见 CloudGeometry.h 的接入前置条件）。
+set(CLOUD_GL_SOURCES
+    src/visualizers/CloudGeometry.cpp                     # osg::Geometry 子类：局部顶点 + 动态世界 AABB + 屏蔽原生相交器
+    src/visualizers/CloudPoseBuffer.cpp                   # 位姿表 → TextureBuffer（双槽，只更新优化槽）
+)
+
 # ============================================================================
 # 第三方子项目
 # ============================================================================
@@ -159,6 +168,7 @@ qt_add_executable(appInteractiveSLAM
     ${BACKEND_SOURCES}        # 后端桥接层源文件
     ${UI_SOURCES}             # UI 层源文件
     ${VISUALIZER_SOURCES}     # 可视化层源文件（需要独立编译单元的）
+    ${CLOUD_GL_SOURCES}       # Phase 2b：点云几何体与位姿纹理（OSG 侧原语）
     src/ui/ui_resources.qrc   # Qt 资源文件（暗色主题 QSS）
 )
 
