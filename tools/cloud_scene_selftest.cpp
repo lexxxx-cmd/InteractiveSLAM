@@ -15,6 +15,11 @@
 // ============================================================================
 
 #include "visualizers/CloudSceneBuilder.h"
+#include "data/hdl_graph_slam/interactive_graph.hpp"
+#include "data/hdl_graph_slam/keyframe.hpp"
+#include "data/hdl_graph_slam/progress_interface.hpp"
+
+#include <g2o/types/slam3d/vertex_se3.h>
 
 #include <osg/Array>
 #include <osg/Geode>
@@ -23,12 +28,18 @@
 // （osg 下**没有** DrawArrays / DrawElements 这两个头文件）
 #include <osg/PrimitiveSet>
 #include <osg/StateSet>
+#include <osg/TextureBuffer>
 #include <osg/Uniform>
 #include <osg/Vec2>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <string>
 #include <vector>
 
 using namespace hdl_graph_slam;
@@ -133,9 +144,271 @@ bool sameBox(const osg::BoundingBox& a, float x0, float y0, float z0,
            std::fabs(a.yMax() - y1) < 1e-5f && std::fabs(a.zMax() - z1) < 1e-5f;
 }
 
+// ---------------------------------------------------------------------------
+// 真实地图段（--map）：位姿表 → 位姿纹理 的布局，以及装配层在真实规模下的不变量
+// ---------------------------------------------------------------------------
+
+struct SilentProgress : ProgressInterface {
+    int max = 0, cur = 0;
+    void set_maximum(int m) override { max = m; }
+    void increment() override {
+        ++cur;
+        if (max > 0 && (cur % 512 == 0 || cur == max)) {
+            std::printf("\r[load] %3d%%", cur * 100 / max);
+            std::fflush(stdout);
+        }
+    }
+};
+
+std::string argValue(int argc, char** argv, const char* name, const std::string& def) {
+    for (int i = 0; i < argc; ++i) {
+        if (std::strcmp(argv[i], name) == 0 && i + 1 < argc) return argv[i + 1];
+    }
+    return def;
+}
+
+/**
+ * @brief 校验某槽位姿纹理的 texel 分组与位姿表的内存布局一致
+ *
+ * 这是整套架构里最承重的一条约定，且跨三个不同时间写的文件：
+ *   CloudPoseTable::toColumnMajor16   写 out[4c+r] = M(r,c)（数学列主序）
+ *   CloudPoseBuffer::fillSlot         写 texel[i*4+k] = p[4k .. 4k+3]
+ *   顶点着色器                         texelFetch(uPoseTable, frame*4 + j) → 第 j 列
+ * 任何一处 off-by-one 或分组错误都会让点云画在**错误的位姿**上——而且症状看起来
+ * 只是"数据不对"，极难归因到纹理布局。所以这里逐 texel 对照内存布局。
+ *
+ * @return 不一致的 texel 数（0 = 通过；-1 = 纹理/数组/texel 数不可用）
+ */
+int verifyPoseTexels(const CloudPoseTable& poses, CloudPoseBuffer& buf, uint32_t slot,
+                     const std::vector<size_t>& frames) {
+    osg::TextureBuffer* tex = buf.texture(slot);
+    if (!tex) return -1;
+    const auto* arr = dynamic_cast<const osg::Vec4Array*>(tex->getBufferData());
+    if (!arr) return -1;
+    if (tex->getTextureWidth() != static_cast<int>(poses.frameCount() * 4)) return -1;
+
+    const size_t stride = poses.slotFloats();
+    const float* base = poses.data().data() + static_cast<size_t>(slot) * stride;
+    int bad = 0;
+    for (size_t i : frames) {
+        if (i * 4 + 3 >= arr->size()) { ++bad; continue; }
+        for (size_t k = 0; k < 4; ++k) {
+            const osg::Vec4& t = (*arr)[i * 4 + k];
+            const float* p = base + i * 16 + k * 4;
+            if (t.x() != p[0] || t.y() != p[1] || t.z() != p[2] || t.w() != p[3]) ++bad;
+        }
+    }
+    return bad;
+}
+
+/** @brief 抽出某槽纹理的全部 texel（用于"逐位不变"比对） */
+bool snapshotTexels(CloudPoseBuffer& buf, uint32_t slot, std::vector<float>& out) {
+    osg::TextureBuffer* tex = buf.texture(slot);
+    if (!tex) return false;
+    const auto* arr = dynamic_cast<const osg::Vec4Array*>(tex->getBufferData());
+    if (!arr) return false;
+    out.resize(arr->size() * 4);
+    for (size_t i = 0; i < arr->size(); ++i) {
+        const osg::Vec4& v = (*arr)[i];
+        out[i * 4 + 0] = v.x(); out[i * 4 + 1] = v.y();
+        out[i * 4 + 2] = v.z(); out[i * 4 + 3] = v.w();
+    }
+    return true;
+}
+
+void sectionRealMap(Checker& ck, const std::string& mapDir, int sampleFrames) {
+    ck.section("H. 真实地图：位姿表 → 位姿纹理 的布局（跨三文件的承重约定）");
+
+    SilentProgress progress;
+    auto graph = std::make_shared<InteractiveGraph>();
+    const auto t0 = std::chrono::steady_clock::now();
+    if (!graph->load_map_data(mapDir, progress)) {
+        std::printf("\n错误：地图加载失败\n");
+        ck.check(false, "地图加载成功");
+        return;
+    }
+    const double loadMs = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - t0).count();
+    std::printf("\n地图加载完成：%zu 关键帧，%.1f s\n",
+                graph->keyframes.size(), loadMs / 1000.0);
+
+    ChunkBuildOptions opt;
+    opt.lodLevels = 4;
+    CloudPoseTable poses;
+    CloudPoseBuffer poseBuf;
+    CloudSceneBuilder scene;
+
+    // buildChunks 内部会 poses.rebuild(graph)，因此返回后 poses 已可用
+    ChunkBuildResult res = buildChunks(graph, poses, opt);
+    const size_t nf = poses.frameCount();
+    std::printf("分块：%zu chunk / %llu 点；帧 %zu\n", res.chunks.size(),
+                static_cast<unsigned long long>(res.totalPoints), nf);
+    ck.check(nf > 0 && res.totalPoints > 0, "地图非空");
+
+    // ---- 1) 位姿纹理布局 ----
+    const size_t wrote = poseBuf.rebuild(poses);
+    ck.check(wrote == poseBuf.slotBytes() * CloudPoseTable::kSlotCount,
+             "rebuild 上传量 == 两槽合计（帧数 × 64 B × 2）");
+    ck.check(poseBuf.slotBytes() == nf * 64, "单槽字节 == 帧数 × 64");
+
+    std::vector<size_t> sample;
+    if (nf > 0) {
+        sample.push_back(0);
+        sample.push_back(nf - 1);
+        for (int s = 0; s < sampleFrames; ++s) sample.push_back(static_cast<size_t>(s) % nf);
+    }
+    const int badOpt = verifyPoseTexels(poses, poseBuf, CloudPoseTable::kSlotOptimized, sample);
+    const int badOdo = verifyPoseTexels(poses, poseBuf, CloudPoseTable::kSlotOriginal, sample);
+    ck.check(badOpt == 0, "优化槽：texel[i*4+k] == 位姿表第 i 帧第 k 列（4 float 一组）");
+    ck.check(badOdo == 0, "原始槽：texel[i*4+k] == 位姿表第 i 帧第 k 列");
+
+    // ---- 2) 更新只重写优化槽，上传量严格 = 帧数 × 64 B ----
+    {
+        std::vector<float> origBefore;
+        ck.check(snapshotTexels(poseBuf, CloudPoseTable::kSlotOriginal, origBefore),
+                 "取到原始槽 texel 快照");
+
+        std::vector<std::pair<g2o::VertexSE3*, Eigen::Isometry3d>> saved;
+        const size_t step = (nf / 32) ? (nf / 32) : 1;
+        size_t seen = 0;
+        for (auto& kv : graph->keyframes) {
+            if (saved.size() >= 32) break;
+            auto* v = dynamic_cast<g2o::VertexSE3*>(kv.second->node);
+            if (!v) continue;
+            if ((seen++ % step) != 0) continue;
+            const Eigen::Isometry3d oldT = v->estimate();
+            Eigen::Isometry3d newT = oldT;
+            newT.translation() += Eigen::Vector3d(0.25, -0.5, 0.75);
+            saved.emplace_back(v, oldT);
+            v->setEstimate(newT);
+        }
+        poses.updateOptimized(graph);
+        const size_t up = poseBuf.updateOptimizedSlot(poses);
+        ck.check(up == poseBuf.slotBytes(),
+                 "updateOptimizedSlot 上传量 == 单槽（帧数 × 64 B），而不是两槽");
+
+        std::vector<float> origAfter;
+        snapshotTexels(poseBuf, CloudPoseTable::kSlotOriginal, origAfter);
+        ck.check(!origBefore.empty() && origBefore == origAfter,
+                 "更新优化槽后原始槽 texel **逐位不变**（冻结是结构性保证）");
+        ck.check(verifyPoseTexels(poses, poseBuf, CloudPoseTable::kSlotOptimized, sample) == 0,
+                 "更新后优化槽 texel 仍与位姿表一致");
+
+        for (auto& [v, oldT] : saved) v->setEstimate(oldT);
+        poses.updateOptimized(graph);
+        poseBuf.updateOptimizedSlot(poses);
+    }
+
+    // ---- 3) 装配层在真实规模下的不变量 ----
+    const size_t nGeom = scene.build(res.chunks, opt.chunkFrames, poseBuf,
+                                     /*withOriginal=*/true, 2.0f);
+    std::printf("装配：几何体 %zu，顶点 %zu，整图 AABB 有效=%d\n",
+                nGeom, scene.vertexCount(), scene.mapBounds().valid() ? 1 : 0);
+
+    ck.check(scene.vertexCount() == res.totalPoints,
+             "顶点总数 == 全量点数（**不是 2×**：两层共享同一批几何体）");
+    {
+        osg::Group* optG = scene.layerGroup(CloudPoseTable::kSlotOptimized);
+        osg::Group* orgG = scene.layerGroup(CloudPoseTable::kSlotOriginal);
+        ck.check(optG && orgG && optG->getChild(0) == orgG->getChild(0),
+                 "两层的子节点是同一个 Geode（真实规模下同样成立）");
+    }
+    {
+        size_t gi = 0, bad = 0;
+        for (const auto& c : res.chunks) {
+            if (c.positions.empty()) continue;
+            if (gi >= scene.geometries().size()) { ++bad; break; }
+            osg::Uniform* u =
+                scene.geometries()[gi]->getStateSet()->getUniform("uFrameIdBias");
+            int v = -1;
+            if (!u || !u->get(v) || static_cast<uint32_t>(v) != c.firstFrameIndex) ++bad;
+            ++gi;
+        }
+        ck.check(bad == 0 && gi == scene.geometries().size(),
+                 "每个 chunk 的 uFrameIdBias == 该 chunk 的 firstFrameIndex");
+    }
+    {
+        bool lodOk = true;
+        for (uint32_t L = 1; L < opt.lodLevels; ++L) {
+            scene.setActiveLodLevel(static_cast<int>(L));
+            size_t total = 0;
+            for (const auto& g : scene.geometries()) {
+                if (!g.valid() || g->getNumPrimitiveSets() != 1) { lodOk = false; continue; }
+                total += g->getPrimitiveSet(0)->getNumIndices();
+            }
+            std::printf("  L%u 装配侧索引总数 %zu（数据层 %llu）\n", L, total,
+                        static_cast<unsigned long long>(res.lodPoints[L]));
+            if (total != res.lodPoints[L]) lodOk = false;
+        }
+        ck.check(lodOk, "各级 LOD 的索引总数与数据层统计逐级一致");
+        scene.setActiveLodLevel(0);
+    }
+
+    // ---- 4) Phase 3：换槽刷新世界 AABB，几何体的世界盒必须跟着变 ----
+    {
+        auto snapshot = [&]() {
+            std::vector<osg::BoundingBox> v;
+            v.reserve(scene.geometries().size());
+            for (const auto& g : scene.geometries()) v.push_back(g->worldBounds());
+            return v;
+        };
+        const std::vector<osg::BoundingBox> optB = snapshot();
+        const double ms =
+            scene.refreshWorldBounds(res.chunks, poses, CloudPoseTable::kSlotOriginal);
+        const std::vector<osg::BoundingBox> orgB = snapshot();
+        std::printf("  换到原始槽刷新世界 AABB: %.3f ms\n", ms);
+
+        bool matches = true, differs = false;
+        size_t gi = 0;
+        for (const auto& c : res.chunks) {
+            if (c.positions.empty()) continue;
+            const osg::BoundingBox& got = scene.geometries()[gi]->worldBounds();
+            if (std::fabs(got.xMin() - c.worldMin[0]) > 1e-3f ||
+                std::fabs(got.yMin() - c.worldMin[1]) > 1e-3f ||
+                std::fabs(got.zMin() - c.worldMin[2]) > 1e-3f ||
+                std::fabs(got.xMax() - c.worldMax[0]) > 1e-3f ||
+                std::fabs(got.yMax() - c.worldMax[1]) > 1e-3f ||
+                std::fabs(got.zMax() - c.worldMax[2]) > 1e-3f) matches = false;
+            ++gi;
+        }
+        for (size_t i = 0; i < optB.size() && i < orgB.size(); ++i) {
+            if (std::fabs(optB[i].xMin() - orgB[i].xMin()) > 1e-3f ||
+                std::fabs(optB[i].xMax() - orgB[i].xMax()) > 1e-3f) differs = true;
+        }
+        ck.check(matches, "刷新后每个几何体的世界盒 == 数据层该 chunk 的世界 AABB");
+        ck.check(differs, "换槽刷新确实改变了世界盒（两层位姿不同）");
+
+        scene.refreshWorldBounds(res.chunks, poses, CloudPoseTable::kSlotOptimized);
+        const std::vector<osg::BoundingBox> back = snapshot();
+        bool restored = true;
+        for (size_t i = 0; i < optB.size() && i < back.size(); ++i) {
+            if (std::fabs(optB[i].xMin() - back[i].xMin()) > 1e-3f ||
+                std::fabs(optB[i].xMax() - back[i].xMax()) > 1e-3f) restored = false;
+        }
+        ck.check(restored, "换回优化槽后世界盒恢复");
+    }
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc >= 2 && (std::strcmp(argv[1], "-h") == 0 ||
+                      std::strcmp(argv[1], "--help") == 0)) {
+        std::printf(
+            "cloud_scene_selftest —— Phase 2b/3 装配层无头自检\n"
+            "\n"
+            "用法:\n"
+            "  cloud_scene_selftest [--map <地图目录>] [--sample N]\n"
+            "      --map DIR   额外跑真实地图段（位姿纹理布局 + 装配层真实规模不变量）\n"
+            "                  建议先用小地图（559 帧）跑，大地图会占用数 GB 内存\n"
+            "      --sample N  真实地图段的位姿抽样帧数（默认 200）\n"
+            "\n"
+            "退出码: 0 = 全部通过；1 = 有失败项\n");
+        return 0;
+    }
+    const std::string mapDir = argValue(argc, argv, "--map", "");
+    const int sampleFrames = std::atoi(argValue(argc, argv, "--sample", "200").c_str());
+
     std::printf("=== cloud_scene_selftest ===\n\n");
     Checker ck;
 
