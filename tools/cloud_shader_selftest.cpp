@@ -19,13 +19,13 @@
 #include "visualizers/CloudGeometry.h"   // kFrameIdAttribLocation
 #include "visualizers/TurboColormap.h"
 
+#include <osg/Array>   // Vec4Array 是这里的 typedef（osg 下没有 Vec4Array 头）
 #include <osg/CopyOp>
 #include <osg/Program>
 #include <osg/Shader>
 #include <osg/StateSet>
 #include <osg/TextureBuffer>
 #include <osg/Uniform>
-#include <osg/Vec4Array>
 
 #include <algorithm>
 #include <cctype>

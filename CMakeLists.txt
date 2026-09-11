@@ -185,12 +185,21 @@ qt_add_translations(appInteractiveSLAM
 )
 
 # 包含目录
+#
+# 注意 OSG 的头必须靠 OPENSCENEGRAPH_INCLUDE_DIRS 显式带上：
+# OPENSCENEGRAPH_LIBRARIES 是**库文件路径列表**（形如
+#   optimized;E:/vcpkg/installed/x64-windows/lib/osg.lib;debug;.../osgd.lib
+# ），不是 imported target，因此**不会传递任何头文件路径**。
+# 此前之所以能编译 osg/*，只是因为 PCL_INCLUDE_DIRS 恰好包含 vcpkg 的 include
+# 根目录（E:/vcpkg/installed/x64-windows/include）——那是巧合；任何不带 PCL 的
+# 目标（例如 cloud_shader_selftest）都会立刻报 "无法打开包括文件 osg/Array"。
 target_include_directories(appInteractiveSLAM PRIVATE
     ${CMAKE_SOURCE_DIR}/src          # 项目源代码根目录
     ${EIGEN3_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${G2O_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
+    ${OPENSCENEGRAPH_INCLUDE_DIRS}   # OSG 头文件（理由见上）
 )
 
 # 链接库
@@ -324,6 +333,7 @@ target_include_directories(cloud_pick_selftest PRIVATE
     ${PCL_INCLUDE_DIRS}
     ${G2O_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
+    ${OPENSCENEGRAPH_INCLUDE_DIRS}   # OSG 头（OPENSCENEGRAPH_LIBRARIES 不带头路径）
 )
 target_link_libraries(cloud_pick_selftest PRIVATE
     ${PCL_LIBRARIES}
@@ -351,6 +361,9 @@ add_executable(cloud_shader_selftest
 )
 target_include_directories(cloud_shader_selftest PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    # 本目标刻意不依赖 PCL/数据层，因此**必须**显式带上 OSG 头路径
+    # （不能像其它目标那样指望 PCL_INCLUDE_DIRS 顺带把 vcpkg include 根带进来）
+    ${OPENSCENEGRAPH_INCLUDE_DIRS}
 )
 target_link_libraries(cloud_shader_selftest PRIVATE
     ${OPENSCENEGRAPH_LIBRARIES}
@@ -379,6 +392,7 @@ target_include_directories(cloud_scene_selftest PRIVATE
     ${PCL_INCLUDE_DIRS}
     ${G2O_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
+    ${OPENSCENEGRAPH_INCLUDE_DIRS}   # OSG 头（OPENSCENEGRAPH_LIBRARIES 不带头路径）
 )
 target_link_libraries(cloud_scene_selftest PRIVATE
     ${PCL_LIBRARIES}
