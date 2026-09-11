@@ -198,12 +198,22 @@ int main(int argc, char** argv) {
              "位姿数据长度 == 帧数 × 16 × 2 槽");
 
     {
-        // 抽样比对：两槽位姿与图里的 estimate()/odom 一致（1e-6 相对容差）
+        // 抽样比对：两槽位姿与图里的 estimate()/odom 一致。
+        // 注意容差是**绝对** 1e-5，而位姿表存的是 float：值 v 处的 ulp ≈ |v|·2⁻²³，
+        // 往返误差 ≤ 半个 ulp = |v|·5.96e-8，所以 |平移| 超过约 128 m 时
+        // 这个容差就比 float 的固有精度还紧——下面会把量级打出来以便判断。
         std::mt19937 rng(20260911u);
         const size_t n = poses.frameCount();
         const int k = std::min<int>(sampleFrames, static_cast<int>(n));
         std::uniform_int_distribution<size_t> dist(0, n - 1);
         int optBad = 0, odomBad = 0;
+        // —— 诊断量：失败项本身不打印数值，光看 [FAIL] 无法区分
+        //    ① 位姿表真的错 ② float 存储精度不够 ③ 两槽其实是同一份数据 ——
+        double worstOpt = 0.0, worstOdom = 0.0;   // 与参照的最大绝对偏差
+        double worstSlotDiff = 0.0;               // 两槽之间的最大绝对偏差
+        size_t sameSlots = 0;                     // 两槽逐位相同的帧数
+        double maxAbsT = 0.0;                     // 采样帧 |平移| 的最大量级
+        long   worstOptId = -1, worstOdomId = -1;
         for (int s = 0; s < k; ++s) {
             const size_t i = dist(rng);
             auto it = graph->keyframes.find(poses.frameIds()[i]);
@@ -215,9 +225,23 @@ int main(int argc, char** argv) {
             const Eigen::Matrix4d refOdom = it->second->odom.matrix();
             const Eigen::Matrix4d gotOpt  = poses.pose(CloudPoseTable::kSlotOptimized, i).matrix();
             const Eigen::Matrix4d gotOdom = poses.pose(CloudPoseTable::kSlotOriginal, i).matrix();
-            if ((gotOpt - refOpt).cwiseAbs().maxCoeff() > 1e-5) ++optBad;
-            if ((gotOdom - refOdom).cwiseAbs().maxCoeff() > 1e-5) ++odomBad;
+            const double dOpt  = (gotOpt  - refOpt ).cwiseAbs().maxCoeff();
+            const double dOdom = (gotOdom - refOdom).cwiseAbs().maxCoeff();
+            const double dSlot = (gotOpt  - gotOdom).cwiseAbs().maxCoeff();
+            if (dOpt  > worstOpt)  { worstOpt  = dOpt;  worstOptId  = poses.frameIds()[i]; }
+            if (dOdom > worstOdom) { worstOdom = dOdom; worstOdomId = poses.frameIds()[i]; }
+            if (dSlot > worstSlotDiff) worstSlotDiff = dSlot;
+            if (dSlot == 0.0) ++sameSlots;
+            maxAbsT = std::max(maxAbsT, refOpt.block<3, 1>(0, 3).cwiseAbs().maxCoeff());
+            if (dOpt > 1e-5) ++optBad;
+            if (dOdom > 1e-5) ++odomBad;
         }
+        std::printf("  诊断: 采样 %d 帧；|平移| 最大 %.1f m → float 往返误差上界 ≈ %.2e\n",
+                    k, maxAbsT, maxAbsT * 5.96e-8);
+        std::printf("        与参照最大偏差：优化槽 %.3e（帧 %ld）  原始槽 %.3e（帧 %ld）\n",
+                    worstOpt, worstOptId, worstOdom, worstOdomId);
+        std::printf("        两槽之间最大偏差 %.3e；两槽逐位完全相同的帧 %zu/%d\n",
+                    worstSlotDiff, sameSlots, k);
         ck.check(optBad == 0, "优化槽位姿与 vertex->estimate() 一致（抽样）");
         ck.check(odomBad == 0, "原始槽位姿与 keyframe->odom 一致（抽样）");
     }
@@ -478,15 +502,35 @@ int main(int argc, char** argv) {
         refreshAllWorldBounds(res.chunks, poses, CloudPoseTable::kSlotOriginal);
 
         bool differs = false;
+        double maxBoundDiff = 0.0;
+        long long firstDiffChunk = -1;
         for (size_t i = 0, b = 0; i < res.chunks.size(); ++i, b += 6) {
             const CloudChunk& c = res.chunks[i];
             for (int k = 0; k < 3; ++k) {
-                if (std::fabs(optBounds[b + 2 * k] - c.worldMin[k]) > 1e-3f ||
-                    std::fabs(optBounds[b + 2 * k + 1] - c.worldMax[k]) > 1e-3f) {
-                    differs = true;
-                }
+                const double dmin = std::fabs(optBounds[b + 2 * k]     - c.worldMin[k]);
+                const double dmax = std::fabs(optBounds[b + 2 * k + 1] - c.worldMax[k]);
+                const double d    = std::max(dmin, dmax);
+                if (d > maxBoundDiff) { maxBoundDiff = d; firstDiffChunk = (long long)i; }
+                if (d > 1e-3) differs = true;
             }
         }
+        // refreshWorldBounds 在"所有帧都查不到位姿"时会**保留旧包围盒**返回，只把
+        // worldBoundsValid 置 false。此时与优化槽比对会看到"完全相同"，把一次
+        // 刷新失败误判成"两层不独立"。所以先单独断言刷新确实成功。
+        size_t invalidAfter = 0;
+        for (const auto& c : res.chunks) if (!c.worldBoundsValid) ++invalidAfter;
+        std::printf("  诊断: 原始槽刷新后无效 chunk %zu/%zu；包围盒最大差异 %.3e（首个差异 chunk %lld）\n",
+                    invalidAfter, res.chunks.size(), maxBoundDiff, firstDiffChunk);
+        if (!res.chunks.empty() && optBounds.size() >= 6) {
+            std::printf("        chunk[0] 优化槽 AABB [%.2f,%.2f] [%.2f,%.2f] [%.2f,%.2f]\n",
+                        optBounds[0], optBounds[1], optBounds[2], optBounds[3],
+                        optBounds[4], optBounds[5]);
+            std::printf("        chunk[0] 原始槽 AABB [%.2f,%.2f] [%.2f,%.2f] [%.2f,%.2f]\n",
+                        res.chunks[0].worldMin[0], res.chunks[0].worldMax[0],
+                        res.chunks[0].worldMin[1], res.chunks[0].worldMax[1],
+                        res.chunks[0].worldMin[2], res.chunks[0].worldMax[2]);
+        }
+        ck.check(invalidAfter == 0, "用原始槽刷新后所有 chunk 的世界 AABB 仍然有效（刷新未整段失败）");
         ck.check(differs, "用原始槽刷新的世界 AABB 与优化槽不同（两层确实独立）");
 
         // 还原为优化槽 AABB
