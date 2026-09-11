@@ -360,6 +360,38 @@ if(MSVC)
 endif()
 
 # ============================================================================
+# Phase 2b/3 装配层无头自检（不需要 GPU / GL 上下文 / 地图文件）
+# ============================================================================
+
+# 用合成 chunk 验证装配层的结构性不变量，秒级且完全确定：
+# 两层是否共享同一批 Geometry（"双层 = 1× 显存"的全部来源）、每 chunk 的
+# uFrameIdBias 是否正确且不共享、层级的量是否挂在父 Group 靠继承传播、
+# LOD 切换是否只换 primitive set、世界 AABB 是否逐 chunk 落地。
+add_executable(cloud_scene_selftest
+    tools/cloud_scene_selftest.cpp   # 自检主体（合成 chunk）
+    ${CLOUD_GL_SOURCES}              # CloudGeometry + CloudPoseBuffer（需独立编译单元）
+    ${RENDER_DATA_SOURCES}           # 分块数据结构
+    ${DATA_SOURCES}                  # 地图加载（本自检不加载地图，但保证符号齐全）
+)
+target_include_directories(cloud_scene_selftest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${EIGEN3_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${G2O_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(cloud_scene_selftest PRIVATE
+    ${PCL_LIBRARIES}
+    ${G2O_LIBRARIES}
+    Boost::filesystem
+    yaml-cpp
+    ${OPENSCENEGRAPH_LIBRARIES}
+)
+if(MSVC)
+    target_compile_options(cloud_scene_selftest PRIVATE /W3 /wd4996)
+endif()
+
+# ============================================================================
 # 安装规则
 # ============================================================================
 
