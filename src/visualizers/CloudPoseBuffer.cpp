@@ -5,6 +5,10 @@
 
 #include "visualizers/CloudPoseBuffer.h"
 
+// kInternalFormatRGBA32F（含"为什么用字面量而不是 GL_RGBA32F"的完整说明）统一在
+// CoreShaders.h —— 位姿纹理与 Turbo 色表用的是同一个格式，只应有一处定义。
+#include "visualizers/CoreShaders.h"
+
 #include <osg/GL>
 #include <osg/Texture>
 
@@ -18,21 +22,8 @@ namespace {
 /** @brief 每帧的 texel 数（16 float / 每 texel 4 float） */
 constexpr size_t kTexelsPerPose = CloudPoseTable::kFloatsPerPose / 4;
 
-// —— 内部格式常量：为什么不用 GL_RGBA32F 这个名字 ——
-// 本 OSG 构建里 `OSG_GL3_AVAILABLE` 是 undef（vcpkg 的 osg/GL:23），因此
-// `osg/GL` 回落到 Windows `<GL/gl.h>`（只到 GL 1.1）。OSG 自带的 GLDefines
-// 虽然把枚举补到了 GL 3.0（`GL_TEXTURE_BUFFER` 0x8C2A、`GL_PROGRAM_POINT_SIZE`
-// 0x8642 都在其中，所以 TextureBuffer 与点云着色器能编译），但**没有
-// GL_RGBA32F**；而 `<GL/glext.h>` / `<GL/glew.h>` 并未被包含。
-//
-// 为了一个枚举去 include `<GL/glext.h>`（数千行，且依赖 APIENTRY 等 Win32 宏）
-// 不划算，所以按 OpenGL 3.0 规范给出常量。取值已在本机 vcpkg 的三个独立
-// 头文件中核对一致：
-//     GL/glcorearb.h:1000    GL/glew.h:2087    GL/glext.h:882   →  0x8814
-//
-// 必须是**浮点**内部格式：位姿矩阵含平移分量（地图尺度可达 1e3~1e4），
-// 若退化成 8 位归一化格式，位姿会被彻底毁掉（症状：点云挤成一团）。
-constexpr GLint kInternalFormatRGBA32F = 0x8814;  // GL_RGBA32F
+// kInternalFormatRGBA32F 的定义与完整理由已移到 CoreShaders.h（位姿纹理与
+// Turbo 色表共用同一个格式，只应有一处定义）。
 
 }  // namespace
 

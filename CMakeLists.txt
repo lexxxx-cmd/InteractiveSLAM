@@ -337,6 +337,29 @@ if(MSVC)
 endif()
 
 # ============================================================================
+# Phase 2b GL 侧无头自检（不需要 GPU / GL 上下文）
+# ============================================================================
+
+# GLSL 里 uniform 名字打错是**静默失败**：着色器照常编译，OSG 找不到 location
+# 就什么都不做，最后只是画面悄悄不对。这里在 CPU 侧把"着色器声明了什么"与
+# "C++ 创建了什么"做双向交叉比对，另外核对 Turbo 色表的 CPU/GPU 逐位一致
+# （含取色索引的截断语义）与每 chunk uFrameIdBias 的独立性。
+# 不依赖数据层与地图文件，只需 OSG 核心（构造 Program/StateSet/TextureBuffer
+# 都不需要 GL 上下文）。
+add_executable(cloud_shader_selftest
+    tools/cloud_shader_selftest.cpp
+)
+target_include_directories(cloud_shader_selftest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(cloud_shader_selftest PRIVATE
+    ${OPENSCENEGRAPH_LIBRARIES}
+)
+if(MSVC)
+    target_compile_options(cloud_shader_selftest PRIVATE /W3 /wd4996)
+endif()
+
+# ============================================================================
 # 安装规则
 # ============================================================================
 
