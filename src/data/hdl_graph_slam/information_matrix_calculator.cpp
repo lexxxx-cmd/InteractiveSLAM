@@ -102,9 +102,19 @@ double InformationMatrixCalculator::calc_fitness_score(
     const pcl::PointCloud<PointT>::ConstPtr& cloud1,
     const pcl::PointCloud<PointT>::ConstPtr& cloud2,
     const Eigen::Isometry3d& relpose, double max_range) {
-    // 为 cloud1 构建 KD-Tree
-    pcl::search::KdTree<PointT>::Ptr tree_(new pcl::search::KdTree<PointT>());
-    tree_->setInputCloud(cloud1);
+    // 为 cloud1 构建 KD-Tree，然后委托给复用树的重载 ——
+    // 保持本函数行为与签名不变（既有调用点无需改动），
+    // 同时让"cloud1 固定、只变相对位姿"的场景可以跳过建树。
+    pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>());
+    tree->setInputCloud(cloud1);
+    return calc_fitness_score_with_tree(tree, cloud2, relpose, max_range);
+}
+
+double InformationMatrixCalculator::calc_fitness_score_with_tree(
+    const pcl::search::KdTree<PointT>::Ptr& tree,
+    const pcl::PointCloud<PointT>::ConstPtr& cloud2,
+    const Eigen::Isometry3d& relpose, double max_range) {
+    if (!tree) return std::numeric_limits<double>::max();
 
     double fitness_score = 0.0;
 
@@ -120,8 +130,8 @@ double InformationMatrixCalculator::calc_fitness_score(
 
     // 遍历变换后的每个点，查找最近邻
     for (size_t i = 0; i < input_transformed.points.size(); ++i) {
-        // 在 cloud1 的 KD-Tree 中查找最近邻
-        tree_->nearestKSearch(input_transformed.points[i], 1, nn_indices, nn_dists);
+        // 在传入的 KD-Tree 中查找最近邻
+        tree->nearestKSearch(input_transformed.points[i], 1, nn_indices, nn_dists);
 
         // 仅统计距离在 max_range 以内的点对
         if (nn_dists[0] <= max_range) {

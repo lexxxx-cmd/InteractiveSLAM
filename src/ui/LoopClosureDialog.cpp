@@ -155,6 +155,12 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
         return;
     }
 
+    // 起点云的 KD-Tree 只建一次：m_beginCloud 在对话框生命周期内是常量，
+    // 而适应度分数是"固定 cloud1、只变 relpose"的反复求值，每次重建树纯属浪费
+    // （默认子图半宽 7 → 约 19.5 万点，建树约 0.1 秒/次）。
+    m_beginTree.reset(new pcl::search::KdTree<PointT>());
+    m_beginTree->setInputCloud(m_beginCloud);
+
     // 查找关键帧获取位姿
     auto itBegin = m_graph->keyframes.find(m_beginVertexId);
     auto itEnd   = m_graph->keyframes.find(m_endVertexId);
@@ -217,6 +223,14 @@ LoopClosureDialog::~LoopClosureDialog() {
  */
 void LoopClosureDialog::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
+
+    // 适应度分数的去抖计时器：200 ms 单次触发，重复 start() 会重新计时，
+    // 因此连续点击微调按钮时只在"停手"后算一次分数（见 scheduleFitnessScore）
+    m_fitnessTimer = new QTimer(this);
+    m_fitnessTimer->setSingleShot(true);
+    m_fitnessTimer->setInterval(200);
+    connect(m_fitnessTimer, &QTimer::timeout, this,
+            [this]() { updateFitnessScore(); });
 
     // --- 迷你视口（560×560） ---
     m_miniViewport = new MiniViewportWidget(this);
@@ -389,8 +403,11 @@ void LoopClosureDialog::applySliderDelta(int axis, double delta, bool isRotation
         m_endPose.translation() += m_endPose.linear().col(axis) * delta;
     }
 
-    updateFitnessScore();
+    // 实时预览优先、评分去抖：预览重建是 O(N) 线性且必须立刻看到，
+    // 评分是 O(N log N) 的最近邻搜索（默认约 19.5 万点，单次 0.2–0.3 秒），
+    // 连续点击时不能每次都算，否则 GUI 线程被阻塞、迷你视口极卡
     updatePreview();
+    scheduleFitnessScore();
 }
 
 // ---------------------------------------------------------------------------
@@ -433,10 +450,27 @@ void LoopClosureDialog::onStepButton(int axis, bool isRotation, int direction) {
  */
 void LoopClosureDialog::updateFitnessScore() {
     Eigen::Isometry3d relative = m_beginPose.inverse() * m_endPose;
-    double score = hdl_graph_slam::InformationMatrixCalculator::calc_fitness_score(
-        m_beginCloud, m_endCloud, relative, 1.0);
+    // 复用已建好的起点云 KD-Tree（见构造处的说明），不再每次重建
+    double score = hdl_graph_slam::InformationMatrixCalculator::calc_fitness_score_with_tree(
+        m_beginTree, m_endCloud, relative, 1.0);
     score = std::min(1000000.0, score);
     m_fitnessLabel->setText(tr("fitness_score: %1").arg(score, 0, 'f', 4));
+}
+
+/**
+ * @brief 适应度分数的去抖触发（见头文件说明）
+ *
+ * 连续点击微调按钮时，每次都算分数会把 GUI 线程按"每次点击 0.2–0.3 秒"阻塞，
+ * 表现为迷你视口极卡。这里改成：调整立即刷新预览（廉价），分数等 200 ms
+ * 无新调整后再算一次。分数标签先置"…"提示正在重算，避免显示过期数值。
+ */
+void LoopClosureDialog::scheduleFitnessScore() {
+    if (!m_fitnessTimer) {   // 兜底：计时器未创建时退回同步计算
+        updateFitnessScore();
+        return;
+    }
+    m_fitnessLabel->setText(tr("fitness_score: …"));
+    m_fitnessTimer->start();  // 单次触发；重复调用会重新计时（去抖）
 }
 
 // ---------------------------------------------------------------------------

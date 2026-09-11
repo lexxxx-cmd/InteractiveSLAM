@@ -23,6 +23,7 @@
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
+#include <pcl/search/kdtree.h>   // calc_fitness_score_with_tree 的形参需要完整类型
 
 namespace hdl_graph_slam {
 
@@ -94,6 +95,32 @@ public:
                                      const pcl::PointCloud<PointT>::ConstPtr& cloud2,
                                      const Eigen::Isometry3d& relpose,
                                      double max_range = std::numeric_limits<double>::max());
+
+    /**
+     * @brief 复用已建 KD-Tree 的适应度分数（交互式反复求值时用）
+     *
+     * 与上面重载的唯一区别：**不再为 cloud1 重新建树**，而是直接使用调用方
+     * 传入的 tree。适用于"cloud1 固定、只有相对位姿在变"的场景 —— 例如回环
+     * 闭合对话框里每按一次微调按钮都要刷新分数。
+     *
+     * 为什么要这个重载：建树是 O(N log N) 的一次性成本，在 PCL 的 KdTree 上
+     * 通常与随后的 N 次最近邻查询同量级。对 19.5 万点的合并子图，每次重建
+     * 树要多花约 0.1 秒；而回环对话框的起点云在整个对话框生命周期内是常量，
+     * 重建完全是浪费。
+     *
+     * 必须满足的前提：`tree` 已经以**同一个** cloud1 调用过 setInputCloud()，
+     * 且该点云在后续调用期间不被修改（调用方持 ConstPtr 即可保证）。
+     *
+     * @param tree     已对 cloud1 建好的 KD-Tree
+     * @param cloud2   待评估的目标点云
+     * @param relpose  从 cloud2 到 cloud1 的相对位姿
+     * @param max_range 只统计最近邻距离不超过该值的点对
+     */
+    static double calc_fitness_score_with_tree(
+        const pcl::search::KdTree<PointT>::Ptr& tree,
+        const pcl::PointCloud<PointT>::ConstPtr& cloud2,
+        const Eigen::Isometry3d& relpose,
+        double max_range = std::numeric_limits<double>::max());
 
     /**
      * @brief 计算信息矩阵

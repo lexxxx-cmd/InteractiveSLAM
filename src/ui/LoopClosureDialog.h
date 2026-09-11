@@ -25,10 +25,12 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QFutureWatcher>
+#include <QTimer>
 #include <memory>
 #include <Eigen/Geometry>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
+#include <pcl/search/kdtree.h>   // m_beginTree（缓存起点云的 KD-Tree）
 
 class MiniViewportWidget;
 class GraphManager;
@@ -101,9 +103,19 @@ private slots:
     void onScanMatchFinished();     ///< 扫描匹配完成回调
 
 private:
-    void updateFitnessScore();  ///< 更新适应度分数显示
+    void updateFitnessScore();  ///< 更新适应度分数显示（用缓存的 KD-Tree）
     void updatePreview();       ///< 更新迷你视口预览
     void setupUi();             ///< 初始化 UI 布局
+
+    /**
+     * @brief 适应度分数的去抖触发
+     *
+     * 微调按钮可能被连续点击，而每次评分是 O(N log N) 的最近邻搜索
+     * （默认子图半宽 7 → 每个云约 19.5 万点，单次约 0.2–0.3 秒）。
+     * 因此调整时只立即刷新预览（廉价、也是用户真正需要的视觉反馈），
+     * 评分改为停顿 200 ms 后再算一次，避免把 GUI 线程按每次点击阻塞。
+     */
+    void scheduleFitnessScore();
 
     /**
      * @brief 应用滑块增量
@@ -126,6 +138,18 @@ private:
 
     CloudPtr m_beginCloud;  ///< 起点合并点云
     CloudPtr m_endCloud;    ///< 终点合并点云
+
+    /**
+     * @brief 起点云的 KD-Tree（只建一次）
+     *
+     * 适应度分数是"固定 cloud1、变化 relpose"的反复求值，而 m_beginCloud
+     * 在整个对话框生命周期内是常量（构造时传入的 ConstPtr，之后不再赋值），
+     * 因此树可以缓存复用。原先每次评分都重建树，对 19.5 万点约多花 0.1 秒。
+     */
+    pcl::search::KdTree<PointT>::Ptr m_beginTree;
+
+    /// 适应度分数去抖计时器（单次触发，见 scheduleFitnessScore()）
+    QTimer* m_fitnessTimer = nullptr;
 
     Eigen::Isometry3d m_beginPose;      ///< 起点位姿（对话框打开时固定）
     Eigen::Isometry3d m_endPoseInit;    ///< 终点初始位姿（对话框打开时固定）
