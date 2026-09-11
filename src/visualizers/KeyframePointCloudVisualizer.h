@@ -218,11 +218,19 @@ public:
                 }
             }
         }
-        // 只在**真的重建了**原始层时记录签名：签名描述的是"已换入的那一层"的
-        // 内容版本。若跳过时也记录，签名就会去描述一个并不存在的层——原始层关着
-        // 而图内容变了的那种构建会把签名推进到新值，之后重新打开时便被误判为
-        // "内容未变"，从而复用陈旧的底图（含已删除帧的点）。
-        if (!result.odomLevels.empty()) m_odomSignature = result.odomSignature;
+        // 只在**真的重建了**原始层时才推进签名：签名描述的是"已换入的那一层"的内容
+        // 版本。若跳过时也记录，签名就会去描述一个并不存在的层——原始层关着而图内容
+        // 变了的那种构建会把签名推进到新值，之后重新打开时便被误判为"内容未变"，
+        // 从而复用陈旧的底图（含已删除帧的点）。
+        // m_odomResidentBytes 相反：必须跨构建保留，冻结复用的轮次里 odomArrayBytes
+        // 是 0，但几何体仍在显存里，日志要报的是"仍驻留多少"。
+        const bool odomRebuilt = !result.odomLevels.empty();
+        if (odomRebuilt) {
+            m_odomSignature     = result.odomSignature;
+            m_odomResidentBytes = m_lastCommit.odomArrayBytes;
+        }
+        m_lastCommit.odomRebuilt       = odomRebuilt;
+        m_lastCommit.odomResidentBytes = m_odomResidentBytes;
         // 原始层颜色是常量、所有分块共享同一个 1 元素数组，因此透明度变化
         // 只需就地改这一个元素（O(1)），不触发任何重建或重传。
         setOriginalLayerOpacity(m_opacity);
@@ -480,6 +488,7 @@ public:
         m_odomAllChunkGeoms.clear();
         m_odomColorArray = nullptr;
         m_odomSignature = 0;
+        m_odomResidentBytes = 0;
         m_odomGeode->setNodeMask(0);
         m_odomActiveLevel = 0;
         m_highlightVertices->clear();
@@ -618,11 +627,18 @@ public:
     struct CommitStats {
         size_t levels         = 0;  ///< LOD 级别数（含主级别）
         size_t chunks         = 0;  ///< 主层分块几何体总数（各级求和）
-        size_t odomChunks     = 0;  ///< 原始层分块几何体总数（各级求和）
+        size_t odomChunks     = 0;  ///< 原始层分块几何体总数（本次新建；冻结复用时为 0）
         size_t arrayBytes     = 0;  ///< 主层顶点+颜色数组字节数（各级求和）
-        size_t odomArrayBytes = 0;  ///< 原始层顶点+颜色数组字节数
+        size_t odomArrayBytes = 0;  ///< 原始层本次新建的数组字节数（冻结复用时为 0）
         size_t pooledReuse    = 0;  ///< 命中数组池的块数（增量上传）
         size_t freshArrays    = 0;  ///< 新建数组的块数（完整分配）
+
+        // —— 原始层冻结复用（见 PointCloudBuilder::BuildOptions::buildOriginalLayer） ——
+        bool   odomRebuilt       = false; ///< 本次是否重新生成了原始层
+        /// 已换入原始层的数组字节数，**跨构建保留**。冻结复用的轮次里
+        /// odomArrayBytes 是 0（本次没新建），但几何体仍在显存里——只看前者
+        /// 会把"沿用了冻结层"误读成"原始层没启用"。显存核算要用这个。
+        size_t odomResidentBytes = 0;
     };
 
     /** @brief 最近一次 commitBuild 的落地统计 */
@@ -977,6 +993,8 @@ private:
     /// 原始层共享的常量颜色数组（所有分块是同一个 1 元素 Vec4Array，BIND_OVERALL）
     osg::ref_ptr<osg::Vec4Array> m_odomColorArray;
     uint64_t m_odomSignature = 0;            ///< 已换入原始层的内容签名（0 = 尚未构建过）
+    /// 已换入原始层的数组字节数（跨构建保留；冻结复用时表示仍驻留的量）
+    size_t   m_odomResidentBytes = 0;
     int  m_odomActiveLevel   = 0;            ///< 原始层激活级别（恒为 0：只有单级）
     bool m_odomLayerVisible  = false;        ///< 原始层开关（默认关闭）
     int  m_uploadLevel = -1;                 ///< 渐进上传中的级别（-1 = 无）

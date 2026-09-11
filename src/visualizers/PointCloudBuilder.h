@@ -136,19 +136,24 @@ struct BuildTimings {
     double totalMs      = 0.0;  ///< 整个 build() 的墙钟耗时
 
     // —— 规模计数 ——
+    // 口径：**每个字段只描述它自己那一段**——mainXxx 只含主级别，lodXxx 只含第
+    // 一层 LOD，odomXxx 则是原始层的整层合计（该层只有全分辨率一级）。写日志时
+    // 必须显式相加成分层合计，不能把 mainRenderPoints 与 odomPoints 直接并排比
+    // 较——两者口径不同，会造出"原始层比主层点数还多"的假象。
     int    frameCount       = 0;  ///< 有效关键帧数（有位姿且点云非空）
     size_t totalPoints      = 0;  ///< 全量世界点总数（优化层锚点数组）
-    size_t mainRenderPoints = 0;  ///< 主级别渲染点数（滤波后）
-    size_t lodPoints        = 0;  ///< 第一层 LOD 点数（未生成时为 0）
-    size_t odomPoints       = 0;  ///< 原始层点数（未启用时为 0）
+    size_t mainRenderPoints = 0;  ///< 主级别渲染点数（滤波后）；不含 LOD
+    size_t lodPoints        = 0;  ///< 第一层 LOD 点数（未生成时为 0）；不含主级别
+    size_t odomPoints       = 0;  ///< 原始层点数（整层合计；未启用或冻结复用未重建时为 0）
     size_t mainChunks       = 0;  ///< 主级别分块数
     size_t lodChunks        = 0;  ///< 第一层 LOD 分块数
     size_t odomChunks       = 0;  ///< 原始层分块总数（各级求和）
 
     // —— 显存占用估算（顶点 + 颜色数组，按 osg::Array::getTotalDataSize 实测） ——
-    size_t mainVboBytes = 0;  ///< 主级别顶点+颜色字节数
-    size_t lodVboBytes  = 0;  ///< 第一层 LOD 顶点+颜色字节数
-    size_t odomVboBytes = 0;  ///< 原始层顶点+颜色字节数
+    // 口径同上：main / lod 各自独立，odom 为整层。
+    size_t mainVboBytes = 0;  ///< 主级别顶点+颜色字节数；不含 LOD
+    size_t lodVboBytes  = 0;  ///< 第一层 LOD 顶点+颜色字节数；不含主级别
+    size_t odomVboBytes = 0;  ///< 原始层顶点+颜色字节数（整层）
 
     /** @brief 三层 VBO 字节数合计 */
     size_t totalVboBytes() const { return mainVboBytes + lodVboBytes + odomVboBytes; }

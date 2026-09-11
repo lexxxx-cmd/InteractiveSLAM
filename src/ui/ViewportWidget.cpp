@@ -988,13 +988,28 @@ void ViewportWidget::logCloudBuildPerf(const hdl_graph_slam::BuildTimings& t) {
 
     hdl_graph_slam::CloudPerfLog& log = hdl_graph_slam::CloudPerfLog::instance();
     log.write(QStringLiteral("=== 点云构建周期（后台构建 + 主线程换入） ==="));
-    log.write(QStringLiteral("  规模: 关键帧=%1  全量点=%2  主级别渲染点=%3  "
-                             "第一层LOD点=%4  原始层点=%5")
+    // 规模口径：t.mainRenderPoints/t.mainVboBytes 只含**主级别**，t.lodPoints/
+    // t.lodVboBytes 只含 LOD 级别，而 t.odomPoints/t.odomVboBytes 是原始层的
+    // **整层**合计。直接并排会造出"原始层比主层点数还多"的假象——实测原始层比
+    // 主级别多的 75,141 恰好等于第一层 LOD 的点数，一度看起来像统计串了。
+    // 这里显式打印两层的层合计，并把原始层是否为本轮重建讲清楚。
+    log.write(QStringLiteral("  规模: 关键帧=%1  全量点=%2")
                   .arg(t.frameCount)
-                  .arg(static_cast<qulonglong>(t.totalPoints))
+                  .arg(static_cast<qulonglong>(t.totalPoints)));
+    log.write(QStringLiteral("    优化层: 主级别=%1 + LOD=%2 = %3 点")
                   .arg(static_cast<qulonglong>(t.mainRenderPoints))
                   .arg(static_cast<qulonglong>(t.lodPoints))
-                  .arg(static_cast<qulonglong>(t.odomPoints)));
+                  .arg(static_cast<qulonglong>(t.mainRenderPoints + t.lodPoints)));
+    if (c.odomRebuilt) {
+        log.write(QStringLiteral("    原始层: %1 点（全分辨率单级，本轮重建）")
+                      .arg(static_cast<qulonglong>(t.odomPoints)));
+    } else if (c.odomResidentBytes > 0) {
+        log.write(QStringLiteral("    原始层: 冻结复用（沿用已换入几何体，未重建、未重传，"
+                                 "仍驻留 %1 MiB）")
+                      .arg(mib(c.odomResidentBytes)));
+    } else {
+        log.write(QStringLiteral("    原始层: 未启用"));
+    }
     log.write(QStringLiteral("  后台阶段(ms): 快照=%1 变换=%2 滤波=%3 主数组=%4 "
                              "LOD=%5 原始层=%6 | 合计=%7")
                   .arg(t.snapshotMs, 0, 'f', 1)
@@ -1005,22 +1020,28 @@ void ViewportWidget::logCloudBuildPerf(const hdl_graph_slam::BuildTimings& t) {
                   .arg(t.odomMs, 0, 'f', 1)
                   .arg(t.totalMs, 0, 'f', 1));
     log.write(QStringLiteral("  端到端: 请求→换入=%1 ms").arg(endToEndMs, 0, 'f', 1));
-    log.write(QStringLiteral("  落地: 级别=%1  主层块=%2  原始层块=%3  "
+    log.write(QStringLiteral("  本轮落地: 级别=%1  主层块=%2  原始层新建块=%3  "
                              "数组池化复用=%4  新建=%5")
                   .arg(static_cast<qulonglong>(c.levels))
                   .arg(static_cast<qulonglong>(c.chunks))
                   .arg(static_cast<qulonglong>(c.odomChunks))
                   .arg(static_cast<qulonglong>(c.pooledReuse))
                   .arg(static_cast<qulonglong>(c.freshArrays)));
-    log.write(QStringLiteral("  数组字节: builder 主=%1 MiB LOD=%2 MiB 原始层=%3 MiB "
-                             "合计=%4 MiB | 落地 主=%5 MiB 原始层=%6 MiB")
-                  .arg(mib(t.mainVboBytes), mib(t.lodVboBytes), mib(t.odomVboBytes),
-                       mib(t.totalVboBytes()), mib(c.arrayBytes),
-                       mib(c.odomArrayBytes)));
+    log.write(QStringLiteral("  数组字节: 本轮生成 优化层(主=%1 + LOD=%2) = %3 MiB "
+                             "| 原始层=%4 MiB | 合计=%5 MiB")
+                  .arg(mib(t.mainVboBytes), mib(t.lodVboBytes),
+                       mib(t.mainVboBytes + t.lodVboBytes), mib(t.odomVboBytes),
+                       mib(t.totalVboBytes())));
+    log.write(QStringLiteral("            已换入 优化层=%1 MiB | 原始层=%2 MiB | 合计=%3 MiB")
+                  .arg(mib(c.arrayBytes), mib(c.odomResidentBytes),
+                       mib(c.arrayBytes + c.odomResidentBytes)));
 
     const hdl_graph_slam::GpuMemory::Info vram = hdl_graph_slam::GpuMemory::query();
     if (vram.valid) {
-        log.write(QStringLiteral("  显存: %1  used=%2 MiB / total=%3 MiB  "
+        // 注意采样时机：这里是"换入完成、但渐进上传还没跑"的时刻，VBO 尚未分配，
+        // 所以 used 只反映 CPU 侧数组。真正的驻留量由 updateScene() 在渐进上传
+        // 结束时补打（那里才是判定"到底装没装进显存"的唯一时机）。
+        log.write(QStringLiteral("  显存(换入后/上传前): %1  used=%2 MiB / total=%3 MiB  "
                                  "(构建请求前 used=%4 MiB)")
                       .arg(vram.deviceName.isEmpty() ? QStringLiteral("(unknown)")
                                                      : vram.deviceName)
@@ -1072,6 +1093,28 @@ void ViewportWidget::updateScene() {
                 hdl_graph_slam::CloudPerfLog::instance().write(
                     QStringLiteral("  分块渐进上传完成: 请求→全部可见=%1 ms")
                         .arg(totalMs, 0, 'f', 1));
+                // 显存必须**在这里**采样。上面"数组字节"那几行是在换入后、渐进上传
+                // 之前打的，那时 VBO 还没分配，used 只反映 CPU 侧数组（实测两次构建
+                // 分别只涨了 0 和 55 MiB，而数组有 2124/4248 MiB），据此根本判断不了
+                // 数组是否真的驻留显存——这是唯一能给出答案的时刻。
+                const hdl_graph_slam::GpuMemory::Info vramAfter =
+                    hdl_graph_slam::GpuMemory::query();
+                if (vramAfter.valid) {
+                    const qlonglong delta =
+                        static_cast<qlonglong>(vramAfter.usedMiB) -
+                        static_cast<qlonglong>(m_perfVRAMBeforeMiB);
+                    hdl_graph_slam::CloudPerfLog::instance().write(
+                        QStringLiteral("  显存(上传后): used=%1 MiB / total=%2 MiB  "
+                                       "(构建请求前 used=%3 MiB，净增=%4 MiB)")
+                            .arg(vramAfter.usedMiB)
+                            .arg(vramAfter.totalMiB)
+                            .arg(m_perfVRAMBeforeMiB)
+                            .arg(delta));
+                } else {
+                    hdl_graph_slam::CloudPerfLog::instance().write(
+                        QStringLiteral("  显存(上传后): 查询不可用（%1）")
+                            .arg(hdl_graph_slam::GpuMemory::summaryLine()));
+                }
                 m_perfCycleActive = false;
             }
             emit cloudRenderFinished();
