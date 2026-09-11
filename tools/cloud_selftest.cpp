@@ -199,17 +199,21 @@ int main(int argc, char** argv) {
 
     {
         // 抽样比对：两槽位姿与图里的 estimate()/odom 一致。
-        // 注意容差是**绝对** 1e-5，而位姿表存的是 float：值 v 处的 ulp ≈ |v|·2⁻²³，
-        // 往返误差 ≤ 半个 ulp = |v|·5.96e-8，所以 |平移| 超过约 128 m 时
-        // 这个容差就比 float 的固有精度还紧——下面会把量级打出来以便判断。
+        //
+        // 判据**不能**用固定绝对容差：位姿表存的是 float，值 v 处的往返误差可达
+        // 半个 ulp = |v|·5.96e-8，|平移| 达数百米时就是 3e-5 量级（实测 |平移| 658 m
+        // → 最大偏差 3.03e-5），而 1e-5 的绝对容差会把它误报成"位姿不一致"。
+        // 正确做法是把参照位姿也按 float 存一遍再读回——toColumnMajor16 存的就是
+        // (float)M(r,c)，所以两者应当逐位相同；真实错位（错帧、错槽、转置）仍会
+        // 立刻暴露，而地图尺度完全不影响判据。
+        // 同时保留"与 double 参照的偏差"作为诊断量：它反映的正是 float 存储代价。
         std::mt19937 rng(20260911u);
         const size_t n = poses.frameCount();
         const int k = std::min<int>(sampleFrames, static_cast<int>(n));
         std::uniform_int_distribution<size_t> dist(0, n - 1);
         int optBad = 0, odomBad = 0;
-        // —— 诊断量：失败项本身不打印数值，光看 [FAIL] 无法区分
-        //    ① 位姿表真的错 ② float 存储精度不够 ③ 两槽其实是同一份数据 ——
-        double worstOpt = 0.0, worstOdom = 0.0;   // 与参照的最大绝对偏差
+        double worstOpt = 0.0, worstOdom = 0.0;   // 与 double 参照的偏差（float 存储代价）
+        double exactOpt = 0.0, exactOdom = 0.0;   // 与 float 往返参照的偏差（判据用）
         double worstSlotDiff = 0.0;               // 两槽之间的最大绝对偏差
         size_t sameSlots = 0;                     // 两槽逐位相同的帧数
         double maxAbsT = 0.0;                     // 采样帧 |平移| 的最大量级
@@ -225,25 +229,38 @@ int main(int argc, char** argv) {
             const Eigen::Matrix4d refOdom = it->second->odom.matrix();
             const Eigen::Matrix4d gotOpt  = poses.pose(CloudPoseTable::kSlotOptimized, i).matrix();
             const Eigen::Matrix4d gotOdom = poses.pose(CloudPoseTable::kSlotOriginal, i).matrix();
-            const double dOpt  = (gotOpt  - refOpt ).cwiseAbs().maxCoeff();
-            const double dOdom = (gotOdom - refOdom).cwiseAbs().maxCoeff();
-            const double dSlot = (gotOpt  - gotOdom).cwiseAbs().maxCoeff();
+            // 参照位姿按 float 往返一遍，与位姿表的存储精度对齐
+            const Eigen::Matrix4f refOptF32  = refOpt.cast<float>();
+            const Eigen::Matrix4f refOdomF32 = refOdom.cast<float>();
+            const Eigen::Matrix4d refOptF    = refOptF32.cast<double>();
+            const Eigen::Matrix4d refOdomF   = refOdomF32.cast<double>();
+
+            const double eOpt  = (gotOpt  - refOptF ).cwiseAbs().maxCoeff();
+            const double eOdom = (gotOdom - refOdomF).cwiseAbs().maxCoeff();
+            const double dOpt  = (gotOpt  - refOpt  ).cwiseAbs().maxCoeff();
+            const double dOdom = (gotOdom - refOdom ).cwiseAbs().maxCoeff();
+            const double dSlot = (gotOpt  - gotOdom ).cwiseAbs().maxCoeff();
+            if (eOpt  > exactOpt)  exactOpt  = eOpt;
+            if (eOdom > exactOdom) exactOdom = eOdom;
             if (dOpt  > worstOpt)  { worstOpt  = dOpt;  worstOptId  = poses.frameIds()[i]; }
             if (dOdom > worstOdom) { worstOdom = dOdom; worstOdomId = poses.frameIds()[i]; }
             if (dSlot > worstSlotDiff) worstSlotDiff = dSlot;
             if (dSlot == 0.0) ++sameSlots;
             maxAbsT = std::max(maxAbsT, refOpt.block<3, 1>(0, 3).cwiseAbs().maxCoeff());
-            if (dOpt > 1e-5) ++optBad;
-            if (dOdom > 1e-5) ++odomBad;
+            if (eOpt  > 1e-9) ++optBad;
+            if (eOdom > 1e-9) ++odomBad;
         }
         std::printf("  诊断: 采样 %d 帧；|平移| 最大 %.1f m → float 往返误差上界 ≈ %.2e\n",
                     k, maxAbsT, maxAbsT * 5.96e-8);
-        std::printf("        与参照最大偏差：优化槽 %.3e（帧 %ld）  原始槽 %.3e（帧 %ld）\n",
+        std::printf("        与 double 参照偏差（即 float 存储代价）：优化槽 %.3e（帧 %ld）  "
+                    "原始槽 %.3e（帧 %ld）\n",
                     worstOpt, worstOptId, worstOdom, worstOdomId);
+        std::printf("        与 float 往返参照偏差（判据用，应为 0）：优化槽 %.3e  原始槽 %.3e\n",
+                    exactOpt, exactOdom);
         std::printf("        两槽之间最大偏差 %.3e；两槽逐位完全相同的帧 %zu/%d\n",
                     worstSlotDiff, sameSlots, k);
-        ck.check(optBad == 0, "优化槽位姿与 vertex->estimate() 一致（抽样）");
-        ck.check(odomBad == 0, "原始槽位姿与 keyframe->odom 一致（抽样）");
+        ck.check(optBad == 0, "优化槽位姿与 vertex->estimate() 一致（float 往返口径）");
+        ck.check(odomBad == 0, "原始槽位姿与 keyframe->odom 一致（float 往返口径）");
     }
 
     // =====================================================================
@@ -289,18 +306,25 @@ int main(int argc, char** argv) {
         }
         ck.check(odomIntact, "updateOptimized 后原始槽逐位不变（冻结是结构性保证）");
 
-        // 优化槽必须反映新位姿
+        // 优化槽必须反映新位姿（同样用 float 往返口径，理由见 A 段注释）
         bool optUpdated = true;
+        double worstUpd = 0.0;
         for (const auto& [v, oldT] : saved) {
             const int64_t fi = poses.indexOfFrame(static_cast<long>(v->id()));
             if (fi < 0) continue;
             const Eigen::Matrix4d got = poses.pose(CloudPoseTable::kSlotOptimized,
                                                    static_cast<size_t>(fi)).matrix();
-            if ((got - v->estimate().matrix()).cwiseAbs().maxCoeff() > 1e-5) {
+            const Eigen::Matrix4f refF32 = v->estimate().matrix().cast<float>();
+            const Eigen::Matrix4d refF   = refF32.cast<double>();
+            const double e = (got - refF).cwiseAbs().maxCoeff();
+            if (e > worstUpd) worstUpd = e;
+            if (e > 1e-9) {
                 optUpdated = false;
                 break;
             }
         }
+        std::printf("  优化槽与 float 往返参照的最大偏差 %.3e（比对 %zu 帧）\n",
+                    worstUpd, saved.size());
         ck.check(optUpdated, "updateOptimized 后优化槽反映新位姿");
 
         // 顶点数据不该被碰过：顶点字节与点数完全不变
