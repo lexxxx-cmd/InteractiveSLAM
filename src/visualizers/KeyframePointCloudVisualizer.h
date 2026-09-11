@@ -32,6 +32,7 @@
 #include <osg/BlendFunc>
 #include <osg/BlendColor>
 
+#include <cstdint>
 #include <limits>
 #include <set>
 #include <utility>
@@ -186,17 +187,19 @@ public:
             }
         }
 
-        // 原始层（里程计位姿点云）：与 m_lodLevels 逐级对应，独立 geode，
-        // 不参与渐进上传（打开开关时直接整体显示，参照底图无需渐进）。
-        // 渲染索引/范围与优化层共享语义，仅顶点坐标不同。
-        m_odomLevels.clear();
-        if (m_odomGeode.valid() && !m_odomAllChunkGeoms.empty()) {
-            for (auto& chunk : m_odomAllChunkGeoms) {
-                m_odomGeode->removeDrawable(chunk);
-            }
-        }
-        m_odomAllChunkGeoms.clear();
+        // 原始层（里程计位姿点云）：独立 geode，不参与渐进上传（参照底图整体
+        // 显示即可）。该层内容在逻辑上是冻结的，所以 **result.odomLevels 为空
+        // 时完整保留现有几何体**——不清 drawable、不动 NodeMask、不重传缓冲，
+        // 这正是"只建一次"的落地方式（见 PointCloudBuilder::buildOdomLevel）。
         if (!result.odomLevels.empty()) {
+            m_odomLevels.clear();
+            if (m_odomGeode.valid() && !m_odomAllChunkGeoms.empty()) {
+                for (auto& chunk : m_odomAllChunkGeoms) {
+                    m_odomGeode->removeDrawable(chunk);
+                }
+            }
+            m_odomAllChunkGeoms.clear();
+            m_odomColorArray = nullptr;  // 随新层重建，由 addOdomChunk 重新记录
             m_odomLevels.reserve(result.odomLevels.size());
             for (auto& lod : result.odomLevels) {
                 m_odomLevels.emplace_back();
@@ -215,8 +218,16 @@ public:
                 }
             }
         }
-        // 原始层与优化层使用相同的激活级别（构建后为 0），同步可见性
-        m_odomActiveLevel = m_activeLodLevel;
+        // 只在**真的重建了**原始层时记录签名：签名描述的是"已换入的那一层"的
+        // 内容版本。若跳过时也记录，签名就会去描述一个并不存在的层——原始层关着
+        // 而图内容变了的那种构建会把签名推进到新值，之后重新打开时便被误判为
+        // "内容未变"，从而复用陈旧的底图（含已删除帧的点）。
+        if (!result.odomLevels.empty()) m_odomSignature = result.odomSignature;
+        // 原始层颜色是常量、所有分块共享同一个 1 元素数组，因此透明度变化
+        // 只需就地改这一个元素（O(1)），不触发任何重建或重传。
+        setOriginalLayerOpacity(m_opacity);
+        // 原始层只有"全分辨率单一级别"，激活级别恒为 0（不再跟随优化层 LOD）
+        m_odomActiveLevel = 0;
         applyOdomVisibility();
 
         m_lastCommit.levels = m_lodLevels.size();  // 统计：级别数（含主级别）
@@ -305,8 +316,10 @@ public:
         if (!m_colorParamsValid) recolorAll();
         if (highlightActive()) refreshHighlight();
 
-        // 原始层跟随当前 LOD 级别（两层渲染索引语义一致，直接镜像级别号）
-        m_odomActiveLevel = level;
+        // 原始层只有"全分辨率单一级别"，不随优化层 LOD 切换（恒为 0）。
+        // 注意：这里原来写的是 m_odomActiveLevel = level，依赖两层级别 1:1
+        // 镜像；原始层改成独立单级后该前提不再成立。
+        m_odomActiveLevel = 0;
         applyOdomVisibility();
     }
 
@@ -318,6 +331,35 @@ public:
 
     /** @brief 查询原始层开关状态 */
     bool odomLayerVisible() const { return m_odomLayerVisible; }
+
+    /** @brief 原始层几何体是否已就绪（调用方据此判断是否需要请求构建） */
+    bool odomLayerReady() const {
+        return !m_odomLevels.empty() && !m_odomAllChunkGeoms.empty();
+    }
+
+    /**
+     * @brief 已换入的原始层对应的内容签名（0 = 尚未构建过）
+     *
+     * 调用方算出当前内容的签名与它比对：相同即表示原始层内容未变，可以继续
+     * 复用已冻结的几何体，本次构建不必再生成原始层（见
+     * PointCloudBuilder::BuildOptions::buildOriginalLayer）。
+     */
+    uint64_t committedOdomSignature() const { return m_odomSignature; }
+
+    /**
+     * @brief 原地更新原始层透明度（O(1)，不重建、不重传）
+     *
+     * 原始层颜色是常量、所有分块共享同一个 1 元素 osg::Vec4Array，所以透明度
+     * 变化只需改这一个元素并 dirty()，与原始层点数无关。这与优化层不同——
+     * 后者是逐顶点 Turbo 颜色，改透明度要遍历上千万点重新着色（recolorAll）。
+     */
+    void setOriginalLayerOpacity(float opacity) {
+        if (!m_odomColorArray.valid() || m_odomColorArray->empty()) return;
+        const osg::Vec4 c = hdl_graph_slam::PointCloudBuilder::odomColor(opacity);
+        if ((*m_odomColorArray)[0] == c) return;
+        (*m_odomColorArray)[0] = c;
+        m_odomColorArray->dirty();
+    }
 
     /** @brief 当前激活的 LOD 级别 */
     int currentLodLevel() const { return m_activeLodLevel; }
@@ -429,12 +471,15 @@ public:
         m_uploadChunk = 0;
         m_levelUploaded.clear();
         m_activeLodLevel = 0;
-        // 原始层：清空各级数据与几何体，整体隐藏
+        // 原始层：清空数据与几何体、整体隐藏，并作废内容签名与共享颜色数组
+        // ——下次需要原始层时会重新构建（否则换图后可能被误判为"内容未变"）
         m_odomLevels.clear();
         for (auto& chunk : m_odomAllChunkGeoms) {
             m_odomGeode->removeDrawable(chunk);
         }
         m_odomAllChunkGeoms.clear();
+        m_odomColorArray = nullptr;
+        m_odomSignature = 0;
         m_odomGeode->setNodeMask(0);
         m_odomActiveLevel = 0;
         m_highlightVertices->clear();
@@ -466,6 +511,8 @@ public:
     void setOpacity(float opacity) {
         if (opacity == m_opacity) return;  // 无变化，避免无谓的全量重着色
         m_opacity = opacity;
+        // 原始层是常量颜色，透明度跟随即 O(1) 原地更新，不参与下面的全量重着色
+        setOriginalLayerOpacity(opacity);
         m_colorParamsValid = false;  // 颜色与构建时参数不一致，切换级别时需重着色
         if (highlightActive()) {
             // 高亮存在时同步更新主几何体着色与高亮几何体的 alpha
@@ -687,9 +734,18 @@ private:
     /**
      * @brief 为原始层添加一个分块几何体
      *
-     * 与 addChunk 类似但不入块池（原始层颜色固定灰色、随构建整体更换，
-     * 无需跨构建复用 BufferObject），挂到独立的 m_odomGeode 上，
+     * 与 addChunk 类似但**不入块池**：原始层内容冻结、只在签名变化时重建
+     * 一次，没有跨构建复用 BufferObject 的需求。挂到独立的 m_odomGeode 上，
      * 可见性由 geode 的 NodeMask 整体控制。
+     *
+     * 颜色用 BIND_OVERALL 绑定：原始层颜色是常量，buildOdomLevel 为所有分块
+     * 生成的是**同一个** 1 元素 osg::Vec4Array。本工程的 viewer 在 initOsg()
+     * 里调用了 State::setUseVertexAttributeAliasing(true)（ViewportWidget.cpp），
+     * 此时 OSG 的 OVERALL 颜色走 AttributeDispatchers →
+     * glVertexAttrib4fv(_state->getColorAlias()._location, ptr)，而这个 location
+     * 与 Program 里 "osg_Color" 的 glBindAttribLocation 同源（Program.cpp 只在
+     * aliasing 为真时绑定 state 的别名表），所以点云着色器的 `in vec4 osg_Color`
+     * 能正确收到这个常量值。
      */
     void addOdomChunk(LodLevelGeoms& lg, osg::ref_ptr<osg::Vec3Array> v,
                       osg::ref_ptr<osg::Vec4Array> col) {
@@ -706,7 +762,7 @@ private:
         geom->setUseVertexArrayObject(true);
         geom->setDataVariance(osg::Object::STATIC);
         geom->setVertexArray(v);
-        geom->setColorArray(col, osg::Array::BIND_PER_VERTEX);
+        geom->setColorArray(col, osg::Array::BIND_OVERALL);
         geom->addPrimitiveSet(new osg::DrawArrays(GL_POINTS, 0, v->size()));
         geom->setStateSet(m_cloudStateSet);   // 共享着色器状态（点大小/Z 裁剪）
 
@@ -714,6 +770,10 @@ private:
         lg.chunks.push_back(chunk);
         m_odomAllChunkGeoms.push_back(geom);
         m_odomGeode->addDrawable(geom);
+
+        // 记下共享的常量颜色数组（所有分块是同一个对象），透明度变化时
+        // 只改它的第 0 个元素即可，与点数无关
+        m_odomColorArray = col;
 
         m_lastCommit.odomChunks++;
         m_lastCommit.odomArrayBytes +=
@@ -910,11 +970,14 @@ private:
     int m_activeLodLevel = 0;                ///< 当前激活的 LOD 级别索引
     std::vector<bool> m_levelUploaded;       ///< 各级别是否已完整上传（切回时直接显示）
 
-    // —— 原始层（里程计位姿参照底图） ——
+    // —— 原始层（里程计位姿参照底图；内容冻结，签名不变时整层复用） ——
     osg::ref_ptr<osg::Geode> m_odomGeode;    ///< 原始层叶节点（可见性整体控制）
-    std::vector<LodLevelGeoms> m_odomLevels; ///< 原始层各级别（与 m_lodLevels 逐级对应）
+    std::vector<LodLevelGeoms> m_odomLevels; ///< 原始层级别（独立单级：仅 level 0 全量）
     std::vector<osg::ref_ptr<osg::Geometry>> m_odomAllChunkGeoms; ///< 原始层全部几何体（清理用）
-    int  m_odomActiveLevel   = 0;            ///< 原始层跟随的级别号（镜像 m_activeLodLevel）
+    /// 原始层共享的常量颜色数组（所有分块是同一个 1 元素 Vec4Array，BIND_OVERALL）
+    osg::ref_ptr<osg::Vec4Array> m_odomColorArray;
+    uint64_t m_odomSignature = 0;            ///< 已换入原始层的内容签名（0 = 尚未构建过）
+    int  m_odomActiveLevel   = 0;            ///< 原始层激活级别（恒为 0：只有单级）
     bool m_odomLayerVisible  = false;        ///< 原始层开关（默认关闭）
     int  m_uploadLevel = -1;                 ///< 渐进上传中的级别（-1 = 无）
     size_t m_uploadChunk = 0;                ///< 渐进上传中下一个要显示的块

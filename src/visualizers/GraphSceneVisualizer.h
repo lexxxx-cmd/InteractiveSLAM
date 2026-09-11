@@ -23,6 +23,7 @@
 #include <osg/MatrixTransform>
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <unordered_map>
@@ -123,6 +124,31 @@ public:
 
     /** @brief 查询原始层开关状态 */
     bool odomLayerEnabled() const { return m_odomLayerEnabled; }
+
+    /** @brief 原始层几何体是否已就绪（调用方据此判断是否需要请求构建） */
+    bool odomLayerReady() const {
+        return m_cloudViz ? m_cloudViz->odomLayerReady() : false;
+    }
+
+    /**
+     * @brief 已换入原始层的内容签名（0 = 尚未构建过）
+     *
+     * 原始层内容在逻辑上冻结：调用方算出当前内容签名与它比对，相同即表示
+     * 无需重新生成原始层，本次构建可以继续复用已换入的几何体。
+     */
+    uint64_t committedOdomSignature() const {
+        return m_cloudViz ? m_cloudViz->committedOdomSignature() : 0;
+    }
+
+    /**
+     * @brief 原地更新原始层透明度（O(1)，不重建）
+     *
+     * 原始层颜色是常量，所有分块共享同一个 1 元素颜色数组，改透明度只需
+     * 更新这一个元素。
+     */
+    void setOriginalLayerOpacity(float opacity) {
+        if (m_cloudViz) m_cloudViz->setOriginalLayerOpacity(opacity);
+    }
 
     /** @brief 设置点云中点的大小 */
     void setPointSize(float size) {

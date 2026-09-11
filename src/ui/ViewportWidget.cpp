@@ -21,6 +21,7 @@
 #include <QtConcurrent/QtConcurrent>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 
 #include <osg/Notify>
 #include <osg/Math>
@@ -370,14 +371,55 @@ void ViewportWidget::setDrawKeyframeClouds(bool v) {
     m_osgWidget->update();
 }
 
+// ---------------------------------------------------------------------------
+// 原始层内容签名
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/**
+ * @brief 计算原始层的内容签名（0 保留为"尚未构建"哨兵，正常情况不返回 0）
+ *
+ * 原始层的内容只由"有哪些帧、每帧多少点"决定——里程计位姿永不变化，
+ * 所以这个签名足以判定已换入的原始层能否继续复用。
+ *
+ * 用累加（交换律）而不是链式哈希：graph->keyframes 是 std::unordered_map，
+ * 迭代顺序不保证跨增删稳定，链式哈希会因为顺序抖动产生"假变化"，把冻结
+ * 复用退化成每轮都重建。
+ *
+ * 关键帧增删、单帧点数变化、换图都会改变签名；"删一帧又加一帧、帧数不变"
+ * 也会变（帧 ID 与点数都参与混合）。
+ */
+uint64_t originalLayerSignature(
+    const std::shared_ptr<hdl_graph_slam::InteractiveGraph>& graph) {
+    if (!graph) return 0;
+    uint64_t sum = 0;
+    for (const auto& kv : graph->keyframes) {
+        const uint64_t n = (kv.second && kv.second->cloud)
+                               ? static_cast<uint64_t>(kv.second->cloud->size())
+                               : 0ull;
+        uint64_t e = static_cast<uint64_t>(kv.first) * 14695981039346656037ull;
+        e = (e ^ n) * 1099511628211ull;
+        sum += e;
+    }
+    sum ^= static_cast<uint64_t>(graph->keyframes.size()) * 1099511628211ull;
+    return sum ? sum : 1ull;
+}
+
+}  // namespace
+
 void ViewportWidget::setOdomLayerEnabled(bool enabled) {
     m_flags.odom_layer_enabled = enabled;
     bool wasEnabled = m_sceneViz->odomLayerEnabled();
     m_sceneViz->setOdomLayerEnabled(enabled);
-    // 原始层数据按需生成：首次打开时触发后台重建（含里程计位姿点云）；
-    // 关闭仅隐藏几何体，无需重建
+    // 原始层数据按需生成：只有"需要（重新）构建"时才触发后台重建——尚未构建过，
+    // 或者图内容已经变了（签名不符，例如原始层关着的时候增删了关键帧）。
+    // 已经与当前图内容一致的冻结层只切换可见性，不再白付一次全量重建。
     if (enabled && !wasEnabled && m_graph && m_sceneViz->hasPointCloud()) {
-        requestCloudBuild();
+        const bool reusable =
+            m_sceneViz->odomLayerReady() &&
+            originalLayerSignature(m_graph) == m_sceneViz->committedOdomSignature();
+        if (!reusable) requestCloudBuild();
     }
     m_osgWidget->update();
 }
@@ -837,8 +879,21 @@ void ViewportWidget::startCloudBuild() {
     auto graph = m_graph;
     hdl_graph_slam::BuildOptions options;
     options.lodEnabled = m_sceneViz->lodEnabled();
-    // 原始层开关：打开时 builder 额外生成里程计位姿点云（参照底图）
+    // 原始层开关：打开时显示里程计位姿参照底图（淡橙半透明）
     options.showOriginalLayer = m_sceneViz->odomLayerEnabled();
+    // 原始层冻结复用：内容签名与已换入的那一层一致时**不再生成**——不重算
+    // 8000 多万次 odom 变换、不新建 2.12 GiB 数组、不重传缓冲；已换入的几何体
+    // 由 commitBuild 原样保留。实测开启原始层曾让端到端从 43.96 s 涨到 66.68 s
+    // （后台 +9.2 s，主线程换入 +13.5 s），而其中绝大部分本就可省。
+    const uint64_t odomSig = originalLayerSignature(graph);
+    // "已经构建过"必须与签名一起判：签名在从未构建时也已有值（例如原始层一直
+    // 关着、或刚打开过地图），只看签名会把"尚未构建"误判成"可复用"，底图就
+    // 永远不会出现。
+    options.buildOriginalLayer =
+        options.showOriginalLayer &&
+        (!m_sceneViz->odomLayerReady() ||
+         odomSig != m_sceneViz->committedOdomSignature());
+    options.odomSignature = odomSig;
     // 传入当前颜色参数：builder 在后台生成与当前设置一致的颜色，
     // 主线程 commit 时零遍历（避免全量重着色卡顿）
     options.useAutoColorRange = m_sceneViz->isAutoColorRange();

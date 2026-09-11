@@ -86,7 +86,21 @@ struct LodLevel {
  */
 struct BuildOptions {
     bool lodEnabled = false;    ///< 是否生成第一层 LOD（渲染固定为全量 + 第一层）
-    bool showOriginalLayer = false; ///< 是否生成原始层（里程计位姿点云，参照底图）
+    bool showOriginalLayer = false; ///< 原始层是否可见（UI 意图；构建器不再据此生成数据）
+
+    /**
+     * @brief 本次构建是否需要**生成**原始层数据
+     *
+     * 与 showOriginalLayer（是否显示）语义分离：原始层内容在逻辑上是冻结的
+     * （里程计位姿永不变化），调用方只在"内容签名变化"或"尚未构建过"时才置
+     * 为 true；其余构建周期传 false —— 此时既不重算里程计世界坐标，也不生成
+     * 任何数组，已换入的几何体原样保留（见
+     * KeyframePointCloudVisualizer::commitBuild）。
+     */
+    bool buildOriginalLayer = false;
+
+    /// 原始层内容签名（由调用方计算，构建器原样回填到 PointCloudBuildResult）
+    uint64_t odomSignature = 0;
 
     // —— 孤立杂点滤波（全局体素占据计数，见 build() 阶段 2.5） ——
     bool  outlierFilterEnabled = true;  ///< 是否启用孤立杂点滤波
@@ -160,11 +174,14 @@ struct PointCloudBuildResult {
     std::vector<LodLevel> lodLevels;        ///< LOD 级别（不含主级别，至多一级）
 
     // —— 原始层（里程计位姿变换的点云，参照底图，可选） ——
-    // allOdomWorldPoints 与 allWorldPoints 逐点对齐（同一帧、同一局部点顺序），
-    // 因此各级渲染索引可直接复用优化层的选取结果。
+    // allOdomWorldPoints 与 allWorldPoints 逐点对齐（同一帧、同一局部点顺序）。
+    // 与优化层不同，原始层**不**镜像优化层的渲染索引，而是独立的全分辨率
+    // 单一级别（见 buildOdomLevel）——这样它就不再依赖随优化位姿变化的杂点
+    // 滤波索引，从而可以被调用方冻结、只构建一次。
     std::vector<Eigen::Vector3d,
                 Eigen::aligned_allocator<Eigen::Vector3d>> allOdomWorldPoints; ///< 里程计位姿世界坐标点
-    std::vector<LodLevel> odomLevels;       ///< 原始层各级别（[0]=主级别镜像，其后与 lodLevels 一一对应）
+    std::vector<LodLevel> odomLevels;       ///< 原始层（仅 level 0 全量；复用已冻结层时为空）
+    uint64_t odomSignature = 0;             ///< 回填自 options.odomSignature，供 commit 记录
 
     float zMin =  std::numeric_limits<float>::max();  ///< 数据 Z 最小值
     float zMax = -std::numeric_limits<float>::max();  ///< 数据 Z 最大值
@@ -197,6 +214,23 @@ public:
      * 避免单次超大 VBO 上传造成的一帧卡顿。块间逻辑索引连续。
      */
     static constexpr size_t kChunkPoints = 640000;
+
+    // —— 原始层参照底图的常量颜色（淡橙，与优化层 Turbo 着色形成色相区分） ——
+    // 原始层所有分块共享同一个 1 元素颜色数组（BIND_OVERALL），所以这几个
+    // 常量是"原始层透明度可 O(1) 更新"的唯一真源：构建时生成与运行时就地
+    // 更新都走 odomColor()，避免两处颜色公式各自漂移。
+    static constexpr float kOdomColorR     = 0.98f;
+    static constexpr float kOdomColorG     = 0.72f;
+    static constexpr float kOdomColorB     = 0.45f;
+    static constexpr float kOdomAlphaScale = 0.35f;  ///< 原始层 alpha = 点云透明度 × 该系数
+
+    /**
+     * @brief 原始层常量颜色（alpha 按点云透明度缩放）
+     * @param opacity 点云透明度（0..1，与 BuildOptions::opacity 同口径）
+     */
+    static osg::Vec4 odomColor(float opacity) {
+        return osg::Vec4(kOdomColorR, kOdomColorG, kOdomColorB, opacity * kOdomAlphaScale);
+    }
 
     /**
      * @brief 构建点云渲染数据（可在后台线程调用）
@@ -249,8 +283,9 @@ public:
         stageStart = PerfClock::now();
 
         // ---- 阶段 2：无锁变换到世界坐标系 ----
-        // 优化层（estimate 位姿）与原始层（odom 位姿）逐点同步生成，
-        // 两层点序完全一致——原始层无需独立的索引体系。
+        // 优化层（estimate 位姿）逐点生成。原始层（odom 位姿）与优化层逐点
+        // 对齐生成，但**只在 buildOriginalLayer 为真时**才做：原始层被冻结
+        // 复用时不再重算这 8000 多万次矩阵乘法（实测该阶段因此少花约 3.9 s）。
         for (const auto& frame : frames) {
             size_t start = r.allWorldPoints.size();
             for (const auto& pt : frame.cloud->points) {
@@ -266,7 +301,7 @@ public:
                 if (wp.y() > r.bMax.y()) r.bMax.y() = wp.y();
                 if (wp.z() > r.bMax.z()) r.bMax.z() = wp.z();
                 r.allWorldPoints.push_back(wp);
-                if (options.showOriginalLayer) {
+                if (options.buildOriginalLayer) {
                     r.allOdomWorldPoints.push_back(frame.odomPose * local);
                 }
             }
@@ -393,23 +428,22 @@ public:
         }
         stageStart = PerfClock::now();
 
-        // ---- 阶段 6：原始层（里程计位姿点云，参照底图） ----
-        // 与优化层逐点对齐，直接复用优化层的各级渲染索引/范围，
-        // 仅以里程计世界坐标生成顶点/颜色数组。固定淡橙色，
-        // 作为"未优化原始状态"的参照底图。
-        if (options.showOriginalLayer && !r.allOdomWorldPoints.empty()) {
-            r.odomLevels.reserve(1 + r.lodLevels.size());
-            // 主级别镜像
-            r.odomLevels.push_back(
-                buildOdomLevel(r.allOdomWorldPoints, r.renderIndices, r.renderFullRes,
-                               r.renderRanges, options));
-            // LOD 级别镜像（与 r.lodLevels 一一对应）
-            for (const auto& lod : r.lodLevels) {
-                r.odomLevels.push_back(
-                    buildOdomLevel(r.allOdomWorldPoints, lod.renderIndices,
-                                   lod.renderFullRes, lod.renderRanges, options));
-            }
+        // ---- 阶段 6：原始层（里程计位姿点云，参照底图，可选） ----
+        // 独立自洽的一层：不镜像优化层的渲染索引、不做杂点滤波、只有全分辨率
+        // 级别 0。里程计位姿永不变化，且不再依赖随优化位姿变化的滤波索引，
+        // 因此这一层的内容在逻辑上是冻结的——调用方只在内容签名变化时才请求
+        // 构建，其余构建周期传 buildOriginalLayer=false，本阶段整体跳过，
+        // 已换入的几何体由 commitBuild 原样保留。
+        if (options.buildOriginalLayer && !r.allOdomWorldPoints.empty()) {
+            LodLevel odom = buildOdomLevel(r.allOdomWorldPoints, options);
+            // 逐帧范围复用优化层的全量 cloudRanges：两层全量点序逐点对齐，
+            // 原始层不参与索引体系，这里只用于帧→范围的查询。
+            odom.renderRanges = r.cloudRanges;
+            r.odomLevels.push_back(std::move(odom));
         }
+        // 无论本次是否真的生成，都把调用方的签名回填给结果：commitBuild 据它
+        // 记录"已冻结层对应的内容版本"，调用方下一轮据此判断能否继续复用。
+        r.odomSignature = options.odomSignature;
         r.timings.odomMs = msSince(stageStart);
         for (const auto& lvl : r.odomLevels) {
             r.timings.odomPoints += lvl.renderFullRes ? r.allOdomWorldPoints.size()
@@ -442,33 +476,38 @@ private:
     }
 
     /**
-     * @brief 构建原始层单个级别（复用优化层的渲染索引，换用里程计世界坐标）
+     * @brief 构建原始层（独立、全分辨率、单一级别）
      *
-     * @param odomPoints    里程计位姿世界坐标点（与优化层全量点逐点对齐）
-     * @param renderIndices 优化层该级别的渲染索引（renderFullRes 时忽略）
-     * @param renderFullRes 优化层该级别是否全量直通
-     * @param renderRanges  优化层该级别的逐帧渲染范围（原样复制）
+     * @param odomPoints 里程计位姿世界坐标点（与优化层全量点逐点对齐）
+     * @param options    构建选项（只用到 opacity：原始层颜色是常量）
      *
-     * 原始层不参与降采样计算——降采样索引属于"选哪些点"的决策，
-     * 两层点序一致故直接共享；颜色固定为淡橙色半透明参照底图。
+     * 与优化层不同，这里**不再**接收/镜像优化层的渲染索引：原始层直接用全部
+     * 里程计世界点建 level 0 全量数组，renderIndices 留空、renderFullRes 恒为
+     * true（renderRanges 由调用方在拿到结果后赋为全量 cloudRanges）。
+     *
+     * 为什么必须独立全量：镜像优化层的 renderIndices 时，索引含杂点滤波结果、
+     * 会随 g2o 优化位姿改变，原始层就只能跟着每次重建；改成本层自洽之后它
+     * 只依赖永不变化的里程计位姿，调用方才能把它冻结、只构建一次。这同时
+     * 满足"原始层必须全分辨率"的要求。
+     *
+     * 颜色是常量（淡橙色半透明参照底图），所以所有分块**共享同一个 1 元素
+     * osg::Vec4Array**，由 addOdomChunk 以 BIND_OVERALL 绑定——相比逐点存一份
+     * 相同颜色（79.5M 点 × 16 B ≈ 1.19 GiB）只占 16 字节，且透明度变化可以
+     * 就地改这一个元素，无需重建。
      */
     static LodLevel buildOdomLevel(
         const std::vector<Eigen::Vector3d,
                           Eigen::aligned_allocator<Eigen::Vector3d>>& odomPoints,
-        const std::vector<size_t>& renderIndices,
-        bool renderFullRes,
-        const std::vector<CloudRange>& renderRanges,
         const BuildOptions& options) {
         LodLevel lod;
-        lod.renderIndices = renderIndices;  // 复制（levels 持有自己的索引）
-        lod.renderRanges = renderRanges;
-        lod.renderFullRes = renderFullRes;
+        lod.renderFullRes = true;  // level 0 = 全量直通，renderIndices 留空
 
-        const size_t count = renderFullRes ? odomPoints.size() : renderIndices.size();
+        const size_t count = odomPoints.size();
         if (count == 0) return lod;
 
-        // 淡橙色参照底图（与优化层 Turbo 着色形成色相区分）
-        const osg::Vec4 gray(0.98f, 0.72f, 0.45f, options.opacity * 0.35f);
+        // 常量颜色：唯一的 1 元素数组，所有分块共享同一对象
+        osg::ref_ptr<osg::Vec4Array> odomColorArray = new osg::Vec4Array;
+        odomColorArray->push_back(odomColor(options.opacity));
 
         const size_t chunkCount = (count + kChunkPoints - 1) / kChunkPoints;
         lod.vertexChunks.reserve(chunkCount);
@@ -477,18 +516,15 @@ private:
             const size_t begin = c * kChunkPoints;
             const size_t end   = std::min(count, begin + kChunkPoints);
             auto* varr = new osg::Vec3Array;
-            auto* carr = new osg::Vec4Array;
             varr->reserve(end - begin);
-            carr->reserve(end - begin);
             for (size_t i = begin; i < end; ++i) {
-                const Eigen::Vector3d& wp = odomPoints[renderFullRes ? i : renderIndices[i]];
+                const Eigen::Vector3d& wp = odomPoints[i];
                 varr->push_back(osg::Vec3(static_cast<float>(wp.x()),
                                           static_cast<float>(wp.y()),
                                           static_cast<float>(wp.z())));
-                carr->push_back(gray);
             }
             lod.vertexChunks.push_back(varr);
-            lod.colorChunks.push_back(carr);
+            lod.colorChunks.push_back(odomColorArray);  // 共享：同一 ref_ptr 重复入列
         }
         return lod;
     }
