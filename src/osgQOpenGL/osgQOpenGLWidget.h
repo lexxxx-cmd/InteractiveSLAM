@@ -172,6 +172,14 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
     /**
+     * @brief 事件处理（重写 QWidget）
+     *
+     * 捕获设备像素比变化与屏幕内部变化事件，主动重同步 OSG 视口，
+     * 避免最大化/还原或跨屏移动后视口与 FBO 尺寸不匹配。
+     */
+    bool event(QEvent* event) override;
+
+    /**
      * @brief 创建渲染器
      *
      * 设置默认显示设置，创建 OSGRenderer 实例，

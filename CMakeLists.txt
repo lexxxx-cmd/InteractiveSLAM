@@ -49,6 +49,7 @@ find_package(Eigen3 REQUIRED)                    # 线性代数
 find_package(PCL REQUIRED COMPONENTS io common search features registration)  # 点云库
 find_package(g2o REQUIRED)                       # 图优化
 find_package(Boost REQUIRED COMPONENTS filesystem)  # 文件系统
+find_package(yaml-cpp REQUIRED)                  # YAML 配置解析（bag 导入配置）
 
 # —— OpenMP（可选，用于 ndt_omp 多线程 GICP/NDT） ——
 find_package(OpenMP)
@@ -79,6 +80,8 @@ set(DATA_SOURCES
     src/data/hdl_graph_slam/interactive_graph.cpp         # 交互式图数据
     src/data/hdl_graph_slam/registration_methods.cpp      # 点云配准方法
     src/data/hdl_graph_slam/automatic_loop_closure.cpp    # 自动回环检测
+    src/data/hdl_graph_slam/bag_importer.cpp              # ROS1 bag 导入器（打开 Bag 路径）
+    src/data/rosbag/rosbag.cpp                            # ROS1 bag 文件读取（精简版）
     src/data/g2o/robust_kernel_io.cpp                     # 鲁棒核函数 IO
 )
 
@@ -91,16 +94,21 @@ set(BACKEND_SOURCES
 # --- Qt Widgets UI（新的基于 Widgets 的界面，替代 QML） ---
 set(UI_SOURCES
     src/ui/MainWindow.cpp                                 # 主窗口
+    src/ui/ProjectCenterDialog.cpp                        # 项目中心对话框（新建/打开项目）
+    src/ui/BagOpenDialog.cpp                              # 打开 Bag 对话框（topic 选择）
+    src/ui/AutoLoopClosureDialog.cpp                       # 高级设置：自动回环对话框
+    src/ui/RenderingAdvancedDialogs.cpp                    # 高级设置：渲染相关对话框（LOD/Z裁剪/颜色范围）
+    src/ui/SaveMapDialog.cpp                               # 保存地图配置对话框（位姿图/每帧点云/全局点云）
     src/ui/ViewportWidget.cpp                             # 3D 视口控件
     src/ui/GraphStatsPanel.cpp                            # 图统计面板
     src/ui/RenderingPanel.cpp                             # 渲染设置面板
-    src/ui/PointCloudFiltersPanel.cpp                        # 点云过滤面板（Z裁剪 + 颜色范围）
     src/ui/MiniViewportWidget.cpp                         # 缩略图视口
     src/ui/LoopClosureDialog.cpp                          # 回环闭合对话框
-    src/ui/AutoLoopClosurePanel.cpp                       # 自动回环面板
+    src/ui/AutoLoopClosurePanel.cpp                       # 自动回环面板（精简）
     src/ui/EdgeListPanel.cpp                              # 边列表面板
     src/ui/PlaybackPanel.cpp                              # 播放轴面板
     src/ui/OverlayPanelWidget.cpp                         # 叠加面板控件
+    src/ui/LoadingOverlayWidget.cpp                       # 加载遮罩进度覆盖层
 )
 
 # ============================================================================
@@ -131,6 +139,11 @@ qt_add_executable(appInteractiveSLAM
     src/ui/ui_resources.qrc   # Qt 资源文件（暗色主题 QSS）
 )
 
+# Windows exe 图标（.rc 资源脚本引用 icon/app.ico）
+if(WIN32)
+    target_sources(appInteractiveSLAM PRIVATE app.rc)
+endif()
+
 # --- Qt 中文翻译 ---
 qt_add_translations(appInteractiveSLAM
     TS_FILES
@@ -157,6 +170,7 @@ target_link_libraries(appInteractiveSLAM PRIVATE
     ${PCL_LIBRARIES}          # 点云库
     ${G2O_LIBRARIES}          # 图优化库
     Boost::filesystem         # 文件系统库
+    yaml-cpp                  # YAML 配置解析（bag 导入配置）
     ${OPENSCENEGRAPH_LIBRARIES}  # OSG 库
     ${OpenMP_CXX_LIBRARIES}   # OpenMP 库
 )
@@ -197,6 +211,7 @@ target_link_libraries(test_data_loading PRIVATE
     ${PCL_LIBRARIES}
     ${G2O_LIBRARIES}
     Boost::filesystem
+    yaml-cpp
 )
 if(MSVC)
     target_compile_options(test_data_loading PRIVATE /W3 /wd4996)

@@ -144,16 +144,25 @@ void AutomaticLoopClosure::update_last_match(long begin_id, long end_id,
 /**
  * @brief 刷新关键帧 ID 排序列表缓存
  *
- * 将 graph->keyframes 中的所有 ID 提取到 m_sorted_ids 并排序，
+ * 将 graph->keyframes 中的 ID 提取到 m_sorted_ids 并排序，
  * 用于在顺序搜索模式中按 ID 顺序遍历。
+ * 采样步长 > 1 时仅收集 id % stride == 0 的关键帧（源帧池
+ * 限定在采样子集内，与渲染层采样语义一致）。
  */
 void AutomaticLoopClosure::refresh_sorted_ids() {
+    const int stride = sample_stride();
     m_sorted_ids.clear();
     m_sorted_ids.reserve(m_graph->keyframes.size());
     for (const auto& kv : m_graph->keyframes) {
+        if (stride > 1 && kv.first % stride != 0) continue;
         m_sorted_ids.push_back(kv.first);
     }
     std::sort(m_sorted_ids.begin(), m_sorted_ids.end());
+    m_cached_stride = stride;
+    // 记录全量帧数（非采样池大小）：主循环据此判断图是否新增了
+    // 关键帧——采样时池大小恒小于全量数，拿它比较会导致每轮
+    // 误判"过期"并重置遍历索引（顺序模式卡死在第一帧）
+    m_last_keyframe_count = m_graph->keyframes.size();
 }
 
 // ── BFS 候选搜索 ─────────────────────────────────────────────────────────────
@@ -252,9 +261,13 @@ std::vector<long> AutomaticLoopClosure::find_loop_candidates(long source_id) {
 
     // ── 步骤 3：过滤候选 ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐
     std::vector<long> candidates;
+    // 采样步长 > 1 时候选帧也限定在 id % stride == 0 的采样子集内
+    //（与源帧池同一语义；BFS 累积距离计算不受影响，仅过滤最终候选）
+    const int stride = sample_stride();
     for (const auto& [cand_id, cand_kf] : m_graph->keyframes) {
         if (cand_id == source_id)          continue;   // 排除自身
         if (excluded.count(cand_id))       continue;   // 排除已直接相连的关键帧
+        if (stride > 1 && cand_id % stride != 0) continue;  // 排除非采样帧
 
         Eigen::Vector3d cand_pos = cand_kf->node->estimate().translation();
         double dist = (cand_pos - source_pos).norm();
@@ -320,13 +333,22 @@ void AutomaticLoopClosure::loop_detection() {
             continue;
         }
 
-        // ── 步骤 1：如果关键帧数量变化，刷新排序缓存 ────────────
-        if (m_sorted_ids.size() != m_graph->keyframes.size()) {
+        // ── 步骤 1：关键帧数量或采样步长变化时，刷新排序缓存 ──
+        //（用缓存时的全量帧数比较；池大小在采样模式下恒小于全量数，
+        // 不可作判据，否则每轮误刷新并重置 m_current_index）
+        if (m_graph->keyframes.size() != m_last_keyframe_count ||
+            m_cached_stride != sample_stride()) {
             refresh_sorted_ids();
+            m_current_index = 0;  // 源帧池变化，从头遍历避免索引越界跳帧
         }
 
         // ── 步骤 2：选择源关键帧 ────────────────────────────────
         size_t n = m_sorted_ids.size();
+        if (n == 0) {
+            // 采样步长过大导致源帧池为空：等待步长或图变化
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            continue;
+        }
         size_t idx;
 
         if (m_search_method == RANDOM) {

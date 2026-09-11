@@ -12,26 +12,38 @@
  */
 
 #include "ui/MainWindow.h"
+#include "ui/ProjectCenterDialog.h"
 #include "ui/ViewportWidget.h"
 #include "ui/GraphStatsPanel.h"
 #include "ui/RenderingPanel.h"
-#include "ui/PointCloudFiltersPanel.h"
-#include "ui/AutoLoopClosurePanel.h"
 #include "ui/EdgeListPanel.h"
 #include "ui/OverlayPanelWidget.h"
+#include "ui/LoadingOverlayWidget.h"
 #include "ui/PlaybackPanel.h"
 #include "ui/LoopClosureDialog.h"
+#include "ui/AutoLoopClosureDialog.h"
+#include "ui/RenderingAdvancedDialogs.h"
+#include "ui/SaveMapDialog.h"
 #include "backend/graph_manager.hpp"
+#include "data/hdl_graph_slam/bag_importer.hpp"
 
-#include <QFileDialog>
+#include <QInputDialog>
 #include <QMessageBox>
+#include <QSettings>
 #include <QMenu>
 #include <QDialog>
 #include <QFormLayout>
 #include <QSpinBox>
 #include <QLabel>
+#include <QTimer>
 #include <QDialogButtonBox>
 #include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -64,6 +76,30 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
     connect(m_manager, &GraphManager::lastMessageChanged,
             this, &MainWindow::onLogMessage);
 
+    // --- 后端进度 → 加载遮罩 ---
+    // ProgressReporter 的信号此前无 UI 消费；后端已把工作线程的进度
+    // 跨线程转发到主线程，此处直接连接到全屏加载遮罩
+    //（m_loadingOverlay 已在 setupUi() 末尾创建，此处非空）
+    connect(m_manager->progress(), &ProgressReporter::titleChanged,
+            m_loadingOverlay, &LoadingOverlayWidget::setTitle);
+    connect(m_manager->progress(), &ProgressReporter::textChanged,
+            m_loadingOverlay, &LoadingOverlayWidget::setText);
+    connect(m_manager->progress(), &ProgressReporter::progressChanged,
+            m_loadingOverlay, [this](int current, int maximum) {
+        if (maximum > 0)
+            m_loadingOverlay->setProgress(current, maximum);
+        else
+            m_loadingOverlay->setIndeterminate();
+    });
+
+    // 点云全部渲染完成后停止加载动画并隐藏遮罩（spinner/遮罩持续到
+    // LOD 分块上传完毕，而非数据加载完成就消失）
+    connect(m_viewport, &ViewportWidget::cloudRenderFinished,
+            this, [this]() {
+        stopLoadingSpinner();
+        m_loadingOverlay->hideOverlay();
+    });
+
     // 选中顶点的反馈：在状态栏显示顶点 ID
     connect(m_viewport, &ViewportWidget::vertexSelected,
             this, [this](long vertexId) {
@@ -71,6 +107,24 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             statusBar()->showMessage(tr("Selected vertex: %1").arg(vertexId));
         else
             statusBar()->clearMessage();
+    });
+
+    // 多级渲染层级状态提示：构建完成与相机距离切换时在状态栏临时显示
+    connect(m_viewport, &ViewportWidget::lodLevelChanged,
+            this, [this](int level, int levelCount) {
+        if (levelCount > 1) {
+            statusBar()->showMessage(
+                tr("渲染层级: %1/%2").arg(level).arg(levelCount), 2500);
+        }
+    });
+
+    // 第一人称模式提示：操作方式在状态栏显示
+    connect(m_viewport, &ViewportWidget::firstPersonModeChanged,
+            this, [this](bool active) {
+        statusBar()->showMessage(active
+            ? tr("First-person mode: drag to look, W/A/S/D to walk, "
+                 "Q up, E down, wheel adjusts speed, Shift to exit")
+            : tr("First-person mode off"), 5000);
     });
 
     // 右键上下文菜单：显示顶点/边信息，支持手动闭环操作和边删除
@@ -217,22 +271,18 @@ void MainWindow::setupUi() {
     // 创建面板的内容部件
     m_statsPanel   = new GraphStatsPanel(m_manager, m_viewport, nullptr);
     m_renderPanel  = new RenderingPanel(m_viewport, nullptr);
-    m_filtersPanel = new PointCloudFiltersPanel(m_viewport, nullptr);
 
     // 将内容部件包装到可拖动的悬浮面板中
     m_statsOverlay    = new OverlayPanelWidget(tr("Graph Statistics"), m_statsPanel);
     m_renderOverlay   = new OverlayPanelWidget(tr("Rendering"), m_renderPanel);
-    m_filtersOverlay  = new OverlayPanelWidget(tr("Point Cloud Filters"), m_filtersPanel);
 
     // 注册到视口（重新设置父级、定位、显示）
     m_viewport->registerOverlay(m_statsOverlay);
     m_viewport->registerOverlay(m_renderOverlay);
-    m_viewport->registerOverlay(m_filtersOverlay);
 
-    // 图统计和渲染面板默认可见，过滤面板默认隐藏
+    // 图统计和渲染面板默认可见
     m_statsOverlay->show();
     m_renderOverlay->show();
-    m_filtersOverlay->hide();
     m_viewport->updateOverlayPositions();
 
     // 面板关闭按钮 → 隐藏面板 + 同步菜单勾选状态
@@ -252,55 +302,34 @@ void MainWindow::setupUi() {
             if (m_renderViewAction) m_renderViewAction->setChecked(false);
         }
     });
-    connect(m_filtersOverlay, &OverlayPanelWidget::closeRequested,
-            this, [this]() {
-        if (m_filtersOverlay) {
-            m_filtersOverlay->hide();
-            m_viewport->updateOverlayPositions();
-            if (m_filtersViewAction) m_filtersViewAction->setChecked(false);
-        }
-    });
 
     // ---- 已有的浮动叠加面板 ----
-    m_autoLoopPanel = new AutoLoopClosurePanel(m_manager, nullptr);
+    // （自动回环已内嵌到"优化相关"设置对话框，不再作为独立浮动面板）
     m_edgeListPanel = new EdgeListPanel(m_manager, nullptr);
 
-    m_autoLoopOverlay = new OverlayPanelWidget(tr("Auto Loop Closure"), m_autoLoopPanel);
-    m_autoLoopOverlay->setMaximumHeight(560);
     m_edgeListOverlay = new OverlayPanelWidget(tr("Loop Edges"), m_edgeListPanel);
 
-    m_viewport->registerOverlay(m_autoLoopOverlay);
     m_viewport->registerOverlay(m_edgeListOverlay);
 
-    // 默认隐藏（通过视图菜单切换）
-    m_autoLoopOverlay->hide();
+    // 默认隐藏（显示开关在"优化相关"设置对话框）
     m_edgeListOverlay->hide();
     m_viewport->updateOverlayPositions();
 
-    // 面板关闭按钮 → 同步菜单状态
-    connect(m_autoLoopOverlay, &OverlayPanelWidget::closeRequested,
-            this, [this]() {
-        if (m_autoLoopOverlay) {
-            m_autoLoopOverlay->hide();
-            m_viewport->updateOverlayPositions();
-            if (m_autoLoopViewAction) m_autoLoopViewAction->setChecked(false);
-        }
-    });
+    // 面板关闭按钮 → 隐藏面板（显示开关状态由"优化相关"对话框打开时同步）
     connect(m_edgeListOverlay, &OverlayPanelWidget::closeRequested,
             this, [this]() {
         if (m_edgeListOverlay) {
             m_edgeListOverlay->hide();
             m_viewport->updateOverlayPositions();
-            if (m_edgeListViewAction) m_edgeListViewAction->setChecked(false);
         }
     });
 
-    // ---- 播放轴面板 ----
+    // ---- 播放轴面板（默认显示） ----
     m_playbackPanel = new PlaybackPanel(m_viewport, nullptr);
     m_playbackOverlay = new OverlayPanelWidget(tr("Playback"), m_playbackPanel);
     m_playbackOverlay->setMaximumHeight(200);
     m_viewport->registerOverlay(m_playbackOverlay);
-    m_playbackOverlay->hide();
+    m_playbackOverlay->show();
     m_viewport->updateOverlayPositions();
 
     // 面板关闭按钮 → 同步菜单状态
@@ -310,6 +339,9 @@ void MainWindow::setupUi() {
             m_playbackOverlay->hide();
             m_viewport->updateOverlayPositions();
             if (m_playbackViewAction) m_playbackViewAction->setChecked(false);
+            // 关闭面板 = 播放会话结束：停止播放并清理播放高亮
+            if (m_playbackPanel) m_playbackPanel->pausePlayback();
+            m_viewport->highlightPlaybackVertex(-1);
         }
     });
 
@@ -317,21 +349,18 @@ void MainWindow::setupUi() {
     connect(m_viewport, &ViewportWidget::sampleStrideChanged,
             m_playbackPanel, &PlaybackPanel::onSampleStrideChanged);
 
-    // 自动检测到闭环边时刷新视口
-    connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopEdgeInserted,
-            this, [this]() {
-        m_viewport->refreshScene();
-        m_viewport->rebuildPointClouds();
-        m_edgeListPanel->refreshList();
-        statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
+    // 采样步长变化 → 同步自动回环检测（内部变量，对话框可能尚未创建）
+    connect(m_viewport, &ViewportWidget::sampleStrideChanged,
+            this, [this](int stride) {
+        if (m_autoLoopDialog) m_autoLoopDialog->setSampleStride(stride);
     });
 
-    // 自动闭环搜索时的高亮显示：蓝色=源顶点，绿色=候选顶点
-    connect(m_autoLoopPanel, &AutoLoopClosurePanel::loopDetectionStatus,
-            this, [this](long sourceId, QVector<long> candidateIds) {
-        std::vector<long> vec(candidateIds.begin(), candidateIds.end());
-        m_viewport->setLoopHighlight(sourceId, vec);
-        m_viewport->refreshScene();
+    // 任何选中（Ctrl+Click / 程序化 selectVertex）→ 暂停播放轴并清理
+    // 播放通道高亮：用户主动选择时播放让位，避免两个红色标记并存。
+    // 面板自身的停下路径已先清理再选中，此处为幂等兜底。
+    connect(m_viewport, &ViewportWidget::vertexSelected, this, [this](long) {
+        if (m_playbackPanel) m_playbackPanel->pausePlayback();
+        m_viewport->highlightPlaybackVertex(-1);
     });
 
     // 隐藏边变化时刷新视口
@@ -343,6 +372,39 @@ void MainWindow::setupUi() {
 
     // 状态栏初始消息
     statusBar()->showMessage(tr("Ready — open a map folder to begin"));
+
+    // 加载动画：状态栏右侧的旋转字符指示器（加载地图/bag 时显示）
+    m_loadingSpinner = new QLabel(this);
+    m_loadingSpinner->hide();
+    statusBar()->addPermanentWidget(m_loadingSpinner);
+
+    m_loadingTimer = new QTimer(this);
+    m_loadingTimer->setInterval(120);  // ~8.3 fps，旋转平滑
+    connect(m_loadingTimer, &QTimer::timeout, this, [this]() {
+        // 旋转字符序列：| / - \ 循环
+        static const char kFrames[] = {'|', '/', '-', '\\'};
+        m_loadingSpinner->setText(
+            QString(" %1 %2").arg(QChar(kFrames[m_loadingFrame]))
+                             .arg(m_loadingText));
+        m_loadingFrame = (m_loadingFrame + 1) % 4;
+    });
+
+    // 异步保存完成 → 停止加载动画并通知结果
+    //（QFutureWatcher::finished 在启动 watcher 的线程回调，即 UI 线程）
+    connect(&m_saveWatcher, &QFutureWatcher<QString>::finished, this, [this]() {
+        stopLoadingSpinner();
+        m_isSaving = false;
+        const QString err = m_saveWatcher.result();
+        if (err.isEmpty())
+            statusBar()->showMessage(tr("Map saved: %1").arg(m_lastSaveDir), 5000);
+        else
+            statusBar()->showMessage(tr("Save failed: %1").arg(err), 5000);
+    });
+
+    // 加载遮罩进度覆盖层：铺满主窗口的最上层子控件（初始隐藏），
+    // 显示期间冻结底层交互；由加载生命周期回调与后端进度信号驱动
+    m_loadingOverlay = new LoadingOverlayWidget(this);
+    m_loadingOverlay->raise();
 }
 
 // ---------------------------------------------------------------------------
@@ -361,50 +423,40 @@ void MainWindow::setupMenus() {
     // ---- 文件菜单 ----
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
 
-    // 打开地图目录
-    auto* openAction = fileMenu->addAction(tr("&Open Map..."));
-    openAction->setShortcut(QKeySequence::Open);
-    connect(openAction, &QAction::triggered, this, &MainWindow::onOpenMap);
+    // 打开项目中心（新建/切换项目；加载前会先关闭当前地图）
+    // 外部地图目录经"新建项目 → 关联已有地图目录"或项目中心选中
+    // 非项目目录时的"直接加载"入口进入，文件菜单不再单设"打开地图"
+    auto* openProjectAction = fileMenu->addAction(tr("Open &Project..."));
+    connect(openProjectAction, &QAction::triggered, this, &MainWindow::onOpenProjectCenter);
 
     // 关闭当前地图
     auto* closeAction = fileMenu->addAction(tr("&Close Map"));
-    closeAction->setShortcut(QKeySequence::Close);
     connect(closeAction, &QAction::triggered, this, &MainWindow::onCloseMap);
 
     fileMenu->addSeparator();
 
-    // 保存位姿图为 .g2o 文件（Ctrl+S）
-    auto* savePoseAction = fileMenu->addAction(tr("Save Pose Graph..."));
-    savePoseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
-    connect(savePoseAction, &QAction::triggered, this, &MainWindow::onSavePoseGraph);
+    // 快速保存：直接写入项目数据目录/地图来源目录（不弹窗）
+    auto* saveAction = fileMenu->addAction(tr("&Save"));
+    connect(saveAction, &QAction::triggered, this, &MainWindow::onSaveMap);
 
-    // 保存地图（含 LVBA 格式输出）（Ctrl+Shift+S）
-    auto* saveMapAction = fileMenu->addAction(tr("Save Map..."));
-    saveMapAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
-    connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMap);
+    // 另存为：弹窗选择保存内容与目标目录
+    auto* saveMapAction = fileMenu->addAction(tr("Save Map &As..."));
+    connect(saveMapAction, &QAction::triggered, this, &MainWindow::onSaveMapAs);
 
     fileMenu->addSeparator();
 
     // 退出应用程序
     auto* quitAction = fileMenu->addAction(tr("&Quit"));
-    quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
 
     // ---- 视图菜单 ----
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
-    // 重置摄像机视角（按 R 键）
+    // 重置摄像机视角
+    // 注意：不设单键 R 快捷键——R 紧邻 WASD，第一人称行走时易误触
+    // （重置相机同时会退出第一人称模式）
     auto* resetCamAction = viewMenu->addAction(tr("&Reset Camera"));
-    resetCamAction->setShortcut(QKeySequence(Qt::Key_R));
     connect(resetCamAction, &QAction::triggered, this, &MainWindow::onResetCamera);
-
-    // 正交/透视视图切换
-    m_orthoViewAction = viewMenu->addAction(tr("Orthographic View"));
-    m_orthoViewAction->setCheckable(true);
-    m_orthoViewAction->setChecked(false);  // 默认：透视投影
-    connect(m_orthoViewAction, &QAction::toggled, this, [this](bool checked) {
-        m_viewport->setUseOrthographic(checked);
-    });
 
     viewMenu->addSeparator();
 
@@ -430,34 +482,10 @@ void MainWindow::setupMenus() {
         }
     });
 
-    // 点云过滤面板显示切换
-    m_filtersViewAction = viewMenu->addAction(tr("Point Cloud Filters"));
-    m_filtersViewAction->setCheckable(true);
-    m_filtersViewAction->setChecked(false);
-    connect(m_filtersViewAction, &QAction::toggled, this, [this](bool checked) {
-        if (m_filtersOverlay) {
-            m_filtersOverlay->setVisible(checked);
-            m_viewport->updateOverlayPositions();
-        }
-    });
-
-    viewMenu->addSeparator();
-
-    // 自动闭环面板显示切换
-    m_autoLoopViewAction = viewMenu->addAction(tr("Auto Loop Closure Panel"));
-    m_autoLoopViewAction->setCheckable(true);
-    m_autoLoopViewAction->setChecked(false);
-    connect(m_autoLoopViewAction, &QAction::toggled, this, [this](bool checked) {
-        if (m_autoLoopOverlay) {
-            m_autoLoopOverlay->setVisible(checked);
-            m_viewport->updateOverlayPositions();
-        }
-    });
-
-    // 播放轴面板显示切换
+    // 播放轴面板显示切换（回环起点搜索常用入口）
     m_playbackViewAction = viewMenu->addAction(tr("Playback"));
     m_playbackViewAction->setCheckable(true);
-    m_playbackViewAction->setChecked(false);
+    m_playbackViewAction->setChecked(true);  // 默认显示
     connect(m_playbackViewAction, &QAction::toggled, this, [this](bool checked) {
         if (m_playbackOverlay) {
             m_playbackOverlay->setVisible(checked);
@@ -465,64 +493,110 @@ void MainWindow::setupMenus() {
         }
     });
 
-    // 闭环边列表面板显示切换
-    m_edgeListViewAction = viewMenu->addAction(tr("Loop Edges Panel"));
-    m_edgeListViewAction->setCheckable(true);
-    m_edgeListViewAction->setChecked(false);
-    connect(m_edgeListViewAction, &QAction::toggled, this, [this](bool checked) {
+    // ---- 高级设置菜单（收纳不常用功能） ----
+    auto* settingsMenu = menuBar()->addMenu(tr("Ad&vanced"));
+
+    // ==================== 优化相关（子菜单） ====================
+    auto* optMenu = settingsMenu->addMenu(tr("Optimization"));
+
+    // 图优化（不设快捷键：历史上与"打开项目"快捷键重复，
+    // 且需避免与 WASD 行走键相互干扰）
+    auto* optimizeAction = optMenu->addAction(tr("&Optimize"));
+    m_optimizeAction = optimizeAction;
+    connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
+
+    optMenu->addSeparator();
+
+    // 子图窗口大小（小弹窗，即时应用）
+    auto* submapAction = optMenu->addAction(tr("Submap Window Size..."));
+    connect(submapAction, &QAction::triggered, this, [this]() {
+        bool ok = false;
+        int half = QInputDialog::getInt(
+            this, tr("Submap Merge Window"),
+            tr("Merge ±N adjacent keyframes around the selected vertex\n"
+               "for loop-closure matching (N=1 merges 3 frames):"),
+            m_submapWindowHalfSize, 0, 10, 1, &ok);
+        if (ok) {
+            m_submapWindowHalfSize = half;
+            m_viewport->setHighlightWindowHalf(half);
+        }
+    });
+
+    // 自动回环检测（对话框：内嵌面板 + 参数）
+    auto* autoLoopAction = optMenu->addAction(tr("Auto Loop Closure..."));
+    connect(autoLoopAction, &QAction::triggered, this, [this]() {
+        if (!m_autoLoopDialog) {
+            m_autoLoopDialog = new AutoLoopClosureDialog(m_manager, this);
+            // 采样步长为内部变量（UI 无控件）：对话框创建时同步当前
+            // 渲染采样值，保证"先改步长后开对话框"语义一致
+            m_autoLoopDialog->setSampleStride(m_viewport->sampleStride());
+            // 自动回环信号（内嵌面板转发）→ 刷新视口 / 高亮
+            connect(m_autoLoopDialog,
+                    &AutoLoopClosureDialog::loopEdgeInserted,
+                    this, [this]() {
+                m_viewport->refreshScene();
+                // 仅在"插入边后优化"（位姿变化）时才重建点云；
+                // 否则点云世界坐标不变，重建纯属浪费（全量 VBO 上传卡顿）
+                if (m_autoLoopDialog->optimizeAfterInsert()) {
+                    m_viewport->rebuildPointClouds();
+                }
+                m_edgeListPanel->refreshList();
+                statusBar()->showMessage(tr("Loop edge inserted by auto detection"), 3000);
+            });
+            connect(m_autoLoopDialog,
+                    &AutoLoopClosureDialog::loopDetectionStatus,
+                    this, [this](long sourceId, QVector<long> candidateIds) {
+                std::vector<long> vec(candidateIds.begin(), candidateIds.end());
+                m_viewport->setLoopHighlight(sourceId, vec);
+                m_viewport->refreshScene();
+            });
+        }
+        m_autoLoopDialog->show();
+        m_autoLoopDialog->raise();
+        m_autoLoopDialog->activateWindow();
+    });
+
+    // 回环边列表面板显示开关
+    auto* edgeListAction = optMenu->addAction(tr("Show Loop Edges Panel"));
+    edgeListAction->setCheckable(true);
+    edgeListAction->setChecked(false);
+    connect(edgeListAction, &QAction::toggled, this, [this](bool checked) {
         if (m_edgeListOverlay) {
             m_edgeListOverlay->setVisible(checked);
             m_viewport->updateOverlayPositions();
         }
     });
 
-    // ---- 图菜单 ----
-    auto* graphMenu = menuBar()->addMenu(tr("&Graph"));
+    settingsMenu->addSeparator();
 
-    // 图优化（Ctrl+Shift+O）
-    auto* optimizeAction = graphMenu->addAction(tr("&Optimize"));
-    optimizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
-    m_optimizeAction = optimizeAction;
-    connect(optimizeAction, &QAction::triggered, this, &MainWindow::onOptimize);
+    // ==================== 渲染相关（子菜单） ====================
+    auto* renderMenu = settingsMenu->addMenu(tr("Rendering"));
 
-    // 子图合并窗口大小配置
-    graphMenu->addSeparator();
-    auto* submapWindowAction = graphMenu->addAction(tr("Submap Window Size..."));
-    connect(submapWindowAction, &QAction::triggered, this, [this]() {
-        // 弹出对话框配置子图窗口半宽大小
-        QDialog dlg(this);
-        dlg.setWindowTitle(tr("Submap Merge Window"));
-        dlg.setModal(true);
+    // 多级渲染（LOD）模式/层级
+    auto* lodAction = renderMenu->addAction(tr("Multi-level Rendering (LOD)..."));
+    connect(lodAction, &QAction::triggered, this, [this]() {
+        if (!m_lodDialog) m_lodDialog = new LodSettingsDialog(m_viewport, this);
+        m_lodDialog->show();
+        m_lodDialog->raise();
+        m_lodDialog->activateWindow();
+    });
 
-        auto* layout = new QFormLayout(&dlg);
+    // Z 轴裁剪
+    auto* zClipAction = renderMenu->addAction(tr("Z-Clipping..."));
+    connect(zClipAction, &QAction::triggered, this, [this]() {
+        if (!m_zClipDialog) m_zClipDialog = new ZClipSettingsDialog(m_viewport, this);
+        m_zClipDialog->show();
+        m_zClipDialog->raise();
+        m_zClipDialog->activateWindow();
+    });
 
-        auto* label = new QLabel(
-            tr("Number of adjacent keyframes to merge on each side\n"
-               "of the selected vertex for loop closure matching.\n"
-               "N = 1 (default) merges 3 keyframes: center-1, center, center+1.\n"
-               "N = 0 merges only the selected keyframe itself."));
-        label->setWordWrap(true);
-        layout->addRow(label);
-
-        auto* spinBox = new QSpinBox;
-        spinBox->setRange(0, 10);
-        spinBox->setValue(m_submapWindowHalfSize);
-        spinBox->setSuffix(tr(" keyframe(s) each side"));
-        layout->addRow(tr("Window half-size:"), spinBox);
-
-        auto* buttons = new QDialogButtonBox(
-            QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addRow(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-        if (dlg.exec() == QDialog::Accepted) {
-            m_submapWindowHalfSize = spinBox->value();
-            m_viewport->setHighlightWindowHalf(m_submapWindowHalfSize);
-            statusBar()->showMessage(
-                tr("Submap window size set to ±%1 keyframe(s)")
-                    .arg(m_submapWindowHalfSize), 3000);
-        }
+    // 高程颜色范围
+    auto* colorRangeAction = renderMenu->addAction(tr("Elevation Color Range..."));
+    connect(colorRangeAction, &QAction::triggered, this, [this]() {
+        if (!m_colorRangeDialog) m_colorRangeDialog = new ColorRangeSettingsDialog(m_viewport, this);
+        m_colorRangeDialog->show();
+        m_colorRangeDialog->raise();
+        m_colorRangeDialog->activateWindow();
     });
 }
 
@@ -531,28 +605,14 @@ void MainWindow::setupMenus() {
 // ---------------------------------------------------------------------------
 
 /**
- * @brief 打开地图目录
- *
- * 弹出目录选择对话框，调用 GraphManager 加载地图数据（.g2o 及相关点云信息）。
- */
-void MainWindow::onOpenMap() {
-    QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Open Map Directory"), QString(),
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-
-    if (dir.isEmpty()) return;
-
-    m_manager->openMapData(QUrl::fromLocalFile(dir));
-}
-
-/**
  * @brief 关闭当前地图
  *
  * 停止自动闭环检测，关闭地图数据，清空视口和闭环高亮，重置闭环起点。
  */
 void MainWindow::onCloseMap() {
-    if (m_autoLoopPanel) {
-        m_autoLoopPanel->stopDetection();
+    // 停止自动闭环检测（内嵌于"自动回环检测"对话框）
+    if (m_autoLoopDialog) {
+        m_autoLoopDialog->stopAutoLoop();
     }
 
     m_manager->closeMap();
@@ -569,80 +629,168 @@ void MainWindow::onCloseMap() {
 }
 
 /**
- * @brief 保存位姿图为 .g2o 文件
+ * @brief 默认保存目录
+ *
+ * 项目模式下为项目数据目录（与加载来源一致，保存 = 写回）；
+ * 非项目模式为当前地图的来源目录。两者都为空（理论上不发生）返回空串。
  */
-void MainWindow::onSavePoseGraph() {
-    if (!m_manager->isLoaded()) {
-        statusBar()->showMessage(tr("No graph loaded"), 3000);
-        return;
+QString MainWindow::defaultSaveDir() const {
+    if (!m_activeProjectDir.isEmpty()) {
+        auto info = ProjectManager::read(m_activeProjectDir);
+        if (info.valid) return info.resolvedDataDir();
     }
-
-    QString path = QFileDialog::getSaveFileName(
-        this, tr("Save Pose Graph"), QString(),
-        tr("Pose Graph Files (*.g2o);;All Files (*)"));
-    if (path.isEmpty()) return;
-
-    try {
-        m_manager->graph()->save(path.toStdString());
-        statusBar()->showMessage(
-            tr("Pose graph saved: %1").arg(path), 5000);
-    } catch (const std::exception& e) {
-        statusBar()->showMessage(
-            tr("Save failed: %1").arg(e.what()), 5000);
-    }
+    return m_manager->mapSourceDir();
 }
 
 /**
- * @brief 保存地图（含 LVBA 格式输出 + 全局全量点云地图）
+ * @brief 执行保存（统一入口）
  *
- * 调用 graph->dump() 保存标准格式地图数据，
- * 并依次尝试额外导出：
- *   - LVBA 格式（saveLVBA）
- *   - 全局全量拼接点云地图（save_pointcloud → accumulated_cloud.pcd）
- * 额外格式导出失败仅记录日志，不影响主保存操作。
+ * 参数校验与"目录非空"防御确认在 UI 线程同步完成；位姿图/关键帧/
+ * 全局点云的写盘重活放到后台线程（与 bag 导入同一 QtConcurrent 模式），
+ * 完成后经 QFutureWatcher 回 UI 线程通知状态栏，期间不阻塞界面。
+ *
+ * 1) 位姿图 → graph.g2o；2) 每帧点云及 data → 标准地图目录；
+ * 3) 全局点云 → accumulated_cloud.pcd。各项按开关独立执行。
+ * （LVBA/all_pcd_body 导出已停用：无下游使用；saveLVBA 函数保留）
+ *
+ * 防御：目标目录既不是默认保存目录又非空时，弹窗确认"清空并保存"，
+ * 防止与旧地图文件混存（同 bag 导入的清空语义）。
+ *
+ * @return 是否启动了保存（参数校验失败/已有保存进行中/用户取消为 false）
+ */
+bool MainWindow::performSave(const QString& dir,
+                             bool savePoseGraph, bool saveKeyframes,
+                             bool saveGlobalCloud) {
+    if (dir.isEmpty()) {
+        statusBar()->showMessage(tr("No output directory selected"), 3000);
+        return false;
+    }
+    if (!savePoseGraph && !saveKeyframes && !saveGlobalCloud) {
+        statusBar()->showMessage(tr("Nothing selected to save"), 3000);
+        return false;
+    }
+    if (m_isSaving) {
+        statusBar()->showMessage(tr("Saving already in progress"), 3000);
+        return false;
+    }
+
+    // 防御确认：非默认目录且非空 → 清空确认（避免新旧地图文件混杂）
+    if (dir != defaultSaveDir() &&
+        hdl_graph_slam::BagImporter::isOutputDirNonEmpty(dir.toStdString())) {
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(tr("Output Directory Not Empty"));
+        box.setText(tr("The output directory is not empty:\n%1\n\n"
+                       "Saving will permanently delete all existing content "
+                       "in this directory (cannot be undone).").arg(dir));
+        auto* clearBtn = box.addButton(tr("Clear & Save"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != clearBtn) return false;
+        if (!hdl_graph_slam::BagImporter::clearDirectory(dir.toStdString())) {
+            QMessageBox::warning(this, tr("Clear Failed"),
+                                 tr("Failed to clear the output directory:\n%1").arg(dir));
+            return false;
+        }
+    }
+
+    // 记住本次内容勾选（下次快速保存/另存为复用）
+    QSettings settings("DAFTECH", "InteractiveSLAM");
+    settings.setValue("save_map/pose_graph", savePoseGraph);
+    settings.setValue("save_map/keyframes", saveKeyframes);
+    settings.setValue("save_map/global_cloud", saveGlobalCloud);
+
+    m_isSaving = true;
+    m_lastSaveDir = dir;
+    startLoadingSpinner(tr("Saving..."));
+
+    auto* graph = m_manager->graph();
+    auto* progress = m_manager->progress();
+    const std::string dirStd = dir.toStdString();
+    m_saveWatcher.setFuture(QtConcurrent::run(
+        [graph, progress, dirStd, savePoseGraph, saveKeyframes, saveGlobalCloud]()
+            -> QString {
+            try {
+                // 1) 保存位姿图（graph.g2o，固定位于地图目录根，与单帧目录同层）
+                if (savePoseGraph) {
+                    graph->save(dirStd + "/graph.g2o");
+                }
+
+                // 2) 保存每帧点云及 data 文件（标准地图目录）
+                //    （LVBA/all_pcd_body 导出已注释：无下游使用；saveLVBA 函数保留）
+                // if (saveKeyframes) {
+                //     graph->saveLVBA(dirStd, *progress);
+                // }
+                if (saveKeyframes) {
+                    graph->dump(dirStd, *progress);
+                }
+
+                // 3) 保存全局全量拼接点云地图（accumulated_cloud.pcd）
+                if (saveGlobalCloud &&
+                    !graph->save_pointcloud(dirStd + "/accumulated_cloud.pcd",
+                                            *progress)) {
+                    std::cerr << "[MainWindow] save_pointcloud returned false"
+                              << std::endl;
+                }
+
+                return {};  // 空串 = 成功
+            } catch (const std::exception& e) {
+                return QString::fromUtf8(e.what());
+            }
+        }));
+    return true;
+}
+
+/**
+ * @brief 快速保存（Ctrl+S）
+ *
+ * 不弹窗：直接保存到默认保存目录（项目数据目录 / 地图来源目录），
+ * 内容勾选复用上次保存的配置（QSettings）。没有可用目录时退化为另存为。
  */
 void MainWindow::onSaveMap() {
     if (!m_manager->isLoaded()) {
         statusBar()->showMessage(tr("No graph loaded"), 3000);
         return;
     }
-
-    QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Save Map Directory"), QString(),
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-
-    if (dir.isEmpty()) return;
-
-    try {
-        auto* graph = m_manager->graph();
-        graph->dump(dir.toStdString(), *m_manager->progress());
-
-        // 尽力尝试 LVBA 格式转换 —— 失败仅记录日志，不影响主保存操作
-        try {
-            graph->saveLVBA(dir.toStdString(), *m_manager->progress());
-        } catch (const std::exception& e) {
-            std::cerr << "[MainWindow] LVBA conversion failed: "
-                      << e.what() << std::endl;
-        }
-
-        // 尽力尝试保存全局全量拼接点云地图 —— 失败仅记录日志
-        try {
-            std::string cloudPath = dir.toStdString() + "/accumulated_cloud.pcd";
-            if (!graph->save_pointcloud(cloudPath, *m_manager->progress())) {
-                std::cerr << "[MainWindow] save_pointcloud returned false"
-                          << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[MainWindow] save_pointcloud failed: "
-                      << e.what() << std::endl;
-        }
-
-        statusBar()->showMessage(
-            tr("Map saved: %1").arg(dir), 5000);
-    } catch (const std::exception& e) {
-        statusBar()->showMessage(
-            tr("Save failed: %1").arg(e.what()), 5000);
+    if (m_isSaving) {
+        statusBar()->showMessage(tr("Saving already in progress"), 3000);
+        return;
     }
+
+    QString dir = defaultSaveDir();
+    if (dir.isEmpty()) {
+        onSaveMapAs();
+        return;
+    }
+
+    QSettings settings("DAFTECH", "InteractiveSLAM");
+    performSave(dir,
+                settings.value("save_map/pose_graph", true).toBool(),
+                settings.value("save_map/keyframes", true).toBool(),
+                settings.value("save_map/global_cloud", true).toBool());
+}
+
+/**
+ * @brief 另存为（弹窗选择保存内容与目标目录）
+ *
+ * SaveMapDialog 预填默认保存目录并恢复上次勾选；用户可改目录
+ * （导出副本）或改勾选。
+ */
+void MainWindow::onSaveMapAs() {
+    if (!m_manager->isLoaded()) {
+        statusBar()->showMessage(tr("No graph loaded"), 3000);
+        return;
+    }
+    if (m_isSaving) {
+        statusBar()->showMessage(tr("Saving already in progress"), 3000);
+        return;
+    }
+
+    SaveMapDialog dlg(this);
+    dlg.setOutputDirectory(defaultSaveDir());
+    if (dlg.exec() != QDialog::Accepted) return;
+    performSave(dlg.outputDirectory(),
+                dlg.savePoseGraph(), dlg.saveKeyframes(), dlg.saveGlobalCloud());
 }
 
 // ---------------------------------------------------------------------------
@@ -678,8 +826,12 @@ void MainWindow::onOptimize() {
         return;
     }
 
-    // 在分离线程中运行 g2o 优化，完成后通过 invokeMethod 回到主线程刷新
+    // 在分离线程中运行 g2o 优化，完成后通过 invokeMethod 回到主线程刷新。
+    // 必须持有 optimization_mutex：与自动回环检测线程的优化互斥，避免并发
+    // 修改图数据导致的数据竞争（自动回环在 automatic_loop_closure.cpp 中
+    // 同样以该锁保护 optimize）。
     std::thread([this, graph]() {
+        std::lock_guard<std::mutex> lock(graph->optimization_mutex);
         graph->optimize();
         QMetaObject::invokeMethod(this, [this]() {
             m_optimizePending = false;
@@ -711,6 +863,34 @@ void MainWindow::onResetCamera() {
  */
 void MainWindow::onLoadingStarted() {
     statusBar()->showMessage(tr("Loading map..."));
+    // 通用加载文案（地图加载与 bag 导入共用）
+    startLoadingSpinner(tr("Loading..."));
+    // 全屏加载遮罩：忙碌模式直到后端报告具体进度，期间冻结底层交互；
+    // 先清空上一轮残留文案，等待后端进度信号填充
+    m_loadingOverlay->setTitle(QString());
+    m_loadingOverlay->setText(QString());
+    m_loadingOverlay->setIndeterminate();
+    m_loadingOverlay->showOverlay();
+}
+
+/**
+ * @brief 启动状态栏加载动画（旋转字符 | / - \）
+ *
+ * 在状态栏右侧显示"字符 + 文案"，由 120ms 定时器驱动字符旋转，
+ * 直到加载成功/失败回调停止。
+ */
+void MainWindow::startLoadingSpinner(const QString& text) {
+    m_loadingText = text;
+    m_loadingFrame = 0;
+    m_loadingSpinner->setText(QString(" | %1").arg(text));
+    m_loadingSpinner->show();
+    m_loadingTimer->start();
+}
+
+/** @brief 停止并隐藏加载动画 */
+void MainWindow::stopLoadingSpinner() {
+    m_loadingTimer->stop();
+    m_loadingSpinner->hide();
 }
 
 /**
@@ -720,7 +900,18 @@ void MainWindow::onLoadingStarted() {
  * 设置子图高亮窗口半宽，刷新闭环边列表。
  */
 void MainWindow::onLoadingSucceeded() {
+    // 注意：此处不停止加载动画——点云（含 LOD 分块）仍在后台构建/渐进上传，
+    // spinner 由 cloudRenderFinished 信号在点云全部渲染完成后停止
+    // 遮罩同理不隐藏：数据加载完成但点云仍在后台构建，切换文案为构建
+    // 提示并转回忙碌模式，等 cloudRenderFinished 才消失
+    m_loadingOverlay->setText(tr("Building point clouds..."));
+    m_loadingOverlay->setIndeterminate();
     m_loopBeginVertexId = -1;
+    // Bag 导入随加载一并成功 → 回写项目状态 completed
+    if (m_activeIsImport && !m_activeProjectDir.isEmpty()) {
+        ProjectManager::setStatus(m_activeProjectDir, "completed");
+        m_activeIsImport = false;
+    }
     statusBar()->showMessage(
         tr("Map loaded — %1 vertices, %2 edges, %3 keyframes")
             .arg(m_manager->vertexCount())
@@ -753,6 +944,13 @@ void MainWindow::onLoadingSucceeded() {
  * 在状态栏和消息框中显示错误信息。
  */
 void MainWindow::onLoadingFailed(const QString& error) {
+    stopLoadingSpinner();
+    m_loadingOverlay->hideOverlay();
+    // Bag 导入失败 → 回写项目状态 failed（保留 processing 前的状态信息）
+    if (m_activeIsImport && !m_activeProjectDir.isEmpty()) {
+        ProjectManager::setStatus(m_activeProjectDir, "failed");
+        m_activeIsImport = false;
+    }
     statusBar()->showMessage(tr("Loading failed: %1").arg(error));
     QMessageBox::warning(this, tr("Load Error"), error);
 }
@@ -764,4 +962,62 @@ void MainWindow::onLoadingFailed(const QString& error) {
  */
 void MainWindow::onLogMessage(const QString& message) {
     statusBar()->showMessage(message, 5000);
+}
+
+// ---------------------------------------------------------------------------
+// 项目集成
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 从项目中心的启动任务引导主界面
+ *
+ * 由 main.cpp 在窗口 show() 之后调用一次。Action 分派：
+ *   - LoadDirectory：openMapData() 加载项目数据目录；
+ *   - ImportBag：    openBagFile() 后台导入（配置已在项目中心完成，
+ *                    清空确认也已处理），状态回写挂在加载成功/失败回调；
+ *   - None：         空白项目，仅更新标题。
+ */
+void MainWindow::launchFromProject(const ProjectTask& task) {
+    m_activeProjectDir = task.projectDir;
+    m_activeIsImport = (task.action == ProjectTask::Action::ImportBag);
+
+    if (!task.projectName.isEmpty()) {
+        setWindowTitle(tr("Interactive SLAM — %1").arg(task.projectName));
+    }
+
+    switch (task.action) {
+    case ProjectTask::Action::LoadDirectory:
+        statusBar()->showMessage(tr("Opening project \"%1\"...").arg(task.projectName));
+        m_manager->openMapData(QUrl::fromLocalFile(task.dataDir));
+        break;
+    case ProjectTask::Action::ImportBag:
+        statusBar()->showMessage(tr("Importing Bag into project \"%1\"...").arg(task.projectName));
+        m_manager->openBagFile(QUrl::fromLocalFile(task.bagPath), task.importCfg);
+        break;
+    case ProjectTask::Action::None:
+    default:
+        statusBar()->showMessage(
+            tr("Project \"%1\" opened (blank project, import data later)").arg(task.projectName),
+            5000);
+        break;
+    }
+}
+
+/**
+ * @brief 打开项目中心（文件菜单）
+ *
+ * 重新弹出项目中心；用户选定新项目后关闭当前地图并按新任务引导界面。
+ * 取消则留在当前项目/状态。
+ */
+void MainWindow::onOpenProjectCenter() {
+    ProjectCenterDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    if (m_manager->isLoaded()) {
+        m_manager->closeMap();
+    }
+    setWindowTitle("Interactive SLAM");  // launchFromProject 会按需设置项目名
+    m_activeProjectDir.clear();
+    m_activeIsImport = false;
+    launchFromProject(dlg.task());
 }

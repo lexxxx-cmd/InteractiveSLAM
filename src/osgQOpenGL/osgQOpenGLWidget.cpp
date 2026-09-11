@@ -18,14 +18,17 @@
 
 #include <osgViewer/Viewer>
 #include <osg/GL>
+#include <osg/Viewport>
 
 #include <QApplication>
+#include <QEvent>
 #include <QKeyEvent>
 #include <QInputDialog>
 #include <QLayout>
 #include <QMainWindow>
 #include <QScreen>
-#include <QWindow>
+
+#include <cmath>
 
 /**
  * @brief 默认构造函数
@@ -93,16 +96,37 @@ void osgQOpenGLWidget::initializeGL()
  * @param w 新宽度（Qt 逻辑像素）
  * @param h 新高度（Qt 逻辑像素）
  *
- * 获取屏幕的像素比（devicePixelRatio）并传递给渲染器，
- * 以支持高 DPI 屏幕的正确渲染。
+ * 以 widget 自身的 devicePixelRatioF 为准（与 QOpenGLWidget FBO 实际像素
+ * 尺寸同口径）传递给渲染器，支持高 DPI 屏幕的正确渲染。
  */
 void osgQOpenGLWidget::resizeGL(int w, int h)
 {
     Q_ASSERT(m_renderer);
-    QScreen* screen = windowHandle()
-                      && windowHandle()->screen() ? windowHandle()->screen() :
-                      qApp->screens().front();
-    m_renderer->resize(w, h, screen->devicePixelRatio());
+    m_renderer->resize(w, h, static_cast<float>(devicePixelRatioF()));
+}
+
+/**
+ * @brief 事件处理（重写 QWidget）
+ *
+ * 捕获设备像素比与屏幕变化事件：最大化/还原或跨屏移动时 DPR 可能改变，
+ * 而此类变化不触发 resizeGL，需主动重同步 OSG 视口，否则视口尺寸与
+ * FBO 实际像素尺寸不匹配（表现为还原后上/右侧内容缺失）。
+ */
+bool osgQOpenGLWidget::event(QEvent* event)
+{
+    switch (event->type()) {
+    case QEvent::DevicePixelRatioChange:
+    case QEvent::ScreenChangeInternal:
+        // OSGRenderer::resize 内部有未初始化守卫，此处直接调用即可
+        if (m_renderer) {
+            m_renderer->resize(width(), height(),
+                               static_cast<float>(devicePixelRatioF()));
+        }
+        break;
+    default:
+        break;
+    }
+    return QOpenGLWidget::event(event);
 }
 
 /**
@@ -112,7 +136,10 @@ void osgQOpenGLWidget::resizeGL(int w, int h)
  * 1. 获取 OSG 场景图的读锁（允许并发读取，防止写入冲突）
  * 2. 第一帧时：获取 Qt 的默认 FBO ID 并设置到 OSG 图形上下文中，
  *    确保 OSG 渲染输出到正确的帧缓冲区
- * 3. 调用 m_renderer->frame() 执行一帧的 OSG 渲染
+ * 3. 每帧校验相机视口与当前 FBO 实际像素尺寸，不一致则强制重同步
+ *    （最大化/还原等窗口状态切换存在 resizeGL 未被调用或参数过期的
+ *    路径，视口偏小时超出区域无内容覆盖，表现为上/右侧黑边）
+ * 4. 调用 m_renderer->frame() 执行一帧的 OSG 渲染
  */
 void osgQOpenGLWidget::paintGL()
 {
@@ -124,6 +151,21 @@ void osgQOpenGLWidget::paintGL()
         m_renderer->getCamera()->getGraphicsContext()->setDefaultFboId(
             defaultFramebufferObject());
     }
+
+    // 防御性视口同步：视口尺寸以当前 widget 尺寸 × DPR 为准
+    // （与 QOpenGLWidget FBO 实际像素尺寸同口径），容差 0.5px 吸收
+    // 分数缩放下的浮点取整差异
+    if (m_renderer) {
+        const float dpr = static_cast<float>(devicePixelRatioF());
+        const float expectW = static_cast<float>(width()) * dpr;
+        const float expectH = static_cast<float>(height()) * dpr;
+        const osg::Viewport* vp = m_renderer->getCamera()->getViewport();
+        if (!vp || std::abs(vp->width() - expectW) > 0.5f ||
+                    std::abs(vp->height() - expectH) > 0.5f) {
+            m_renderer->resize(width(), height(), dpr);
+        }
+    }
+
     m_renderer->frame();
 }
 
@@ -351,9 +393,8 @@ void osgQOpenGLWidget::createRenderer()
         m_renderer = new OSGRenderer(_arguments, this);
     }
 
-    // 获取屏幕像素比（用于高 DPI 缩放）
-    QScreen* screen = windowHandle()
-                      && windowHandle()->screen() ? windowHandle()->screen() :
-                      qApp->screens().front();
-    m_renderer->setupOSG(width(), height(), screen->devicePixelRatio());
+    // 以 widget 自身的像素比为准（windowHandle 可能尚未创建，
+    // 取主屏值在多屏缩放不一致时初始化即为错误值）
+    m_renderer->setupOSG(width(), height(),
+                         static_cast<float>(devicePixelRatioF()));
 }

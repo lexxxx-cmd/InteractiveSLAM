@@ -7,6 +7,7 @@
 #include <QAtomicInt>
 
 #include "data/hdl_graph_slam/interactive_graph.hpp"
+#include "data/hdl_graph_slam/bag_importer.hpp"
 #include "backend/progress_reporter.hpp"
 
 /**
@@ -94,6 +95,35 @@ public slots:
      */
     void openMapData(const QUrl& folderUrl);
 
+    /** @brief 当前地图的来源目录（openMapData 打开时的路径，保存时预填用） */
+    QString mapSourceDir() const { return m_mapSourceDir; }
+
+    /**
+     * @brief 打开 ROS1 bag 并解析为标准地图（异步，配置由 YAML 控制）
+     * @param bagUrl      bag 文件 URL
+     * @param yamlPath    导入配置文件路径（config/bag_import.yaml；空则用默认参数）
+     * @param odomTopic   位姿 topic（非空则覆盖 yaml 配置，来自用户选择）
+     * @param cloudTopic  点云 topic（非空则覆盖 yaml 配置，来自用户选择）
+     *
+     * 后台线程运行 BagImporter::import（按 SCPGO 数据流：解析 topic、
+     * 时间同步、关键帧抽稀、外参变换、导出 graph.g2o + keyframes），
+     * 完成后自动调用 openMapData() 加载生成的地图目录。
+     */
+    void openBagFile(const QUrl& bagUrl, const QString& yamlPath,
+                     const QString& odomTopic = QString(),
+                     const QString& cloudTopic = QString());
+
+    /**
+     * @brief 打开 ROS1 bag 并解析为标准地图（异步，配置由调用方提供）
+     * @param bagUrl bag 文件 URL
+     * @param cfg    完整导入配置（由 UI 弹窗编辑后的 BagImportConfig）
+     *
+     * 与 openBagFile(bagUrl, yamlPath, ...) 等价，但直接使用调用方传入的
+     * 完整配置（topic/外参/抽稀/输出），不再从 yaml 读取。输出目录为空时
+     * 使用临时目录。
+     */
+    void openBagFile(const QUrl& bagUrl, const hdl_graph_slam::BagImportConfig& cfg);
+
     /**
      * @brief 关闭当前已加载的地图
      *
@@ -147,12 +177,23 @@ private:
      */
     void onLoadFinished();
 
+    /**
+     * @brief bag 导入完成后的主线程回调
+     *
+     * 由 QFutureWatcher 的 finished 信号触发；成功则自动调用
+     * openMapData() 加载生成的地图目录。
+     */
+    void onBagImportFinished();
+
     // —— 成员变量 ——
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;  ///< 图数据共享指针（线程安全引用）
     ProgressReporter* m_progress;                                ///< 进度报告器（用于显示加载进度）
     QFutureWatcher<std::shared_ptr<hdl_graph_slam::InteractiveGraph>>* m_loadWatcher; ///< 异步加载的 future 监视器
+    QFutureWatcher<hdl_graph_slam::BagImportResult>* m_bagWatcher = nullptr; ///< bag 导入 future 监视器
     bool m_isLoaded = false;         ///< 标记图数据是否已成功加载
     bool m_isLoading = false;        ///< 标记是否正在执行加载操作
+    bool m_isImportingBag = false;   ///< 标记是否正在执行 bag 导入
+    QString m_mapSourceDir;          ///< 当前地图来源目录（openMapData 时记录）
     QAtomicInt m_graphVersion{0};    ///< 图数据版本号（每次加载/关闭时递增，用于渲染器同步检测）
     QString m_lastMessage;           ///< 缓存最后一条日志消息内容
     QString m_lastLogLevel = "INFO"; ///< 缓存最后一条日志消息的级别

@@ -37,8 +37,10 @@
 #include "visualizers/CoordinateAxesVisualizer.h"
 #include "visualizers/GroundGridVisualizer.h"
 #include "visualizers/VertexSphereVisualizer.h"
+#include "visualizers/PointCloudBuilder.h"
 #include "visualizers/KeyframePointCloudVisualizer.h"
 #include "visualizers/EdgeLineVisualizer.h"
+#include "visualizers/SpherePickingHandler.h"
 
 /**
  * @brief 图场景可视化器 —— 场景图构建和管理的中央协调器
@@ -49,12 +51,13 @@
  *   3. 提供可见性开关（顶点、边、点云各自独立控制）
  *   4. 支持点云 Z 轴裁剪和颜色范围控制
  *   5. 支持顶点选择高亮（高亮选中顶点附近的时序邻居帧）
- *   6. 支持回环检测可视化（搜索源为蓝色、候选为绿色）
+ *   6. 支持回环检测可视化（搜索源为深蓝、候选为品红）
  *   7. 支持隐藏指定边（通过 EdgeListPanel 交互）
  *
  * 性能考虑：
  *   - updatePoses() 每帧调用，仅更新球体和边位置
- *   - rebuildPointClouds() 计算密集，仅在优化完成后调用
+ *   - 点云由 PointCloudBuilder 在后台线程构建，commitPointCloudBuild()
+ *     换入场景，不阻塞主线程
  */
 class GraphSceneVisualizer {
 public:
@@ -106,6 +109,21 @@ public:
         m_cloudGroup->setNodeMask(v ? ~0u : 0u);
     }
 
+    /**
+     * @brief 设置原始层（里程计位姿参照底图）开关
+     *
+     * 打开后显示按里程计位姿变换的点云（浅灰半透明），
+     * 与优化层叠加对比优化前后的差异。首次打开会触发点云
+     * 后台重建（生成原始层数据），之后仅做可见性切换。
+     */
+    void setOdomLayerEnabled(bool enabled) {
+        m_odomLayerEnabled = enabled;
+        if (m_cloudViz) m_cloudViz->setOdomLayerVisible(enabled);
+    }
+
+    /** @brief 查询原始层开关状态 */
+    bool odomLayerEnabled() const { return m_odomLayerEnabled; }
+
     /** @brief 设置点云中点的大小 */
     void setPointSize(float size) {
         m_pointSize = size;
@@ -116,6 +134,64 @@ public:
     void setPointOpacity(float opacity) {
         m_pointOpacity = opacity;
         if (m_cloudViz) m_cloudViz->setOpacity(opacity);
+    }
+
+    /** @brief 当前点云透明度（供后台构建时生成一致的颜色） */
+    float getPointOpacity() const { return m_pointOpacity; }
+
+    /**
+     * @brief 设置 LOD 多级渲染开关
+     *
+     * 开启后 PointCloudBuilder 在后台构建第一层降采样（目标点数 N/2），
+     * ViewportWidget 按相机距离自动切换级别或手动固定层级：
+     * 近处全量细节，远处低分辨率轮廓，减少远距离顶点处理量。
+     * 渲染固定为"全量 + 第一层"两种（点预算档位已移除）。
+     */
+    void setLodEnabled(bool enabled) {
+        m_lodEnabled = enabled;
+    }
+
+    /** @brief 查询 LOD 开关状态 */
+    bool lodEnabled() const { return m_lodEnabled; }
+
+    /** @brief 按距离切换点云 LOD 级别（转发到可视化器） */
+    void setLodLevel(int level) {
+        if (m_cloudViz) m_cloudViz->setLodLevel(level);
+    }
+
+    /**
+     * @brief 渐进上传推进（每帧由 ViewportWidget::updateScene 调用）
+     *
+     * 分块点云提交后逐帧显示一块，把一次超大 VBO 上传摊成多次小块上传，
+     * 避免"后台构建完成换回主线程那一帧"的 GPU 卡顿。
+     */
+    void advanceChunkUpload() {
+        if (m_cloudViz) m_cloudViz->advanceChunkUpload();
+    }
+
+    /** @brief 是否仍有分块在渐进上传中（点云渲染是否完成） */
+    bool chunkUploadPending() const {
+        return m_cloudViz ? m_cloudViz->chunkUploadPending() : false;
+    }
+
+    /** @brief 当前激活的 LOD 级别 */
+    int currentLodLevel() const {
+        return m_cloudViz ? m_cloudViz->currentLodLevel() : 0;
+    }
+
+    /** @brief 点云 LOD 级别总数（≥1） */
+    int lodLevelCount() const {
+        return m_cloudViz ? m_cloudViz->lodLevelCount() : 1;
+    }
+
+    /** @brief 点云世界包围球中心（供相机距离计算） */
+    Eigen::Vector3d boundsCenter() const {
+        return m_cloudViz ? m_cloudViz->boundsCenter() : Eigen::Vector3d::Zero();
+    }
+
+    /** @brief 点云世界包围球半径（供相机距离计算） */
+    double boundsRadius() const {
+        return m_cloudViz ? m_cloudViz->boundsRadius() : 0.0;
     }
 
     // ========================================================================
@@ -170,6 +246,48 @@ public:
         }
     }
 
+    /** @brief 设置是否绘制视锥体局部坐标轴（调试用，立即重建标记） */
+    void setDrawLocalAxes(bool on) {
+        if (m_drawLocalAxes == on) return;
+        m_drawLocalAxes = on;
+        if (m_sphereViz && m_lastGraph) {
+            rebuildSpheres(m_lastGraph);
+        }
+    }
+
+    /** @brief 查询局部坐标轴开关状态 */
+    bool drawLocalAxes() const { return m_drawLocalAxes; }
+
+    /** @brief 设置顶点位姿标记的整体不透明度（0.0 全透明 ~ 1.0 不透明） */
+    void setVertexOpacity(float opacity) {
+        m_vertexOpacity = opacity;
+        m_focusedVertexId = -1;  // 手动调透明度视为退出聚焦淡化状态
+        if (m_sphereViz) {
+            m_sphereViz->setOpacity(opacity);
+        }
+    }
+
+    /**
+     * @brief 双击聚焦淡化：全体标记压到最低不透明度，目标标记稍高
+     *
+     * 再次调用传入新 ID 时自动切换目标；传 -1（如双击空白处）恢复
+     * 用户设置的整体不透明度。
+     *
+     * @param id 聚焦的顶点 ID（-1 = 取消聚焦淡化）
+     */
+    void setFocusedVertex(long id) {
+        if (!m_sphereViz) return;
+        if (id < 0) {
+            // 取消：恢复用户设置的整体不透明度
+            m_focusedVertexId = -1;
+            m_sphereViz->setOpacity(m_vertexOpacity);
+            return;
+        }
+        m_focusedVertexId = id;
+        m_sphereViz->setOpacity(kFocusDimOpacity);
+        m_sphereViz->updateSphereOpacity(id, kFocusTargetOpacity);
+    }
+
     /**
      * @brief 设置渲染采样步长
      *
@@ -207,10 +325,10 @@ public:
     int sampleStride() const { return m_sampleStride; }
 
     /**
-     * @brief 获取球体中心位置缓存（用于鼠标拾取检测）
-     * @return (球心位置, 顶点ID) 对列表
+     * @brief 获取可拾取标记缓存（用于鼠标拾取检测）
+     * @return (标记中心, 顶点ID, 拾取半径) 列表
      */
-    const std::vector<std::pair<osg::Vec3d, long>>& sphereCenters() const {
+    const std::vector<PickableCenter>& sphereCenters() const {
         return m_sphereCenters;
     }
 
@@ -232,8 +350,8 @@ public:
     /**
      * @brief 设置选中的顶点 ID
      *
-     * 选中顶点后，该顶点的球体变为橙色，同时其时序邻居帧的
-     * 点云会高亮为白色。
+     * 选中顶点后，该顶点的视锥体放大为 2 倍并变为红色系，
+     * 同时其时序邻居帧的点云会高亮为白色。
      *
      * @param id 顶点 ID（设为 -1 取消选择）
      */
@@ -248,35 +366,152 @@ public:
     long selectedVertex() const { return m_selectedVertexId; }
 
     /**
-     * @brief 轻量级播放高亮（不重建球体几何体）
+     * @brief 轻量级播放高亮（不重建视锥体几何体）
      *
-     * 用于播放轴功能，在滑块拖动或自动播放时调用。
-     * 仅更新两个球体的颜色数组（上一个恢复红色，当前变橙色）
-     * + 点云高亮，不触发完整的球体几何体重建。
+     * 播放通道的逻辑只有三步：更新 m_playbackPrevId 状态，然后对
+     * "上一帧"与"当前帧"两个标记按 markerStyleFor() 重算并落地样式
+     * （颜色 + 尺寸 + 拾取半径一次同步生效），最后更新点云高亮。
      *
-     * 与 setSelectedVertex() 独立管理，两者互不干扰。
+     * 样式由"状态 → 样式"的纯函数唯一推导（markerStyleFor 是唯一
+     * 事实来源，与 rebuildSpheres 共用），因此任何状态组合
+     * （普通/播放/选中/回环）下颜色与尺寸都不可能错位，也无需
+     * 针对选中帧、恢复色等写特判分支——上一帧恢复成什么样完全由
+     * 它当前的状态决定。
      *
-     * @param id 顶点 ID（设为 -1 取消高亮）
+     * 三种视觉状态：
+     *   - 普通帧：绿色、1 倍
+     *   - 播放高亮：红色、1 倍（连续播放中的小高亮）
+     *   - 选中帧：红色、2 倍（仅存在于无播放会话时，见下方接管语义）
+     *
+     * 播放通道接管标记高亮：会话开始/推进（id >= 0）时清除上一轮
+     * 遗留的选中高亮（按普通态轻量恢复，不触发重建），避免旧的大红
+     * 标记残留在场景中、播放划过它时被二次放大。会话清理（id = -1）
+     * 不动选中态——暂停路径随后的 selectVertex() 会建立新选中。
+     *
+     * 与 setSelectedVertex() 分工：播放通道只在播放会话期间生效，
+     * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
+     * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
+     *
+     * @param id 顶点 ID（-1 = 清理播放通道：恢复上一个播放帧的视觉样式
+     *            并清空累积留存集合，不动其他点云高亮，避免抹掉刚建立的
+     *            选择高亮）
      */
     void highlightPlaybackVertex(long id) {
-        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);   // 红色 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);  // 橙色 —— 选中
+        long prev = m_playbackPrevId;
+        long oldSelected = m_selectedVertexId;
+        m_playbackPrevId = id;  // 先更新状态，再由状态推导标记样式
+        if (id >= 0) m_selectedVertexId = -1;  // 播放接管：清除旧选中
 
-        // 恢复上一个播放高亮球体为默认红色
-        if (m_playbackPrevId >= 0 && m_sphereViz) {
-            m_sphereViz->updateSphereColor(m_playbackPrevId, defaultColor);
-        }
-        // 设置新球体为橙色
-        if (id >= 0 && m_sphereViz) {
-            m_sphereViz->updateSphereColor(id, selectedColor);
-        }
-        m_playbackPrevId = id;
+        applyMarkerState(oldSelected);  // 旧选中恢复普通态（若已被清除）
+        applyMarkerState(prev);
+        applyMarkerState(id);
 
-        // 点云高亮（已很高效，只更新颜色数组）
+        // 点云高亮（已很高效，只更新颜色数组）；
+        // id < 0 清理播放通道：会话结束，累积留存集合一并清空
+        //（随后的 selectVertex 会建立新的选中高亮，不受影响）
+        if (id < 0) {
+            clearRetainedHighlight();
+            return;
+        }
         if (m_cloudViz) {
-            m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
+            // 累积模式：历史帧的时序邻居保留在高亮集合中（不随播放消失）
+            if (m_playbackRetain) {
+                if (prev >= 0) {
+                    for (long nid : getTemporalNeighbors(prev))
+                        m_retainedHighlightIds.insert(nid);
+                }
+                std::set<long> combined = m_retainedHighlightIds;
+                for (long nid : getTemporalNeighbors(id))
+                    combined.insert(nid);
+                m_cloudViz->recolorHighlight(combined);
+            } else {
+                m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
+            }
         }
     }
+
+    /**
+     * @brief 设置播放累积高亮开关（"播放包点云留存"）
+     *
+     * 打开后，播放过程中每帧的时序邻居点云保留为白色高亮，
+     * 历史帧不随播放推进消失，形成"已播放区域留存"的视觉效果。
+     * 关闭或会话结束（highlightPlaybackVertex(-1)）时清空留存集合。
+     *
+     * @param retain true = 累积模式；false = 仅当前帧高亮（默认）
+     */
+    void setPlaybackRetain(bool retain) {
+        m_playbackRetain = retain;
+        if (!retain && m_cloudViz) {
+            // 关闭时若正处于播放会话，立即恢复为仅当前帧高亮
+            if (m_playbackPrevId >= 0) {
+                m_cloudViz->recolorHighlight(getTemporalNeighbors(m_playbackPrevId));
+            }
+            m_retainedHighlightIds.clear();
+        }
+    }
+
+    /** @brief 查询播放累积高亮开关状态 */
+    bool playbackRetain() const { return m_playbackRetain; }
+
+private:
+    /** @brief 清空累积高亮留存集合（会话结束路径调用） */
+    void clearRetainedHighlight() { m_retainedHighlightIds.clear(); }
+
+    /**
+     * @brief 单个标记的视觉样式（颜色 + 尺寸缩放）
+     */
+    struct MarkerStyle {
+        osg::Vec4 color;  ///< 基色（着色层再做线框提亮与纵向渐变）
+        float scale;      ///< 尺寸缩放（1 = 全局默认，2 = 选中放大）
+    };
+
+    /**
+     * @brief 单个标记的视觉样式 = f(交互状态) —— 唯一事实来源
+     *
+     * rebuildSpheres（全量重建）与 applyMarkerState（轻量路径）都从
+     * 这里取样式，两条路径的视觉语义由同一份代码保证，永不脱节。
+     * 优先级：选中 > 回环源 > 回环候选 > 播放高亮 > 默认。
+     */
+    MarkerStyle markerStyleFor(long id) const {
+        const osg::Vec4 defaultColor(0.25f, 0.80f, 0.30f, 1.0f);  // 绿 —— 默认
+        const osg::Vec4 selectedColor(1.0f, 0.20f, 0.20f, 1.0f);  // 红 —— 选中/播放高亮
+        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f);  // 深蓝 —— 回环搜索源
+        const osg::Vec4 loopCandColor(1.0f, 0.25f, 0.75f, 1.0f);  // 品红 —— 回环候选
+        constexpr float kNormalScale   = 1.0f;
+        constexpr float kSelectedScale = 2.0f;
+
+        if (id == m_selectedVertexId)     return {selectedColor, kSelectedScale};
+        if (id == m_loopSourceId)         return {loopSourceColor, kNormalScale};
+        if (m_loopCandidateIds.count(id)) return {loopCandColor, kNormalScale};
+        if (id == m_playbackPrevId)       return {selectedColor, kNormalScale};
+        return {defaultColor, kNormalScale};
+    }
+
+    /**
+     * @brief 按当前交互状态把某标记的样式落地到场景（轻量路径）
+     *
+     * 颜色、尺寸、拾取半径三者一次同步更新；id < 0 或标记不存在时
+     * 静默跳过。配合"先改状态、后调本函数"的次序使用。
+     */
+    void applyMarkerState(long id) {
+        if (id < 0 || !m_sphereViz) return;
+        const MarkerStyle st = markerStyleFor(id);
+        m_sphereViz->updateSphereColor(id, st.color);
+        m_sphereViz->updateSphereScale(id, st.scale);
+        updatePickRadius(id, st.scale);
+    }
+
+    /** @brief 同步可拾取缓存中指定标记的拾取半径（与样式缩放成比例） */
+    void updatePickRadius(long id, float scale) {
+        for (auto& c : m_sphereCenters) {
+            if (c.vertexId == id) {
+                c.pickRadius = 2.5f * m_sphereRadius * scale;
+                break;
+            }
+        }
+    }
+
+public:
 
     /**
      * @brief 设置高亮窗口半宽
@@ -301,7 +536,8 @@ public:
      * 构建顺序：
      *   1. 清除旧的场景数据
      *   2. 重建顶点球体（世界坐标系）
-     *   3. 重建合并点云（世界坐标系）
+     *   3. 点云 —— 由 ViewportWidget 通过 PointCloudBuilder 在后台线程
+     *      构建，完成后经 commitPointCloudBuild() 换入场景（本方法不阻塞）
      *   4. 重建边线段（世界坐标系，按来源着色）
      *
      * @param graph 交互式图数据共享指针
@@ -319,8 +555,8 @@ public:
         rebuildSpheres(graph);
         m_sphereGroup->addChild(m_sphereViz->getNode());
 
-        // 2. 点云 —— 世界坐标系，所有关键帧点云合并
-        rebuildPointClouds(graph);
+        // 2. 点云 —— 后台异步构建（见 ViewportWidget::rebuildPointClouds），
+        //    完成后 commitPointCloudBuild() 换入，此处不阻塞主线程
 
         // 3. 边线 —— 世界坐标系线段，按 EdgeSource 着色
         m_edgeLineViz = std::make_unique<EdgeLineVisualizer>();
@@ -333,8 +569,8 @@ public:
     /**
      * @brief 每帧更新球体和边线位置（不更新点云）
      *
-     * 点云重建计算密集，需要在 CPU 上进行点变换和 GPU 上传，
-     * 因此仅在优化完成后通过 rebuildPointClouds() 显式触发。
+     * 点云重建计算密集，由 PointCloudBuilder 在后台线程构建，
+     * 完成后通过 commitPointCloudBuild() 换入（见 ViewportWidget）。
      *
      * @param graph 最新的图数据共享指针
      */
@@ -373,25 +609,25 @@ public:
     }
 
     /**
-     * @brief 重建合并后的世界坐标系点云
+     * @brief 换入后台构建完成的点云数据（主线程调用）
      *
-     * 这是一个计算密集型操作（CPU 点变换 + GPU 上传所有点），
-     * 仅在图优化完成后调用，不应每帧执行。
+     * 由 ViewportWidget 在 PointCloudBuilder 后台构建完成后调用。
+     * 点云数据经 KeyframePointCloudVisualizer::commitBuild() 以 swap
+     * 方式换入（旧几何体持续渲染到新数据就绪，避免闪烁/撕裂），
+     * 然后恢复用户当前的 Z 轴裁剪、颜色范围设置与选中/播放高亮。
      *
-     * 此方法会在清除前保存用户的 Z 轴裁剪和颜色范围设置，
-     * 在重建完成后恢复。
-     *
-     * @param graph 交互式图数据共享指针
+     * @param result 后台构建结果（右值，内容被交换移入）
      */
-    void rebuildPointClouds(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
-        if (!graph) return;
-
+    void commitPointCloudBuild(hdl_graph_slam::PointCloudBuildResult&& result) {
         // 首次调用时创建点云可视化器
         if (!m_cloudViz) {
             m_cloudViz = std::make_unique<KeyframePointCloudVisualizer>();
             m_cloudViz->setPointSize(m_pointSize);
             m_cloudViz->setOpacity(m_pointOpacity);
             m_cloudGroup->addChild(m_cloudViz->getNode());
+            // 原始层 geode 挂到同一组（可见性由 geode 自身 NodeMask 控制）
+            m_cloudGroup->addChild(m_cloudViz->getOdomNode());
+            m_cloudViz->setOdomLayerVisible(m_odomLayerEnabled);
         }
 
         // 保存用户当前的 Z 轴裁剪和颜色范围设置
@@ -401,28 +637,38 @@ public:
         bool  savedAutoColor = m_cloudViz->isAutoColorRange();
         float savedColorMin  = m_cloudViz->getColorZMin();
         float savedColorMax  = m_cloudViz->getColorZMax();
+        bool  firstBuild     = !m_cloudViz->isClipRangeInitialized();
 
-        // 清除旧点云并重新添加所有关键帧的点云
-        m_cloudViz->clear();
-        for (auto& [id, kf] : graph->keyframes) {
-            auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
-            if (!v || !kf->cloud || kf->cloud->empty()) continue;
-            m_cloudViz->appendCloud(kf->cloud, v->estimate(), id);
-        }
-        m_cloudViz->finish();
+        // 换入新数据
+        m_cloudViz->commitBuild(std::move(result));
 
         // 恢复用户的 Z 轴裁剪和颜色范围设置
         m_cloudViz->setZClipping(savedZClip);
-        m_cloudViz->setZClipRange(savedClipMin, savedClipMax);
-        if (!savedAutoColor) {
+        // 首次构建时裁剪范围已由 commitBuild 初始化为数据范围，无需覆盖
+        if (!firstBuild) {
+            m_cloudViz->setZClipRange(savedClipMin, savedClipMax);
+        }
+        if (savedAutoColor) {
+            m_cloudViz->setAutoColorRange(true);
+        } else {
             m_cloudViz->setColorZRange(savedColorMin, savedColorMax);
         }
 
-        // 如果之前有选中的顶点，重新应用高亮
+        // 恢复选中/播放高亮；无高亮状态时清除高亮并恢复默认着色
         if (m_selectedVertexId >= 0) {
             m_cloudViz->recolorHighlight(getTemporalNeighbors(m_selectedVertexId));
+        } else if (m_playbackPrevId >= 0) {
+            m_cloudViz->recolorHighlight(getTemporalNeighbors(m_playbackPrevId));
+        } else {
+            m_cloudViz->clearHighlight();
         }
     }
+
+    /** @brief 是否已有点云可视化器（是否有已构建/构建中的点云） */
+    bool hasPointCloud() const { return m_cloudViz != nullptr; }
+
+    /** @brief 最近一次构建场景所用的图（供后台点云构建使用） */
+    std::shared_ptr<hdl_graph_slam::InteractiveGraph> lastGraph() const { return m_lastGraph; }
 
     /** @brief 清除整个场景 */
     void clear() {
@@ -449,17 +695,21 @@ private:
     }
 
     /**
-     * @brief 重建顶点球体
+     * @brief 重建顶点位姿标记
      *
-     * 为每个关键帧创建一个球体，位置在顶点的平移估计值处。
-     * 球体颜色取决于状态：
-     *   - 默认：红色
-     *   - 选中：橙色
-     *   - 回环搜索源：蓝色
-     *   - 回环候选：绿色
+     * 为每个关键帧创建一个相机视锥体标记：锥顶位于顶点平移估计值
+     * （相机光心），方向取关键帧局部位姿的旋转
+     * （右-下-前坐标系，X右/Y下/Z前），沿局部 +Z（前方）展开。
+     * 颜色与尺寸由 markerStyleFor(id) 统一推导（唯一事实来源，
+     * 与轻量路径 applyMarkerState 同源）：
+     *   - 普通顶点：绿色系、1 倍
+     *   - 播放高亮：红色系、1 倍
+     *   - 选中：红色系、2 倍
+     *   - 回环搜索源：深蓝色
+     *   - 回环候选：品红
      *
-     * 当采样步长 > 1 时，仅渲染 id % stride == 0 的球体，
-     * 但特殊球体（选中、回环）始终渲染。
+     * 当采样步长 > 1 时，仅渲染 id % stride == 0 的标记，
+     * 但特殊标记（选中、回环）始终渲染。
      *
      * @param graph 交互式图数据
      */
@@ -469,53 +719,56 @@ private:
         }
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
+        m_sphereViz->setOpacity(m_focusedVertexId >= 0 ? kFocusDimOpacity
+                                                       : m_vertexOpacity);
+        m_sphereViz->setDrawLocalAxes(m_drawLocalAxes);
 
-        // 清空并预分配球心缓存
+        // 清空并预标记中心缓存
         m_sphereCenters.clear();
         m_sphereCenters.reserve(graph->keyframes.size());
 
-        // 定义不同状态的球体颜色
-        const osg::Vec4 defaultColor(1.0f, 0.0f, 0.0f, 1.0f);    // 红色 —— 默认
-        const osg::Vec4 selectedColor(1.0f, 0.8f, 0.0f, 1.0f);   // 橙色 —— 选中
-        const osg::Vec4 loopSourceColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色 —— 回环搜索源
-        const osg::Vec4 loopCandColor(0.0f, 1.0f, 0.0f, 1.0f);   // 绿色 —— 回环候选
-
-        // 遍历所有关键帧，创建顶点球体
+        // 遍历所有关键帧，创建顶点位姿标记
         for (auto& [id, kf] : graph->keyframes) {
             auto* v = dynamic_cast<g2o::VertexSE3*>(kf->node);
             if (!v) continue;
 
             // 采样过滤：仅渲染 id % stride == 0 的关键帧
-            // 但特殊球体（选中、播放高亮、回环源、回环候选）始终渲染，绕过采样
+            // 但特殊标记（选中、播放高亮、回环源、回环候选）始终渲染，绕过采样
             bool isSpecial = (id == m_selectedVertexId ||
                               id == m_playbackPrevId ||
                               id == m_loopSourceId ||
                               m_loopCandidateIds.count(id));
             if (m_sampleStride > 1 && !isSpecial && (id % m_sampleStride != 0)) continue;
 
-            Eigen::Vector3d pos = v->estimate().translation();
+            Eigen::Isometry3d pose = v->estimate();
+            Eigen::Vector3d pos = pose.translation();
             osg::Vec3d center(pos.x(), pos.y(), pos.z());
 
-            // 缓存球心位置（用于鼠标拾取）—— 仅采样后的球体
-            m_sphereCenters.emplace_back(center, id);
+            // 关键帧局部位姿的旋转（右-下-前：X右/Y下/Z前），
+            // 标记尖端沿局部 +Z（前方）方向
+            Eigen::Matrix3f rot = pose.linear().cast<float>();
 
-            // 根据状态选择颜色和半径
-            osg::Vec4 color = defaultColor;
-            float customRadius = -1.0f;  // < 0 表示使用全局默认半径
-            if (id == m_selectedVertexId) {
-                color = selectedColor;
-                customRadius = m_sphereRadius * 2.0f;
-            } else if (id == m_loopSourceId) {
-                color = loopSourceColor;
-            } else if (m_loopCandidateIds.count(id)) {
-                color = loopCandColor;
-            } else if (id == m_playbackPrevId) {
-                // 播放轴高亮球体同样放大 2 倍（仅在完整重建时生效）
-                // 轻量级 highlightPlaybackVertex 路径仅更新颜色，不做几何重建
-                color = selectedColor;
-                customRadius = m_sphereRadius * 2.0f;
-            }
-            m_sphereViz->appendSphere(center, color, id, customRadius);
+            // 颜色和尺寸由统一的状态→样式映射给出（与轻量路径
+            // applyMarkerState 同源，重建后所有标记样式即当前状态）；
+            // scale > 1 的选中帧按比例放大几何体
+            const MarkerStyle style = markerStyleFor(id);
+            float customRadius = (style.scale > 1.0f)
+                                     ? m_sphereRadius * style.scale
+                                     : -1.0f;  // < 0 表示使用全局默认尺寸
+
+            // 缓存可拾取标记（用于鼠标拾取）—— 仅采样后的标记；
+            // 视锥体远平面四角距锥顶最远约 2.3 倍特征尺寸
+            // （深度 2R + 侧向偏移），拾取半径取 2.5 倍保证整个
+            // 视锥体可见部分均可点中；高亮放大的标记（2 倍尺寸）
+            // 自动获得成比例的拾取半径
+            float renderRadius = (customRadius > 0.0f) ? customRadius : m_sphereRadius;
+            m_sphereCenters.push_back({center, id, 2.5f * renderRadius});
+
+            m_sphereViz->appendFrustum(center, rot, style.color, id, customRadius);
+        }
+        // 聚焦淡化状态：目标标记在重建后仍保持稍高的不透明度
+        if (m_focusedVertexId >= 0) {
+            m_sphereViz->updateSphereOpacity(m_focusedVertexId, kFocusTargetOpacity);
         }
         m_sphereViz->finish();
     }
@@ -534,6 +787,13 @@ private:
         m_cloudViz.reset();
         m_edgeLineViz.reset();
         m_hasGraph = false;
+
+        // 重置交互状态：顶点 ID 通常从 0 开始，旧地图的选中/播放/聚焦
+        // ID 残留到新地图几乎必然命中某个无辜顶点，导致其顶着
+        // 红色 2 倍高亮 / 聚焦淡化出现
+        m_selectedVertexId = -1;
+        m_playbackPrevId   = -1;
+        m_focusedVertexId  = -1;
     }
 
     /**
@@ -587,7 +847,7 @@ private:
 
     // —— 缓存数据 ——
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_lastGraph;  ///< 缓存的图引用（用于实时参数更改）
-    std::vector<std::pair<osg::Vec3d, long>> m_sphereCenters;  ///< 球心缓存（与 VBO 并行，重建时刷新）
+    std::vector<PickableCenter> m_sphereCenters;  ///< 可拾取标记缓存（与 VBO 并行，重建时刷新）
     mutable std::vector<EdgeSegment> m_emptySegments;  ///< 无边时的空向量返回（备用）
 
     // —— 交互状态 ——
@@ -596,7 +856,12 @@ private:
     std::set<long> m_loopCandidateIds;     ///< 回环检测候选顶点 ID 集合
     long m_selectedVertexId = -1;          ///< 当前选中的顶点 ID（-1 表示无选中）
     long m_playbackPrevId = -1;            ///< 播放轴上一个高亮的顶点 ID（用于恢复颜色）
+    long m_focusedVertexId = -1;           ///< 双击聚焦淡化的目标顶点 ID（-1 = 未聚焦）
     int  m_highlightWindowHalf = 1;        ///< 高亮窗口半宽（与 m_submapWindowHalfSize 一致）
+
+    // —— 聚焦淡化参数 ——
+    static constexpr float kFocusDimOpacity    = 0.10f;  ///< 聚焦时全体标记的最低不透明度
+    static constexpr float kFocusTargetOpacity = 0.35f;  ///< 聚焦目标标记的稍高不透明度
 
     // —— 渲染采样 ——
     int  m_sampleStride = 1;               ///< 渲染采样步长（1=全部, N=每N帧渲染1个球体）
@@ -605,8 +870,14 @@ private:
     // —— 状态配置 ——
     bool m_hasGraph    = false;   ///< 是否有已加载的图数据
     bool m_drawClouds  = true;    ///< 是否绘制点云
-    float m_sphereRadius  = 1.0f; ///< 球体半径
+    bool m_drawLocalAxes = false;  ///< 是否绘制视锥体局部坐标轴（调试用）
+    float m_sphereRadius  = 0.1f; ///< 球体半径
+    float m_vertexOpacity = 1.0f; ///< 顶点位姿标记不透明度（1.0 不透明）
     float m_edgeWidth     = 2.0f; ///< 边线宽度（像素）
-    float m_pointSize     = 3.0f; ///< 点云点大小（像素）
+    float m_pointSize     = 2.0f; ///< 点云点大小（像素）
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
+    bool  m_lodEnabled    = true; ///< LOD 渲染开关（渲染固定为全量 + 第一层两种）
+    bool  m_odomLayerEnabled = false; ///< 原始层（里程计位姿参照底图）开关（默认关闭）
+    bool  m_playbackRetain   = false; ///< 播放累积高亮开关（历史帧点云留存）
+    std::set<long> m_retainedHighlightIds; ///< 累积模式下已播放帧的留存高亮集合
 };

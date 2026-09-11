@@ -55,14 +55,7 @@ InteractiveGraph::InteractiveGraph()
     anchor_edge = nullptr;
 }
 
-/**
- * @brief 析构函数：等待后台优化线程结束
- */
-InteractiveGraph::~InteractiveGraph() {
-    if (optimization_thread.joinable()) {
-        optimization_thread.join();
-    }
-}
+InteractiveGraph::~InteractiveGraph() = default;
 
 /**
  * @brief 从目录加载完整的地图数据
@@ -381,65 +374,6 @@ void InteractiveGraph::optimize(int num_iterations) {
 
     // 恢复 cerr 重定向
     std::cerr.rdbuf(cerr_buf);
-}
-
-/**
- * @brief 在后台线程中执行图优化（异步）
- * @param num_iterations 优化迭代次数，负数使用默认值
- *
- * 与 optimize() 的主要区别：
- *   - 在独立线程中执行，不阻塞调用者（通常为 UI 线程）
- *   - 使用 optimization_mutex 保护优化过程的数据一致性
- *   - 每次调用前加入前一个后台线程
- *   - 优化日志同样被捕获到 optimization_stream
- */
-void InteractiveGraph::optimize_background(int num_iterations) {
-    // 等待之前的后台优化线程结束
-    if (optimization_thread.joinable()) {
-        optimization_thread.join();
-    }
-
-    // 更新锚点节点估计值
-    if (anchor_node) {
-        g2o::VertexSE3* first_keyframe =
-            dynamic_cast<g2o::VertexSE3*>(anchor_edge->vertices()[1]);
-        if (first_keyframe == nullptr) {
-            std::cerr << "failed to cast the first keyframe to VertexSE3" << std::endl;
-        } else {
-            anchor_node->setEstimate(first_keyframe->estimate());
-        }
-    }
-
-    // 清空优化日志流
-    optimization_stream.str("");
-    optimization_stream.clear();
-
-    // 定义后台线程任务
-    auto task = [this, num_iterations]() {
-        std::streambuf* cerr_buf = std::cerr.rdbuf();
-        std::cerr.rdbuf(optimization_stream.rdbuf());
-
-        std::lock_guard<std::mutex> lock(optimization_mutex);
-        g2o::SparseOptimizer* g = dynamic_cast<g2o::SparseOptimizer*>(this->graph.get());
-        auto t1 = std::chrono::high_resolution_clock::now();
-
-        int max_iterations = num_iterations;
-        if (num_iterations < 0) {
-            max_iterations = params.param<int>("g2o_solver_num_iterations", 64);
-        }
-
-        chi2_before = g->chi2();
-        iterations = GraphSLAM::optimize(max_iterations);
-        chi2_after = g->chi2();
-
-        auto t2 = std::chrono::high_resolution_clock::now();
-        elapsed_time_msec =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000000.0;
-
-        std::cerr.rdbuf(cerr_buf);
-    };
-
-    optimization_thread = std::thread(task);
 }
 
 /**

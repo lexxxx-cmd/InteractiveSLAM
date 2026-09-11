@@ -24,10 +24,6 @@
 namespace g2o {
 class VertexSE3;        ///< SE3 位姿顶点（前向声明）
 class EdgeSE3;          ///< SE3 相对位姿边（前向声明）
-class EdgeSE3PriorXY;   ///< XY 坐标先验边（前向声明）
-class EdgeSE3PriorXYZ;  ///< XYZ 坐标先验边（前向声明）
-class EdgeSE3PriorVec;  ///< 方向向量先验边（前向声明）
-class EdgeSE3PriorQuat; ///< 四元数姿态先验边（前向声明）
 class RobustKernelFactory;  ///< 鲁棒核函数工厂（前向声明）
 }  // namespace g2o
 
@@ -109,52 +105,6 @@ public:
     g2o::EdgeSE3* add_se3_edge(g2o::VertexSE3* v1, g2o::VertexSE3* v2,
                                const Eigen::Isometry3d& relative_pose,
                                const Eigen::MatrixXd& information_matrix);
-
-    /**
-     * @brief 添加 XY 坐标先验边（约束顶点的水平位置）
-     * @param v_se3             SE3 顶点
-     * @param xy                先验的 XY 坐标
-     * @param information_matrix 信息矩阵
-     * @return 创建的 XY 先验边指针
-     */
-    g2o::EdgeSE3PriorXY* add_se3_prior_xy_edge(g2o::VertexSE3* v_se3,
-                                                const Eigen::Vector2d& xy,
-                                                const Eigen::MatrixXd& information_matrix);
-
-    /**
-     * @brief 添加 XYZ 坐标先验边（约束顶点的三维位置）
-     * @param v_se3             SE3 顶点
-     * @param xyz               先验的三维坐标
-     * @param information_matrix 信息矩阵
-     * @return 创建的 XYZ 先验边指针
-     */
-    g2o::EdgeSE3PriorXYZ* add_se3_prior_xyz_edge(g2o::VertexSE3* v_se3,
-                                                  const Eigen::Vector3d& xyz,
-                                                  const Eigen::MatrixXd& information_matrix);
-
-    /**
-     * @brief 添加四元数姿态先验边（约束顶点的朝向）
-     * @param v_se3             SE3 顶点
-     * @param quat              先验的姿态四元数
-     * @param information_matrix 信息矩阵
-     * @return 创建的四元数先验边指针
-     */
-    g2o::EdgeSE3PriorQuat* add_se3_prior_quat_edge(g2o::VertexSE3* v_se3,
-                                                    const Eigen::Quaterniond& quat,
-                                                    const Eigen::MatrixXd& information_matrix);
-
-    /**
-     * @brief 添加方向向量先验边（约束顶点的某个方向）
-     * @param v_se3             SE3 顶点
-     * @param direction         方向向量
-     * @param measurement       测量值
-     * @param information_matrix 信息矩阵
-     * @return 创建的方向向量先验边指针
-     */
-    g2o::EdgeSE3PriorVec* add_se3_prior_vec_edge(g2o::VertexSE3* v_se3,
-                                                  const Eigen::Vector3d& direction,
-                                                  const Eigen::Vector3d& measurement,
-                                                  const Eigen::MatrixXd& information_matrix);
 
     /**
      * @brief 为边添加鲁棒核函数

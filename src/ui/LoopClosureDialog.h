@@ -4,7 +4,7 @@
  *
  * LoopClosureDialog 是用于手动创建闭环的模态对话框。
  * 用户右键选择两个顶点后，该对话框允许预览相对位姿、调整位姿、
- * 执行自动对齐（FPFH）或扫描匹配（ICP/GICP/NDT），
+ * 执行扫描匹配（ICP/GICP/NDT）或手动调节，
  * 最后将闭环边提交到图优化系统中。
  *
  * 操作流程：
@@ -12,7 +12,7 @@
  *   2. MainWindow 合并 A 和 B 周围相邻关键帧的点云
  *   3. 用户右键选择顶点 B → "Loop End"（MainWindow 打开此对话框）
  *   4. 对话框显示相对位姿预览、适应度分数、调整控件
- *   5. 用户可自动对齐（FPFH）、扫描匹配（ICP/GICP/NDT）或手动调节
+ *   5. 用户可扫描匹配（ICP/GICP/NDT）或手动调节
  *   6. "添加边" 提交相对位姿到图谱；"取消" 放弃操作
  */
 
@@ -25,7 +25,6 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QFutureWatcher>
-#include <atomic>
 #include <memory>
 #include <Eigen/Geometry>
 #include <pcl/point_types.h>
@@ -62,7 +61,7 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr mergeAdjacentClouds(
  *   2. MainWindow 合并 A 和 B 周围相邻关键帧的点云
  *   3. 用户右键选择顶点 B → "Loop End"（MainWindow 打开此对话框）
  *   4. 对话框显示相对位姿预览、适应度分数、调整控件
- *   5. 用户可自动对齐（FPFH）、扫描匹配（ICP/GICP/NDT）或手动调节
+ *   5. 用户可扫描匹配（ICP/GICP/NDT）或手动调节
  *   6. "添加边" 提交相对位姿到图谱；"取消" 放弃操作
  *
  * @param beginCloud  起点顶点的合并点云（关键帧局部坐标）
@@ -94,13 +93,11 @@ private slots:
     void onStepButton(int axis, bool isRotation, int direction);  ///< ◀/▶ 步进按钮
 
     // --- 按钮 ---
-    void onAutoAlign();       ///< FPFH 全局配准
     void onScanMatching();    ///< ICP/GICP/NDT 局部配准
     void onReset();           ///< 重置位姿到初始值
     void onAddEdge();         ///< 添加闭环边到图谱
 
     // --- 配准线程完成 ---
-    void onFpfhAlignFinished();     ///< FPFH 配准完成回调
     void onScanMatchFinished();     ///< 扫描匹配完成回调
 
 private:
@@ -115,11 +112,6 @@ private:
      * @param isRotation true=绕局部轴旋转, false=沿局部轴平移
      */
     void applySliderDelta(int axis, double delta, bool isRotation);
-
-    // FPFH 自动对齐（后台线程运行）
-    void runFpfhAlign(double normalRadius, double searchRadius,
-                      int maxIter, int numSamples, int corrRandomness,
-                      double similarityThresh, double maxCorrDist, double inlierFrac);
 
     // 扫描匹配（后台线程运行）
     void runScanMatching(int methodIndex, int maxIterations,
@@ -147,7 +139,6 @@ private:
     QComboBox* m_stepCombo;              ///< 步长档位选择器
     // +/- 按钮数组：[axis][0]=减按钮, [axis][1]=加按钮
     QPushButton* m_stepBtns[6][2];       ///< 六轴步进按钮：PX, PY, PZ, RX, RY, RZ
-    QPushButton* m_autoAlignBtn;         ///< 自动对齐按钮
     QPushButton* m_scanMatchBtn;         ///< 扫描匹配按钮
     QPushButton* m_resetBtn;             ///< 重置按钮
     QPushButton* m_addEdgeBtn;           ///< 添加边按钮
@@ -156,10 +147,6 @@ private:
     QLabel* m_statusLabel;               ///< 状态提示标签
 
     // === 线程相关 ===
-    QFutureWatcher<Eigen::Isometry3d>* m_fpfhWatcher = nullptr;     ///< FPFH 异步结果监听器
-    std::atomic_int m_fpfhProgress{0};  ///< FPFH 进度（0-5，用于进度条阶段）
-    bool m_fpfhRunning = false;         ///< FPFH 是否正在运行
-
     QFutureWatcher<Eigen::Isometry3d>* m_scanMatchWatcher = nullptr; ///< 扫描匹配异步结果监听器
     bool m_scanMatchRunning = false;    ///< 扫描匹配是否正在运行
 };

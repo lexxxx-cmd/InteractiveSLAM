@@ -1,15 +1,10 @@
 /**
  * @file AutoLoopClosurePanel.cpp
- * @brief 自动闭环检测控制面板实现
+ * @brief 自动闭环检测控制面板实现（精简版）
  *
- * 实现自动闭环检测的 UI 控制面板，包括：
- * - 搜索参数（方法、距离阈值）的 UI 控件
- * - 点云配准参数（方法、迭代次数、精度、NDT分辨率）
- * - 鲁棒核函数选择
- * - 适应度分数阈值设置
- * - 启动/停止控制
- * - 定时轮询状态快照（10Hz）
- * - 信号发射：闭环边插入通知、顶点高亮通知
+ * 界面简洁化后，面板只保留"开始/停止 + 实时状态"；
+ * 全部参数收敛到 LoopClosureParams，由「高级设置 → 优化相关…」
+ * 对话框读写（getParams/setParams），启动时同步到数据层。
  */
 
 #include "ui/AutoLoopClosurePanel.h"
@@ -21,15 +16,12 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 #include <QFormLayout>
-#include <QScrollArea>
 #include <QMessageBox>
 
-// ---- 核函数名称表（必须与 g2o RobustKernelFactory 顺序一致） ----
-static const char* kKernelUiNames[] = {
-    "NONE", "Huber", "Cauchy", "DCS", "Fair",
-    "GemanMcClure", "PseudoHuber", "Saturated", "Tukey", "Welsch"
-};
-static constexpr int kNumUiKernels = sizeof(kKernelUiNames) / sizeof(kKernelUiNames[0]);
+#include <algorithm>
+#include <limits>
+#include <utility>
+#include <vector>
 
 // ---- 构造 / 析构 ----
 
@@ -70,202 +62,151 @@ void AutoLoopClosurePanel::stopDetection() {
     }
 }
 
+LoopClosureParams AutoLoopClosurePanel::getParams() const {
+    return m_params;
+}
+
+void AutoLoopClosurePanel::setParams(const LoopClosureParams& params) {
+    m_params = params;
+    // 未运行时立即同步到数据层；运行中由下次启动生效
+    if (m_autoLoop && !m_autoLoop->is_running()) {
+        syncParamsToLoop();
+    }
+}
+
+void AutoLoopClosurePanel::setSampleStride(int stride) {
+    if (stride < 1) stride = 1;
+    m_sampleStride = stride;
+    // 数据层存在即推送（运行中由检测线程在下一迭代感知并重建源帧池）
+    if (m_autoLoop) {
+        m_autoLoop->set_sample_stride(stride);
+    }
+    // 刷新采样帧间距统计（参考调整距离阈值）
+    refreshStrideDistances();
+}
+
 // ---- UI 设置 ----
 
 /**
- * @brief 创建 UI 控件
- *
- * 按功能分组创建控件：
- * - 搜索参数组（方法、距离阈值）
- * - 配准参数组（方法、迭代次数、精度、分辨率）
- * - 鲁棒核函数组（类型、delta）
- * - 适应度分数组（阈值、最大范围）
- * - 选项（插入后优化）
- * - 开始/停止按钮
- * - 状态显示组
+ * @brief 创建 UI 控件（仅开始/停止 + 状态显示）
  */
 void AutoLoopClosurePanel::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setContentsMargins(8, 8, 8, 8);
 
-    // 可滚动区域 — 面板内容过长时自动出现滚动条
-    auto* scrollArea = new QScrollArea(this);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scrollArea->setObjectName("AutoLoopScrollArea");
-
-    auto* scrollContent = new QWidget;
-    scrollContent->setObjectName("AutoLoopScrollContent");
-    auto* contentLayout = new QVBoxLayout(scrollContent);
-    contentLayout->setContentsMargins(8, 8, 8, 8);
-
-    // ---- 搜索参数组 ----
-    auto* searchGroup = new QGroupBox(tr("Search"));
-    auto* searchForm  = new QFormLayout(searchGroup);
-
-    m_searchMethodCombo = new QComboBox;
-    m_searchMethodCombo->addItem(tr("SEQUENTIAL"), 0);
-    m_searchMethodCombo->addItem(tr("RANDOM"), 1);
-    m_searchMethodCombo->setCurrentIndex(1);  // 默认：RANDOM
-    searchForm->addRow(tr("Method:"), m_searchMethodCombo);
-
-    m_distanceThreshSpin = new QDoubleSpinBox;
-    m_distanceThreshSpin->setRange(0.5, 100.0);
-    m_distanceThreshSpin->setValue(10.0);
-    m_distanceThreshSpin->setDecimals(1);
-    m_distanceThreshSpin->setSingleStep(0.5);
-    searchForm->addRow(tr("Distance thresh:"), m_distanceThreshSpin);
-
-    m_accumDistThreshSpin = new QDoubleSpinBox;
-    m_accumDistThreshSpin->setRange(0.5, 100.0);
-    m_accumDistThreshSpin->setValue(15.0);
-    m_accumDistThreshSpin->setDecimals(1);
-    m_accumDistThreshSpin->setSingleStep(0.5);
-    searchForm->addRow(tr("Accum. dist thresh:"), m_accumDistThreshSpin);
-
-    contentLayout->addWidget(searchGroup);
-
-    // ---- 配准参数组 ----
-    auto* regGroup = new QGroupBox(tr("Registration"));
-    auto* regForm  = new QFormLayout(regGroup);
-
-    m_methodCombo = new QComboBox;
-    // 从临时 RegistrationMethods 实例填充配准方法列表
-    {
-        hdl_graph_slam::RegistrationMethods tmp;
-        for (const char* name : tmp.method_names()) {
-            m_methodCombo->addItem(QString::fromUtf8(name));
-        }
-    }
-    m_methodCombo->setCurrentIndex(1);  // 默认：GICP
-    regForm->addRow(tr("Method:"), m_methodCombo);
-
-    m_maxIterSpin = new QSpinBox;
-    m_maxIterSpin->setRange(1, 512);
-    m_maxIterSpin->setValue(64);
-    regForm->addRow(tr("Max iterations:"), m_maxIterSpin);
-
-    m_epsSpin = new QDoubleSpinBox;
-    m_epsSpin->setRange(1e-6, 1e-1);
-    m_epsSpin->setDecimals(6);
-    m_epsSpin->setValue(1e-4);
-    m_epsSpin->setSingleStep(1e-5);
-    regForm->addRow(tr("Transformation epsilon:"), m_epsSpin);
-
-    m_resolutionSpin = new QDoubleSpinBox;
-    m_resolutionSpin->setRange(0.1, 20.0);
-    m_resolutionSpin->setDecimals(1);
-    m_resolutionSpin->setValue(2.0);
-    m_resolutionSpin->setSingleStep(0.5);
-    regForm->addRow(tr("Resolution (NDT):"), m_resolutionSpin);
-
-    contentLayout->addWidget(regGroup);
-
-    // ---- 鲁棒核函数组 ----
-    auto* kernelGroup = new QGroupBox(tr("Robust Kernel"));
-    auto* kernelForm  = new QFormLayout(kernelGroup);
-
-    m_kernelCombo = new QComboBox;
-    for (int i = 0; i < kNumUiKernels; ++i) {
-        m_kernelCombo->addItem(QString::fromUtf8(kKernelUiNames[i]), i);
-    }
-    m_kernelCombo->setCurrentIndex(0);  // 默认：NONE
-    kernelForm->addRow(tr("Type:"), m_kernelCombo);
-
-    m_kernelDeltaSpin = new QDoubleSpinBox;
-    m_kernelDeltaSpin->setRange(1e-4, 10.0);
-    m_kernelDeltaSpin->setDecimals(4);
-    m_kernelDeltaSpin->setValue(0.01);
-    m_kernelDeltaSpin->setSingleStep(0.001);
-    kernelForm->addRow(tr("Delta:"), m_kernelDeltaSpin);
-
-    contentLayout->addWidget(kernelGroup);
-
-    // ---- 适应度分数组 ----
-    auto* fitGroup = new QGroupBox(tr("Fitness Score"));
-    auto* fitForm  = new QFormLayout(fitGroup);
-
-    m_fitnessThreshSpin = new QDoubleSpinBox;
-    m_fitnessThreshSpin->setRange(0.01, 10.0);
-    m_fitnessThreshSpin->setDecimals(2);
-    m_fitnessThreshSpin->setValue(0.30);
-    m_fitnessThreshSpin->setSingleStep(0.01);
-    fitForm->addRow(tr("Threshold:"), m_fitnessThreshSpin);
-
-    m_fitnessMaxRangeSpin = new QDoubleSpinBox;
-    m_fitnessMaxRangeSpin->setRange(0.1, 20.0);
-    m_fitnessMaxRangeSpin->setDecimals(2);
-    m_fitnessMaxRangeSpin->setValue(2.00);
-    m_fitnessMaxRangeSpin->setSingleStep(0.10);
-    fitForm->addRow(tr("Max range:"), m_fitnessMaxRangeSpin);
-
-    contentLayout->addWidget(fitGroup);
-
-    // ---- 选项 ----
-    m_optimizeCb = new QCheckBox(tr("Optimize after edge insert"));
-    m_optimizeCb->setChecked(true);
-    contentLayout->addWidget(m_optimizeCb);
-
-    // ---- 开始/停止按钮 ----
+    // 开始/停止按钮
     m_startStopBtn = new QPushButton(tr("Start"));
-    m_startStopBtn->setMinimumHeight(32);
     m_startStopBtn->setObjectName("primaryButton");
-    contentLayout->addWidget(m_startStopBtn);
+    mainLayout->addWidget(m_startStopBtn);
 
-    // ---- 状态显示组 ----
+    // 状态显示组
     auto* statusGroup = new QGroupBox(tr("Status"));
-    auto* statusLayout = new QVBoxLayout(statusGroup);
+    auto* statusForm = new QFormLayout(statusGroup);
 
     m_statusLabel = new QLabel(tr("Status: Stopped"));
-    m_statusLabel->setObjectName("LoopStatusLabel");
-    statusLayout->addWidget(m_statusLabel);
+    m_statusLabel->setStyleSheet("color: #999999; font-weight: bold;");
+    statusForm->addRow(tr("State:"), m_statusLabel);
 
     m_sourceLabel = new QLabel(tr("Current source: —"));
-    statusLayout->addWidget(m_sourceLabel);
+    statusForm->addRow(tr("Source:"), m_sourceLabel);
 
-    m_candidatesLabel = new QLabel(tr("Candidates: —"));
-    statusLayout->addWidget(m_candidatesLabel);
+    m_candidatesLabel = new QLabel(tr("Candidates: 0"));
+    statusForm->addRow(tr("Candidates:"), m_candidatesLabel);
 
     m_edgesInsertedLabel = new QLabel(tr("Edges inserted: 0"));
-    statusLayout->addWidget(m_edgesInsertedLabel);
+    statusForm->addRow(tr("Edges:"), m_edgesInsertedLabel);
 
-    m_lastMatchLabel = new QLabel(tr("Last match: —"));
-    m_lastMatchLabel->setWordWrap(true);
-    statusLayout->addWidget(m_lastMatchLabel);
+    m_lastMatchLabel = new QLabel(tr("Last: —"));
+    statusForm->addRow(tr("Last match:"), m_lastMatchLabel);
 
-    contentLayout->addWidget(statusGroup);
+    // 采样帧间距统计：相邻采样帧（id % stride == 0）位姿直线距离的
+    // 最小/平均/最大值，供用户参考调整搜索距离阈值（候选帧与源帧的
+    // 空间距离上限必须大于典型帧间距才可能有候选）
+    m_strideDistLabel = new QLabel(tr("Stride dist: —"));
+    m_strideDistLabel->setToolTip(tr(
+        "Euclidean distances between consecutive sampled keyframes "
+        "(min / avg / max). Use as reference for the distance threshold."));
+    statusForm->addRow(tr("Stride dist:"), m_strideDistLabel);
 
-    contentLayout->addStretch();
-
-    // 将可滚动内容放入 ScrollArea，ScrollArea 放入主布局
-    scrollArea->setWidget(scrollContent);
-    mainLayout->addWidget(scrollArea);
+    mainLayout->addWidget(statusGroup);
+    mainLayout->addStretch();
 }
 
 // ---- 参数同步 ----
 
 /**
- * @brief 将 UI 控件的值推送到数据层 AutomaticLoopClosure
+ * @brief 将 m_params 推送到数据层 AutomaticLoopClosure
  */
 void AutoLoopClosurePanel::syncParamsToLoop() {
     if (!m_autoLoop) return;
 
-    m_autoLoop->set_search_method(m_searchMethodCombo->currentData().toInt());
-    m_autoLoop->set_distance_thresh(m_distanceThreshSpin->value());
-    m_autoLoop->set_accum_distance_thresh(m_accumDistThreshSpin->value());
-    m_autoLoop->set_registration_method_index(m_methodCombo->currentIndex());
-    m_autoLoop->set_registration_max_iterations(m_maxIterSpin->value());
-    m_autoLoop->set_registration_epsilon(static_cast<float>(m_epsSpin->value()));
-    m_autoLoop->set_registration_resolution(static_cast<float>(m_resolutionSpin->value()));
-    m_autoLoop->set_robust_kernel_type(m_kernelCombo->currentData().toInt());
-    m_autoLoop->set_robust_kernel_delta(static_cast<float>(m_kernelDeltaSpin->value()));
-    m_autoLoop->set_fitness_score_thresh(static_cast<float>(m_fitnessThreshSpin->value()));
-    m_autoLoop->set_fitness_score_max_range(static_cast<float>(m_fitnessMaxRangeSpin->value()));
-    m_autoLoop->set_optimize_after_insert(m_optimizeCb->isChecked());
+    m_autoLoop->set_search_method(m_params.searchMethod);
+    m_autoLoop->set_distance_thresh(m_params.distanceThresh);
+    m_autoLoop->set_accum_distance_thresh(m_params.accumDistanceThresh);
+    m_autoLoop->set_registration_method_index(m_params.registrationMethod);
+    m_autoLoop->set_registration_max_iterations(m_params.maxIterations);
+    m_autoLoop->set_registration_epsilon(static_cast<float>(m_params.epsilon));
+    m_autoLoop->set_registration_resolution(static_cast<float>(m_params.resolution));
+    m_autoLoop->set_robust_kernel_type(m_params.robustKernel);
+    m_autoLoop->set_robust_kernel_delta(static_cast<float>(m_params.kernelDelta));
+    m_autoLoop->set_fitness_score_thresh(static_cast<float>(m_params.fitnessThresh));
+    m_autoLoop->set_fitness_score_max_range(static_cast<float>(m_params.fitnessMaxRange));
+    m_autoLoop->set_optimize_after_insert(m_params.optimizeAfterInsert);
 }
 
 // ---- 私有辅助 ----
+
+/**
+ * @brief 统计采样帧间直线距离并更新标签
+ *
+ * 按 id 升序取采样集（id % stride == 0）内相邻两帧的位姿平移
+ * （xyz）计算欧氏距离，显示最小/平均/最大值（米，保留 2 位小数）。
+ * 供用户参考调整自动回环的搜索距离阈值：候选帧与源帧的空间距离
+ * 上限（distance_thresh）明显小于典型帧间距时候选会恒为空。
+ * 图未加载或采样帧不足 2 帧时显示占位符。
+ */
+void AutoLoopClosurePanel::refreshStrideDistances() {
+    if (!m_strideDistLabel) return;
+
+    auto* graph = m_manager ? m_manager->graph() : nullptr;
+    if (!graph || graph->keyframes.size() < 2) {
+        m_strideDistLabel->setText(tr("Stride dist: —"));
+        return;
+    }
+
+    // 收集采样帧的位姿平移，按 id 升序（相邻采样帧 = 序列上前后帧）
+    std::vector<std::pair<long, Eigen::Vector3d>> sampled;
+    sampled.reserve(graph->keyframes.size());
+    for (const auto& [id, kf] : graph->keyframes) {
+        if (m_sampleStride > 1 && id % m_sampleStride != 0) continue;
+        if (!kf) continue;
+        sampled.emplace_back(id, Eigen::Vector3d(kf->estimate().translation()));
+    }
+
+    if (sampled.size() < 2) {
+        m_strideDistLabel->setText(tr("Stride dist: —"));
+        return;
+    }
+    std::sort(sampled.begin(), sampled.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    // 相邻采样帧间直线距离统计
+    double minD = std::numeric_limits<double>::max();
+    double maxD = 0.0;
+    double sumD = 0.0;
+    for (size_t i = 1; i < sampled.size(); ++i) {
+        double d = (sampled[i].second - sampled[i - 1].second).norm();
+        minD = std::min(minD, d);
+        maxD = std::max(maxD, d);
+        sumD += d;
+    }
+    double avgD = sumD / static_cast<double>(sampled.size() - 1);
+
+    m_strideDistLabel->setText(tr("Stride dist: %1 / %2 / %3 m")
+        .arg(minD, 0, 'f', 2)
+        .arg(avgD, 0, 'f', 2)
+        .arg(maxD, 0, 'f', 2));
+}
 
 void AutoLoopClosurePanel::updateStatusStyle(bool running) {
     if (running) {
@@ -281,7 +222,7 @@ void AutoLoopClosurePanel::updateStatusStyle(bool running) {
  * @brief 开始/停止按钮处理
  *
  * - 未运行时：延迟创建数据层，同步参数，检查配准方法可用性，启动检测
- * - 运行时：停止检测，停止轮询，恢复 UI 可编辑状态
+ * - 运行时：停止检测，停止轮询，恢复 UI 状态
  */
 void AutoLoopClosurePanel::onStartStop() {
     auto* graph = m_manager->graph();
@@ -291,9 +232,14 @@ void AutoLoopClosurePanel::onStartStop() {
         return;
     }
 
-    // 延迟创建数据层
-    if (!m_autoLoop) {
+    // 延迟创建数据层（图指针变化时重建）
+    if (!m_autoLoop || m_loopGraph != graph) {
         m_autoLoop = std::make_unique<hdl_graph_slam::AutomaticLoopClosure>(graph);
+        m_loopGraph = graph;
+        // 数据层重建后补同步缓存的采样步长
+        m_autoLoop->set_sample_stride(m_sampleStride);
+        // 图可能在此前未加载时空转过（统计显示占位符），启动时重算
+        refreshStrideDistances();
     }
 
     if (m_autoLoop->is_running()) {
@@ -303,15 +249,8 @@ void AutoLoopClosurePanel::onStartStop() {
         m_statusLabel->setText(tr("Status: Stopped"));
         updateStatusStyle(false);
         m_startStopBtn->setText(tr("Start"));
-        // 恢复参数编辑
-        m_searchMethodCombo->setEnabled(true);
     } else {
         // ---- 启动检测 ----
-        // 如果图谱已关闭并重新打开（指针改变），重新创建数据层
-        if (m_autoLoop) {
-            m_autoLoop = std::make_unique<hdl_graph_slam::AutomaticLoopClosure>(graph);
-        }
-
         syncParamsToLoop();
 
         // 提前检查配准方法是否可用
@@ -329,9 +268,6 @@ void AutoLoopClosurePanel::onStartStop() {
         updateStatusStyle(true);
         m_startStopBtn->setText(tr("Stop"));
         m_lastKnownEdgesInserted = 0;
-
-        // 运行时禁用参数编辑
-        m_searchMethodCombo->setEnabled(false);
     }
 }
 
@@ -357,7 +293,6 @@ void AutoLoopClosurePanel::onPollStatus() {
         m_statusLabel->setText(tr("Status: Stopped"));
         updateStatusStyle(false);
         m_startStopBtn->setText(tr("Start"));
-        m_searchMethodCombo->setEnabled(true);
         return;
     }
 

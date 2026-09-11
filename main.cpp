@@ -12,6 +12,7 @@
 #include <QLibraryInfo>
 #include <QFile>
 #include <QTextStream>
+#include <QIcon>
 #include <iostream>
 
 // 第三方依赖头文件（编译时检查可用性）
@@ -22,6 +23,7 @@
 // 后端
 #include "backend/graph_manager.hpp"
 #include "ui/MainWindow.h"
+#include "ui/ProjectCenterDialog.h"
 
 /**
  * @brief 应用程序入口点
@@ -63,12 +65,22 @@ int main(int argc, char *argv[]) {
         styleFile.close();
     }
 
+    // --- 设置应用图标（来自 src/icon 文件夹，qrc 资源） ---
+    app.setWindowIcon(QIcon(":/ui/app_icon.jpg"));
+
     // 创建图管理器后端实例（应用程序生命周期内作为全局单例使用）
     GraphManager graphManager;
 
-    // 创建并显示主窗口
+    // --- 项目中心：新建/打开项目，产出启动任务 ---
+    // 用户取消（关闭项目中心）则直接退出程序
+    ProjectCenterDialog center;
+    if (center.exec() != QDialog::Accepted) return 0;
+    const ProjectTask task = center.task();
+
+    // 创建并显示主窗口，按启动任务加载/导入数据
     MainWindow mainWindow(&graphManager);
     mainWindow.show();
+    mainWindow.launchFromProject(task);
 
     // 进入 Qt 事件循环
     return app.exec();

@@ -18,6 +18,7 @@
 
 #include <QWidget>
 #include <QTimer>
+#include <QFutureWatcher>
 #include <memory>
 #include <set>
 #include <vector>
@@ -26,12 +27,14 @@
 #include <osgViewer/Viewer>
 
 #include "visualizers/GraphSceneVisualizer.h"
+#include "visualizers/PointCloudBuilder.h"
 #include "ui/DrawFlags.h"
 
 class osgQOpenGLWidget;
 class GraphManager;
 class OverlayPanelWidget;
 class SpherePickingHandler;
+class FirstPersonManipulator;
 
 namespace hdl_graph_slam {
 class InteractiveGraph;
@@ -61,7 +64,7 @@ public slots:
      * @brief 程序化选中指定顶点（等价于 Ctrl+Click）
      *
      * 用于播放轴功能，效果与 Ctrl+Click 选中关键帧完全相同：
-     * 选中球体变橙色 + 邻域点云高亮 + 发射 vertexSelected 信号。
+     * 选中视锥体变红色（2 倍尺寸）+ 邻域点云高亮 + 发射 vertexSelected 信号。
      *
      * @param vertexId 要选中的顶点 ID（-1 取消选择）
      */
@@ -78,6 +81,16 @@ public slots:
     void highlightPlaybackVertex(long vertexId);
 
     /**
+     * @brief 设置播放累积高亮开关（"播放点云留存"）
+     *
+     * 打开后播放过的帧点云保留白色高亮（不随播放推进消失），
+     * 关闭或播放会话结束时清空留存。
+     *
+     * @param retain true = 累积留存模式
+     */
+    void setPlaybackRetain(bool retain);
+
+    /**
      * @brief 图谱加载完成后的回调
      * @param graph 加载的图谱对象（共享指针）
      */
@@ -90,8 +103,9 @@ public slots:
     void refreshScene();
 
     /**
-     * @brief 重建点云
-     * @note 这是重量级操作，仅在优化完成后调用
+     * @brief 重建点云（异步）
+     * @note 计算密集的 CPU 变换/降采样在后台线程执行，完成后在主线程
+     *       换入场景，不阻塞 UI。多次调用会自动合并为一次构建。
      */
     void rebuildPointClouds();
 
@@ -102,13 +116,45 @@ public slots:
     void setDrawSE3Edges(bool v);            ///< 是否绘制 SE3 约束边
     void setEdgeWidth(int width);            ///< 设置边线宽度
     void setSphereRadius(float radius);      ///< 设置顶点球体半径
+    void setVertexOpacity(int opacity);      ///< 设置顶点位姿标记不透明度（0-100）
     void setSampleStride(int stride);        ///< 设置渲染采样步长
+    int  sampleStride() const { return m_flags.sample_stride; }  ///< 当前采样步长
     void setPointSize(int size);             ///< 设置点云点大小
     void setPointOpacity(int opacity);       ///< 设置点云不透明度（0-100）
+    void setLodEnabled(bool enabled);        ///< 设置 LOD 多级渲染开关
+    void setOdomLayerEnabled(bool enabled);  ///< 设置原始层（里程计位姿参照底图）开关
+
+    /**
+     * @brief 设置 LOD 切换模式
+     * @param manual true = 手动固定层级（由 setLodManualLevel 控制）；
+     *               false = 按相机距离自动切换（默认）
+     */
+    void setLodMode(bool manual);
+
+    /**
+     * @brief 手动指定 LOD 层级（仅手动模式下生效）
+     * @param level 目标级别（0 = 全量，1 = 第一层降采样）
+     */
+    void setLodManualLevel(int level);
     void setBackgroundColor(const QColor& color);  ///< 设置背景色
     void setHiddenEdges(const std::set<long>& ids);     ///< 设置隐藏边集合
     void setLoopHighlight(long sourceId, const std::vector<long>& candidateIds);  ///< 闭环高亮
     void resetCamera();                      ///< 重置摄像机
+    void restoreWheelZoomFactor();           ///< 恢复聚焦时提高的滚轮缩放系数
+
+    // === 第一人称模式（Shift 切换） ===
+    void enterFirstPersonMode();             ///< 进入第一人称模式
+    void exitFirstPersonMode();              ///< 退出并恢复轨迹球相机（位姿无缝衔接）
+    bool firstPersonActive() const { return m_fpActive; }
+
+    /**
+     * @brief 双击聚焦：相机移动到指定位姿球体局部 x 轴负方向，
+     *        视线沿位姿朝向（局部 x 轴）看向球心，球心位于视角中心
+     * @param vertexId 目标顶点 ID
+     */
+    void focusOnVertex(long vertexId);
+    void onFocusPoint(const osg::Vec3d& point);  ///< 双击点云居中（旋转中心=命中点）
+    void onFrameView(long vertexId);             ///< Ctrl+双击：切换到帧位姿视角
 
     // === Z 裁剪 + 高程颜色范围 ===
     void setZClipping(bool enabled);          ///< 启用/禁用 Z 裁剪
@@ -147,12 +193,39 @@ signals:
     void vertexSelected(long vertexId);                   ///< 顶点选中信号
 
     /**
+     * @brief 点云全部渲染完成信号
+     *
+     * 在点云分块渐进上传全部完成时发射（含"无点云/构建被丢弃"的兜底，
+     * 保证 UI 的加载指示一定能结束）。MainWindow 据此停止加载动画。
+     */
+    void cloudRenderFinished();
+
+    /**
+     * @brief LOD 层级状态信号
+     *
+     * 在以下时机发射：
+     *   - LOD 多级构建完成（level=0，levelCount>1 表示 LOD 已就绪）；
+     *   - 相机距离变化导致层级切换（level 为切换后的目标级别）。
+     * 供渲染面板持续显示当前层级、状态栏临时提示切换。
+     *
+     * @param level      当前级别（0 = 主级别/全量，越大点数越少）
+     * @param levelCount 级别总数（1 = 未启用 LOD）
+     */
+    void lodLevelChanged(int level, int levelCount);
+
+    /**
      * @brief 采样步长变化信号
      *
      * 当用户通过 RenderingPanel 调整 sampleStride 时发射，
      * PlaybackPanel 监听此信号以重建采样后的播放帧列表。
      */
     void sampleStrideChanged(int stride);
+
+    /**
+     * @brief 第一人称模式切换信号（供状态栏提示操作方式）
+     * @param active true = 进入第一人称模式，false = 退出
+     */
+    void firstPersonModeChanged(bool active);
 
     /**
      * @brief 右键上下文菜单请求信号
@@ -178,13 +251,18 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override; ///< 拦截第一人称模式的键盘事件（Shift 切换 / WASD 行走）
 
 private slots:
     void initOsg();          ///< OSG 初始化（osgQOpenGLWidget 准备就绪后调用）
     void updateScene();      ///< 定时场景更新（姿态/边刷新 + FPS 统计）
     void onVertexPicked(long vertexId);  ///< 顶点选中回调（Ctrl+Click）
+    void onCloudBuildFinished();         ///< 后台点云构建完成回调（主线程）
 
 private:
+    // === 异步点云构建调度 ===
+    void requestCloudBuild();   ///< 请求一次点云构建（运行中则合并为一次）
+    void startCloudBuild();     ///< 启动后台构建任务
     osgQOpenGLWidget* m_osgWidget = nullptr;                      ///< OSG 嵌入 Qt 的 OpenGL 部件
     std::unique_ptr<GraphSceneVisualizer> m_sceneViz;             ///< 场景可视化器
     std::shared_ptr<hdl_graph_slam::InteractiveGraph> m_graph;    ///< 当前加载的图谱
@@ -205,4 +283,24 @@ private:
     int m_frameCount = 0;    ///< 帧计数器
     float m_fpsAccum = 0.0f;  ///< FPS 累加器
     float m_fps = 0.0f;       ///< 当前 FPS 值
+
+    // 异步点云构建状态
+    QFutureWatcher<hdl_graph_slam::PointCloudBuildResult>* m_cloudBuildWatcher = nullptr; ///< 后台构建监视器
+    int m_cloudBuildSeq = 0;         ///< 构建版本号（图变化时递增，使在途结果作废）
+    int m_cloudBuildActiveSeq = -1;  ///< 当前在途构建对应的版本号
+    bool m_cloudBuildRunning = false; ///< 是否有构建任务正在运行
+    bool m_cloudBuildPending = false; ///< 构建期间是否收到新的构建请求（合并用）
+    bool m_chunkUploadWasPending = false; ///< 上一帧是否有点云分块在渐进上传（完成检测用）
+
+    // LOD 模式状态
+    bool m_lodManualMode = true;  ///< true = 手动固定层级（默认手动，不随距离自动切换）
+    int  m_lodManualLevel = 1;    ///< 手动模式下固定的目标层级（默认 level 1 = 第一层降采样）
+
+    // 双击聚焦状态
+    double m_savedWheelZoomFactor = -1.0; ///< 聚焦前的滚轮缩放系数（-1 = 未修改）
+
+    // 第一人称模式状态
+    osg::ref_ptr<FirstPersonManipulator> m_fpManip;   ///< 第一人称操作器
+    osg::ref_ptr<osgGA::CameraManipulator> m_savedManip; ///< 进入前保存的轨迹球操作器
+    bool m_fpActive = false;                          ///< 是否处于第一人称模式
 };

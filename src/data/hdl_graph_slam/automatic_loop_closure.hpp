@@ -103,6 +103,24 @@ public:
     void set_robust_kernel_delta(float d)          { m_kernel_delta = d; }
     void set_optimize_after_insert(bool v)         { m_optimize = v; }
 
+    /**
+     * @brief 设置采样步长（内部变量，非 UI 参数）
+     *
+     * stride > 1 时源帧池与候选帧均限定在 id % stride == 0 的
+     * 采样关键帧子集内（与渲染层采样语义一致）。BFS 累积距离
+     * 计算不受影响——仍遍历全部关键帧，只在最终候选过滤时剔除
+     * 非采样帧。运行中设置，下一迭代生效。
+     *
+     * @param s 采样步长（<=1 视为不采样）
+     */
+    void set_sample_stride(int s) {
+        if (s <= 1) s = 1;
+        m_sample_stride.store(s, std::memory_order_relaxed);
+    }
+    int sample_stride() const {
+        return m_sample_stride.load(std::memory_order_relaxed);
+    }
+
     // ── 供 UI 初始化的参数访问器 ──────────────────────────────────────
     const RegistrationMethods& reg_methods() const { return m_reg_methods; }
     int    search_method()          const { return m_search_method; }
@@ -148,10 +166,15 @@ private:
     float  m_kernel_delta          = 0.01f;   ///< 鲁棒核函数 delta 参数
     bool   m_optimize              = true;    ///< 插入闭环边后是否自动执行全局优化
 
+    // 采样步长（原子：UI 线程设置 / 检测线程读取，>1 时限定源/候选帧
+    // 在 id % stride == 0 采样子集内；与渲染层采样语义一致）
+    std::atomic_int m_sample_stride{1};
+
     // 排序后的关键帧 ID 缓存（用于顺序索引）
-    std::vector<long> m_sorted_ids;      ///< 按 ID 排序的关键帧列表
+    std::vector<long> m_sorted_ids;      ///< 按 ID 排序的关键帧列表（仅采样帧）
     int  m_current_index = 0;            ///< 当前处理的索引位置
     size_t m_last_keyframe_count = 0;    ///< 上次缓存时的关键帧数量，用于检测变化
+    int   m_cached_stride = 1;           ///< 上次缓存时的采样步长，变化时重建源帧池
 };
 
 }  // namespace hdl_graph_slam

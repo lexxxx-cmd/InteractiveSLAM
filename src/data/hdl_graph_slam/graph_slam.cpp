@@ -35,12 +35,6 @@
 #include <g2o/solvers/pcg/linear_solver_pcg.h>
 #include <g2o/types/slam3d/types_slam3d.h>
 
-// 自定义 g2o 类型（SE3 先验边，非 vcpkg 标准 g2o 提供）
-#include "data/g2o/edge_se3_priorxy.hpp"
-#include "data/g2o/edge_se3_priorxyz.hpp"
-#include "data/g2o/edge_se3_priorvec.hpp"
-#include "data/g2o/edge_se3_priorquat.hpp"
-
 // 鲁棒核函数 I/O（项目本地拷贝）
 #include "data/g2o/robust_kernel_io.hpp"
 
@@ -48,14 +42,6 @@
 G2O_USE_OPTIMIZATION_LIBRARY(pcg)      ///< PCG 共轭梯度求解器
 G2O_USE_OPTIMIZATION_LIBRARY(cholmod)  ///< Cholmod 分解求解器
 G2O_USE_OPTIMIZATION_LIBRARY(csparse)  ///< CSparse 分解求解器
-
-namespace g2o {
-// 注册自定义 g2o 边类型到工厂，使其可在 .g2o 文件中按名称识别
-G2O_REGISTER_TYPE(EDGE_SE3_PRIORXY, EdgeSE3PriorXY)
-G2O_REGISTER_TYPE(EDGE_SE3_PRIORXYZ, EdgeSE3PriorXYZ)
-G2O_REGISTER_TYPE(EDGE_SE3_PRIORVEC, EdgeSE3PriorVec)
-G2O_REGISTER_TYPE(EDGE_SE3_PRIORQUAT, EdgeSE3PriorQuat)
-}  // namespace g2o
 
 namespace hdl_graph_slam {
 
@@ -165,92 +151,6 @@ g2o::EdgeSE3* GraphSLAM::add_se3_edge(g2o::VertexSE3* v1, g2o::VertexSE3* v2,
     edge->vertices()[0] = v1;                          // 设置源顶点
     edge->vertices()[1] = v2;                          // 设置目标顶点
     graph->addEdge(edge);                              // 添加到图
-    return edge;
-}
-
-/**
- * @brief 创建 XY 坐标先验边
- * @param v_se3             SE3 顶点
- * @param xy                先验的 XY 坐标
- * @param information_matrix 信息矩阵
- * @return 创建的 XY 先验边指针
- *
- * 用于约束顶点在水平面（XY）上的位置，例如 GPS 测量提供的水平位置约束。
- */
-g2o::EdgeSE3PriorXY* GraphSLAM::add_se3_prior_xy_edge(
-    g2o::VertexSE3* v_se3, const Eigen::Vector2d& xy,
-    const Eigen::MatrixXd& information_matrix) {
-    g2o::EdgeSE3PriorXY* edge(new g2o::EdgeSE3PriorXY());
-    edge->setMeasurement(xy);
-    edge->setInformation(information_matrix);
-    edge->vertices()[0] = v_se3;
-    graph->addEdge(edge);
-    return edge;
-}
-
-/**
- * @brief 创建 XYZ 坐标先验边
- * @param v_se3             SE3 顶点
- * @param xyz               先验的三维坐标
- * @param information_matrix 信息矩阵
- * @return 创建的 XYZ 先验边指针
- *
- * 用于约束顶点在三维空间中的位置。
- */
-g2o::EdgeSE3PriorXYZ* GraphSLAM::add_se3_prior_xyz_edge(
-    g2o::VertexSE3* v_se3, const Eigen::Vector3d& xyz,
-    const Eigen::MatrixXd& information_matrix) {
-    g2o::EdgeSE3PriorXYZ* edge(new g2o::EdgeSE3PriorXYZ());
-    edge->setMeasurement(xyz);
-    edge->setInformation(information_matrix);
-    edge->vertices()[0] = v_se3;
-    graph->addEdge(edge);
-    return edge;
-}
-
-/**
- * @brief 创建方向向量先验边
- * @param v_se3             SE3 顶点
- * @param direction         方向向量（3 维）
- * @param measurement       测量值（3 维）
- * @param information_matrix 信息矩阵（6x6）
- * @return 创建的方向向量先验边指针
- *
- * 测量向量 m = [direction; measurement]，其中 direction 表示约束的方向
- * （如重力方向），measurement 为该方向上的测量值。
- */
-g2o::EdgeSE3PriorVec* GraphSLAM::add_se3_prior_vec_edge(
-    g2o::VertexSE3* v_se3, const Eigen::Vector3d& direction,
-    const Eigen::Vector3d& measurement, const Eigen::MatrixXd& information_matrix) {
-    Eigen::Matrix<double, 6, 1> m;
-    m.head<3>() = direction;    ///< 方向向量（前 3 维）
-    m.tail<3>() = measurement;  ///< 测量值（后 3 维）
-
-    g2o::EdgeSE3PriorVec* edge(new g2o::EdgeSE3PriorVec());
-    edge->setMeasurement(m);
-    edge->setInformation(information_matrix);
-    edge->vertices()[0] = v_se3;
-    graph->addEdge(edge);
-    return edge;
-}
-
-/**
- * @brief 创建四元数姿态先验边
- * @param v_se3             SE3 顶点
- * @param quat              先验的姿态四元数
- * @param information_matrix 信息矩阵
- * @return 创建的四元数先验边指针
- *
- * 用于约束顶点的朝向（姿态），例如 IMU 航向角测量。
- */
-g2o::EdgeSE3PriorQuat* GraphSLAM::add_se3_prior_quat_edge(
-    g2o::VertexSE3* v_se3, const Eigen::Quaterniond& quat,
-    const Eigen::MatrixXd& information_matrix) {
-    g2o::EdgeSE3PriorQuat* edge(new g2o::EdgeSE3PriorQuat());
-    edge->setMeasurement(quat);
-    edge->setInformation(information_matrix);
-    edge->vertices()[0] = v_se3;
-    graph->addEdge(edge);
     return edge;
 }
 

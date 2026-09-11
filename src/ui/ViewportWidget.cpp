@@ -16,16 +16,24 @@
 
 #include <QVBoxLayout>
 #include <QColor>
+#include <QKeyEvent>
 #include <QResizeEvent>
+#include <QtConcurrent/QtConcurrent>
 #include <chrono>
+#include <cmath>
 
 #include <osg/Notify>
 #include <osg/Math>
+#include <osgGA/TrackballManipulator>
+
+#include <Eigen/Geometry>
 
 #include "osgQOpenGL/osgQOpenGLWidget.h"
 #include "osgQOpenGL/OSGRenderer.h"
 #include "backend/graph_manager.hpp"
 #include "visualizers/SpherePickingHandler.h"
+#include "visualizers/PointCloudBuilder.h"
+#include "ui/FirstPersonManipulator.h"
 #include "ui/OverlayPanelWidget.h"
 
 // ---------------------------------------------------------------------------
@@ -48,6 +56,9 @@ ViewportWidget::ViewportWidget(QWidget* parent)
     // 创建 OSG 嵌入部件
     m_osgWidget = new osgQOpenGLWidget(this);
     layout->addWidget(m_osgWidget);
+    // 键盘焦点：第一人称模式（Shift + WASD）需要接收键盘事件
+    m_osgWidget->setFocusPolicy(Qt::StrongFocus);
+    m_osgWidget->installEventFilter(this);
 
     // 初始化场景可视化器
     m_sceneViz = std::make_unique<GraphSceneVisualizer>();
@@ -60,6 +71,12 @@ ViewportWidget::ViewportWidget(QWidget* parent)
     m_updateTimer = new QTimer(this);
     connect(m_updateTimer, &QTimer::timeout, this, &ViewportWidget::updateScene);
     m_updateTimer->start(16);
+
+    // 后台点云构建监视器：构建完成在主线程换入场景
+    m_cloudBuildWatcher =
+        new QFutureWatcher<hdl_graph_slam::PointCloudBuildResult>(this);
+    connect(m_cloudBuildWatcher, &QFutureWatcher<hdl_graph_slam::PointCloudBuildResult>::finished,
+            this, &ViewportWidget::onCloudBuildFinished);
 }
 
 ViewportWidget::~ViewportWidget() = default;
@@ -195,7 +212,11 @@ void ViewportWidget::initOsg() {
     viewer->setSceneData(m_sceneViz->getRootNode());
 
     // 轨迹球摄像机操作器
-    viewer->setCameraManipulator(new osgGA::TrackballManipulator);
+    // 关闭松手后的惯性甩动：OSG 的 StandardManipulator 默认 allowThrow=true，
+    // 拖拽旋转后松手会继续旋转（表现为"甩动"），此处显式关闭
+    auto* manipulator = new osgGA::TrackballManipulator;
+    manipulator->setAllowThrow(false);
+    viewer->setCameraManipulator(manipulator);
 
     // 正交投影（替换 OSG 默认的透视投影）
     applyProjection();
@@ -204,7 +225,7 @@ void ViewportWidget::initOsg() {
     // 球心坐标和边段数据在每次事件触发时实时查询，确保图谱加载/位姿更新后自动反映
     m_pickingHandler = new SpherePickingHandler(
         // 球心坐标提供器
-        [this]() -> const std::vector<std::pair<osg::Vec3d, long>>* {
+        [this]() -> const std::vector<PickableCenter>* {
             return &m_sceneViz->sphereCenters();
         },
         // 边段提供器
@@ -249,6 +270,31 @@ void ViewportWidget::initOsg() {
                     enriched.vtxPosX, enriched.vtxPosY, enriched.vtxPosZ,
                     enriched.vtxAccumDist, enriched.vtxDegree);
             }, Qt::QueuedConnection);
+        },
+        // --- 双击兜底回调（未命中点云：球体聚焦 / 空白取消聚焦淡化） ---
+        [this](long vertexId) {
+            QMetaObject::invokeMethod(this, [this, vertexId]() {
+                if (vertexId < 0) {
+                    // 双击空白处：取消聚焦淡化，恢复整体不透明度与滚轮缩放系数
+                    m_sceneViz->setFocusedVertex(-1);
+                    restoreWheelZoomFactor();
+                    m_osgWidget->update();
+                    return;
+                }
+                focusOnVertex(vertexId);
+            }, Qt::QueuedConnection);
+        },
+        // --- 双击点云命中回调（命中点设为轨迹球旋转中心并居中） ---
+        [this](const osg::Vec3d& point) {
+            QMetaObject::invokeMethod(this, [this, point]() {
+                onFocusPoint(point);
+            }, Qt::QueuedConnection);
+        },
+        // --- Ctrl+双击回调（切换到该帧位姿视角） ---
+        [this](long vertexId) {
+            QMetaObject::invokeMethod(this, [this, vertexId]() {
+                onFrameView(vertexId);
+            }, Qt::QueuedConnection);
         });
     viewer->addEventHandler(m_pickingHandler);
 
@@ -262,19 +308,23 @@ void ViewportWidget::initOsg() {
 /**
  * @brief 图谱加载完成
  *
- * 将图谱数据传递给场景可视化器构建场景，应用当前设置，
- * 发射 cloudDataReady 信号供 UI 面板初始化，更新投影并重置摄像机。
+ * 将图谱数据传递给场景可视化器构建场景（球体/边线同步，
+ * 点云后台异步构建），应用当前设置，更新投影并重置摄像机。
+ *
+ * 点云构建完成后（onCloudBuildFinished）发射 cloudDataReady 供 UI
+ * 面板初始化，并刷新渲染统计。
  */
 void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
     m_graph = graph;
+    ++m_cloudBuildSeq;  // 使任何在途构建结果作废
     m_sceneViz->buildFromGraph(graph, m_flags);
 
     // 应用当前设置
     m_sceneViz->setPointOpacity(m_flags.draw_keyframe_vertices ? 1.0f : 0.0f);
     m_osgWidget->update();
 
-    // 发射数据范围信号供 UI 面板初始化
-    emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
+    // 后台异步构建点云（完成后发射 cloudDataReady）
+    rebuildPointClouds();
 
     // 为新加载的场景更新正交投影，然后让摄像机定格到整个场景
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
@@ -287,10 +337,11 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
 /**
  * @brief 图谱关闭
  *
- * 重置共享指针，清空场景可视化器。
+ * 重置共享指针，清空场景可视化器，并使在途点云构建结果作废。
  */
 void ViewportWidget::onGraphClosed() {
     m_graph.reset();
+    ++m_cloudBuildSeq;  // 使在途构建结果作废
     m_sceneViz->clear();
     m_osgWidget->update();
 }
@@ -318,6 +369,18 @@ void ViewportWidget::setDrawKeyframeClouds(bool v) {
     m_osgWidget->update();
 }
 
+void ViewportWidget::setOdomLayerEnabled(bool enabled) {
+    m_flags.odom_layer_enabled = enabled;
+    bool wasEnabled = m_sceneViz->odomLayerEnabled();
+    m_sceneViz->setOdomLayerEnabled(enabled);
+    // 原始层数据按需生成：首次打开时触发后台重建（含里程计位姿点云）；
+    // 关闭仅隐藏几何体，无需重建
+    if (enabled && !wasEnabled && m_graph && m_sceneViz->hasPointCloud()) {
+        requestCloudBuild();
+    }
+    m_osgWidget->update();
+}
+
 void ViewportWidget::setDrawSE3Edges(bool v) {
     m_flags.draw_se3_edges = v;
     // SE3 边是常规边集合的一部分
@@ -332,6 +395,11 @@ void ViewportWidget::setEdgeWidth(int width) {
 
 void ViewportWidget::setSphereRadius(float radius) {
     m_sceneViz->setSphereRadius(radius);
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setVertexOpacity(int opacity) {
+    m_sceneViz->setVertexOpacity(opacity / 100.0f);
     m_osgWidget->update();
 }
 
@@ -350,6 +418,42 @@ void ViewportWidget::setPointSize(int size) {
 void ViewportWidget::setPointOpacity(int opacity) {
     m_sceneViz->setPointOpacity(opacity / 100.0f);
     m_osgWidget->update();
+}
+
+void ViewportWidget::setLodEnabled(bool enabled) {
+    m_flags.lod_enabled = enabled;
+    m_sceneViz->setLodEnabled(enabled);
+    // 已有点云数据时触发后台异步重建（生成/移除第一层 LOD）
+    if (m_graph && m_sceneViz->hasPointCloud()) {
+        requestCloudBuild();
+    }
+}
+
+void ViewportWidget::setLodMode(bool manual) {
+    m_lodManualMode = manual;
+    if (manual) {
+        // 立即应用当前手动层级（应用时 clamp 到有效范围，不覆盖用户设定值，
+        // 保证数据重建后能恢复到用户选择的层级）
+        int level = qBound(0, m_lodManualLevel, m_sceneViz->lodLevelCount() - 1);
+        m_sceneViz->setLodLevel(level);
+        emit lodLevelChanged(level, m_sceneViz->lodLevelCount());
+    } else {
+        // 恢复自动距离切换：立即按当前距离重新评估
+        emit lodLevelChanged(m_sceneViz->currentLodLevel(),
+                             m_sceneViz->lodLevelCount());
+    }
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setLodManualLevel(int level) {
+    m_lodManualLevel = level;
+    if (m_lodManualMode && m_sceneViz->hasPointCloud()) {
+        int maxLevel = m_sceneViz->lodLevelCount() - 1;
+        int clamped = qBound(0, level, maxLevel);
+        m_sceneViz->setLodLevel(clamped);
+        emit lodLevelChanged(clamped, m_sceneViz->lodLevelCount());
+        m_osgWidget->update();
+    }
 }
 
 void ViewportWidget::setZClipping(bool enabled) {
@@ -400,10 +504,275 @@ void ViewportWidget::setLoopHighlight(long sourceId, const std::vector<long>& ca
 }
 
 void ViewportWidget::resetCamera() {
+    exitFirstPersonMode();
+    restoreWheelZoomFactor();
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
     if (viewer) {
         viewer->home();
     }
+    m_osgWidget->update();
+}
+
+/**
+ * @brief 恢复聚焦时提高的滚轮缩放系数
+ *
+ * 由 resetCamera 与"双击空白处取消聚焦"调用。
+ */
+void ViewportWidget::restoreWheelZoomFactor() {
+    if (m_savedWheelZoomFactor < 0.0) return;  // 未处于聚焦加速状态
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (viewer) {
+        auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+            viewer->getCameraManipulator());
+        if (manip) {
+            manip->setWheelZoomFactor(m_savedWheelZoomFactor);
+        }
+    }
+    m_savedWheelZoomFactor = -1.0;
+}
+
+// ---------------------------------------------------------------------------
+// 第一人称模式（Shift 切换）
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 进入第一人称模式
+ *
+ * 从当前相机位姿取视线方向初始化 yaw/pitch，行走速度按场景包围球
+ * 半径设定；切换操作器到 FirstPersonManipulator（保留轨迹球实例，
+ * 退出时恢复并以第一人称位姿无缝衔接）。
+ */
+void ViewportWidget::enterFirstPersonMode() {
+    if (m_fpActive) return;
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer || !viewer->getSceneData()) return;
+    auto* trackball = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!trackball) return;
+
+    osg::Vec3d eye, center, up;
+    viewer->getCamera()->getViewMatrixAsLookAt(eye, center, up);
+    osg::Vec3d dir = center - eye;
+    if (dir.length2() < 1e-12) dir.set(0.0, 1.0, 0.0);
+
+    if (!m_fpManip) m_fpManip = new FirstPersonManipulator;
+    const double sceneR = viewer->getSceneData()->getBound().radius();
+    const double speed = std::max(sceneR * 0.15, 1.5);  // 米/秒，随场景尺度
+    m_fpManip->startFrom(eye, dir, speed);
+
+    m_savedManip = viewer->getCameraManipulator();
+    viewer->setCameraManipulator(m_fpManip.get(), false);  // false = 不重置 home
+    m_fpActive = true;
+    emit firstPersonModeChanged(true);
+}
+
+/**
+ * @brief 退出第一人称模式
+ *
+ * 取当前第一人称位姿，恢复轨迹球操作器并 setTransformation 到同一
+ * 位姿，视角无跳变衔接。
+ */
+void ViewportWidget::exitFirstPersonMode() {
+    if (!m_fpActive) return;
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) { m_fpActive = false; return; }
+
+    osg::Vec3d eye, dir;
+    m_fpManip->getPose(eye, dir);
+
+    viewer->setCameraManipulator(m_savedManip.get(), false);
+    auto* trackball = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (trackball) {
+        trackball->setTransformation(eye, eye + dir, osg::Vec3d(0.0, 0.0, 1.0));
+    }
+    m_savedManip = nullptr;
+    m_fpActive = false;
+    emit firstPersonModeChanged(false);
+}
+
+/**
+ * @brief 事件过滤器：拦截 osgQOpenGLWidget 的键盘事件驱动第一人称模式
+ *
+ * - Shift 按下 → 在任意状态下切换第一人称模式（进入/退出）；
+ * - 第一人称模式下 W/A/S/D 按下/释放 → 写入行走键状态（不转发给 OSG）。
+ * 其余事件一律放行。osgQOpenGLWidget 默认无键盘焦点策略，
+ * 已在构造时设为 StrongFocus（点击视口一次即获得焦点）。
+ */
+bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_osgWidget) {
+        switch (event->type()) {
+        case QEvent::KeyPress: {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            if (ke->isAutoRepeat()) break;
+            // Shift 在两种状态下都可切换（进入/退出第一人称）
+            if (ke->key() == Qt::Key_Shift) {
+                if (m_fpActive) exitFirstPersonMode();
+                else enterFirstPersonMode();
+                return true;
+            }
+            // WASD 仅在第一人称模式下作为行走键拦截
+            if (m_fpActive) {
+                switch (ke->key()) {
+                case Qt::Key_W: m_fpManip->setKey('W', true); return true;
+                case Qt::Key_A: m_fpManip->setKey('A', true); return true;
+                case Qt::Key_S: m_fpManip->setKey('S', true); return true;
+                case Qt::Key_D: m_fpManip->setKey('D', true); return true;
+                case Qt::Key_Q: m_fpManip->setKey('Q', true); return true;
+                case Qt::Key_E: m_fpManip->setKey('E', true); return true;
+                default: break;
+                }
+            }
+            break;
+        }
+        case QEvent::KeyRelease: {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            if (ke->isAutoRepeat()) break;
+            if (m_fpActive) {
+                switch (ke->key()) {
+                case Qt::Key_W: m_fpManip->setKey('W', false); return true;
+                case Qt::Key_A: m_fpManip->setKey('A', false); return true;
+                case Qt::Key_S: m_fpManip->setKey('S', false); return true;
+                case Qt::Key_D: m_fpManip->setKey('D', false); return true;
+                case Qt::Key_Q: m_fpManip->setKey('Q', false); return true;
+                case Qt::Key_E: m_fpManip->setKey('E', false); return true;
+                default: break;
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+/**
+ * @brief 双击聚焦：相机飞到指定位姿球体正后上方，沿扫描方向看向球心
+ *
+ * 位姿轴约定（由调试轴验证）：红X=右、绿Y=下、蓝Z=前方扫描方向。
+ * 相机坐标系对齐：
+ *   - 相机 right      = 位姿局部 +X（红，右）
+ *   - 相机视线（前向）= 位姿局部 +Z（蓝，前方扫描方向）
+ *   - 相机 up         = 位姿局部 −Y（绿轴向下，取反为实际上方）
+ * 相机位置 = 球心正后方（-Z）再沿 up 抬升 lift（正后上方），
+ * 距离 dist 稍远，兼顾观察球体与前方场景。
+ * 数学：f=Z, up=−Y → s=Z^(−Y)=X（right）、u=X^Z=−Y（up）。
+ */
+void ViewportWidget::focusOnVertex(long vertexId) {
+    if (!m_graph) return;
+    if (m_fpActive) exitFirstPersonMode();  // 聚焦使用轨迹球，先退出第一人称
+    auto it = m_graph->keyframes.find(vertexId);
+    if (it == m_graph->keyframes.end()) return;
+    const auto& pose = it->second->estimate();   // Eigen::Isometry3d
+
+    // 球心（位姿平移）、前向（局部 z 轴=扫描方向）、up（局部 y 轴取反）
+    osg::Vec3d center(pose.translation().x(),
+                      pose.translation().y(),
+                      pose.translation().z());
+    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
+    osg::Vec3d forward(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(-dirY.x(), -dirY.y(), -dirY.z());
+    forward.normalize();
+    up.normalize();
+
+    // 相机距离：以位姿球体半径的比例（聚焦到单个位姿，近距离观察球体）
+    double radius = m_sceneViz->sphereRadius();
+    double dist = (radius > 1e-6) ? radius * 12.0 : 6.0;   // 正后方距离（稍远）
+    double lift = (radius > 1e-6) ? radius * 4.0 : 2.0;    // 沿 up（实际上方）的抬升量
+    // 相机位于球心正后上方：正后方（-forward）再沿 up 抬升 lift
+    osg::Vec3d eye = center - forward * dist + up * lift;
+
+    // 设置轨迹球相机：eye / center / up，球心居中、朝向球心。
+    // 只需 setTransformation：TrackballManipulator 会据此更新内部状态，
+    // 每帧由 getInverseMatrix() 自动生成视图矩阵（手动 setViewMatrix
+    // 会与操作器每帧的矩阵计算冲突）
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (manip) {
+        manip->setTransformation(eye, center, up);
+        // 聚焦后相机距离骤减（约 radius×12，可能仅数米），而 Trackball 的
+        // 滚轮/平移步长都与当前距离成正比，退回工作视距会变得极慢。
+        // 提高滚轮缩放系数（OSG 默认 0.1），保存原值供 resetCamera /
+        // 双击空白处取消聚焦时恢复
+        if (m_savedWheelZoomFactor < 0.0) {
+            m_savedWheelZoomFactor = manip->getWheelZoomFactor();
+        }
+        manip->setWheelZoomFactor(0.5);
+    }
+    // 聚焦淡化：全体标记透明度压到最低，目标锥体保持稍高不透明度
+    m_sceneViz->setFocusedVertex(vertexId);
+    m_osgWidget->update();
+}
+
+/**
+ * @brief 双击点云居中：轨迹球旋转中心移到命中的点云点
+ *
+ * 保持相机眼点与向上方向不变，仅把视线中心（= 轨迹球旋转中心）
+ * 移到命中点：该点随即位于屏幕中央，后续拖拽即绕该点公转，
+ * 旋转过程中该点恒居屏幕中心。同时恢复滚轮缩放系数
+ * （若此前处于聚焦缩小状态，避免缩放步长过细）。
+ */
+void ViewportWidget::onFocusPoint(const osg::Vec3d& point) {
+    if (m_fpActive) exitFirstPersonMode();  // 轨迹球操作，先退出第一人称
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!manip) return;
+
+    osg::Vec3d eye, center, up;
+    manip->getTransformation(eye, center, up);
+    manip->setTransformation(eye, point, up);
+    restoreWheelZoomFactor();
+    m_osgWidget->update();
+}
+
+/**
+ * @brief Ctrl+双击：切换到指定关键帧的位姿视角
+ *
+ * 相机眼点 = 关键帧位姿平移（相机光心），视线沿位姿局部 +Z（扫描
+ * 方向），up 取局部 −Y（Y 轴向下）。轨迹球中心放在前方 lookAhead
+ * 处，进入后拖拽绕其旋转；聚焦淡化与滚轮缩放语义与旧双击聚焦一致。
+ * 数学同 focusOnVertex：f=Z, up=−Y。
+ */
+void ViewportWidget::onFrameView(long vertexId) {
+    if (vertexId < 0 || !m_graph) return;
+    if (m_fpActive) exitFirstPersonMode();
+    auto it = m_graph->keyframes.find(vertexId);
+    if (it == m_graph->keyframes.end()) return;
+    const auto& pose = it->second->estimate();
+
+    osg::Vec3d eye(pose.translation().x(),
+                   pose.translation().y(),
+                   pose.translation().z());
+    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
+    osg::Vec3d forward(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(-dirY.x(), -dirY.y(), -dirY.z());
+    forward.normalize();
+    up.normalize();
+
+    // 轨迹球中心放在前方（帧视角下的注视点）
+    double radius = m_sceneViz->sphereRadius();
+    double lookAhead = (radius > 1e-6) ? radius * 10.0 : 5.0;
+    osg::Vec3d center = eye + forward * lookAhead;
+
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!manip) return;
+    manip->setTransformation(eye, center, up);
+    if (m_savedWheelZoomFactor < 0.0) {
+        m_savedWheelZoomFactor = manip->getWheelZoomFactor();
+    }
+    manip->setWheelZoomFactor(0.5);
+    m_sceneViz->setFocusedVertex(vertexId);
     m_osgWidget->update();
 }
 
@@ -417,11 +786,102 @@ void ViewportWidget::refreshScene() {
     m_osgWidget->update();
 }
 
-void ViewportWidget::rebuildPointClouds() {
+// ---------------------------------------------------------------------------
+// 异步点云构建调度
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 请求重建点云（异步，自动合并）
+ *
+ * 若已有构建任务在运行，仅标记 pending，当前任务完成后自动再启动一次，
+ * 避免多次连续触发（自动回环插入边、图优化等）导致并行构建竞争。
+ */
+void ViewportWidget::requestCloudBuild() {
     if (!m_graph) return;
-    m_sceneViz->rebuildPointClouds(m_graph);
-    emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
-    m_osgWidget->update();
+    m_cloudBuildPending = true;
+    if (m_cloudBuildRunning) return;  // 已有任务在跑，完成后再处理
+    startCloudBuild();
+}
+
+/**
+ * @brief 启动后台点云构建任务
+ *
+ * 计算密集部分（位姿快照、CPU 变换、体素降采样、顶点数组构建）
+ * 在 QtConcurrent 工作线程执行，不阻塞 UI。完成后由
+ * onCloudBuildFinished() 在主线程换入场景。
+ */
+void ViewportWidget::startCloudBuild() {
+    m_cloudBuildRunning = true;
+    m_cloudBuildPending = false;
+    m_cloudBuildActiveSeq = m_cloudBuildSeq;
+
+    auto graph = m_graph;
+    hdl_graph_slam::BuildOptions options;
+    options.lodEnabled = m_sceneViz->lodEnabled();
+    // 原始层开关：打开时 builder 额外生成里程计位姿点云（参照底图）
+    options.showOriginalLayer = m_sceneViz->odomLayerEnabled();
+    // 传入当前颜色参数：builder 在后台生成与当前设置一致的颜色，
+    // 主线程 commit 时零遍历（避免全量重着色卡顿）
+    options.useAutoColorRange = m_sceneViz->isAutoColorRange();
+    options.colorZMin = m_sceneViz->getColorZMin();
+    options.colorZMax = m_sceneViz->getColorZMax();
+    options.opacity   = m_sceneViz->getPointOpacity();
+    m_cloudBuildWatcher->setFuture(QtConcurrent::run([graph, options]() {
+        return hdl_graph_slam::PointCloudBuilder::build(graph, options);
+    }));
+}
+
+/**
+ * @brief 后台点云构建完成（主线程回调）
+ *
+ * 若构建期间图已更换/关闭（版本号不匹配）则丢弃结果；
+ * 否则换入场景、发射数据范围信号并刷新视图。
+ */
+void ViewportWidget::onCloudBuildFinished() {
+    m_cloudBuildRunning = false;
+
+    if (m_cloudBuildActiveSeq == m_cloudBuildSeq) {
+        auto result = m_cloudBuildWatcher->result();
+        m_sceneViz->commitPointCloudBuild(std::move(result));
+
+        // 发射数据范围信号供 UI 面板初始化/更新
+        emit cloudDataReady(m_sceneViz->getDataZMin(), m_sceneViz->getDataZMax());
+
+        // LOD 状态提示：手动模式恢复用户选择的层级；自动模式从 level 0 起步
+        if (m_sceneViz->lodEnabled()) {
+            if (m_lodManualMode && m_sceneViz->lodLevelCount() > 1) {
+                int level = qBound(0, m_lodManualLevel,
+                                   m_sceneViz->lodLevelCount() - 1);
+                m_sceneViz->setLodLevel(level);
+                emit lodLevelChanged(level, m_sceneViz->lodLevelCount());
+            } else {
+                emit lodLevelChanged(0, m_sceneViz->lodLevelCount());
+            }
+        }
+        m_osgWidget->update();
+
+        // 点云渲染完成判定：分块渐进上传开始前标记"待检测"；
+        // 若本次构建无分块（空点云）则立即通知完成，避免加载指示卡死
+        m_chunkUploadWasPending = m_sceneViz->chunkUploadPending();
+        if (!m_chunkUploadWasPending) {
+            emit cloudRenderFinished();
+        }
+    } else {
+        // 构建被丢弃（图已更换/关闭）：没有新点云要渲染，立即通知完成
+        emit cloudRenderFinished();
+    }
+
+    // 构建期间有新请求（预算变化/优化完成等）→ 用最新状态再构建一次
+    if (m_cloudBuildPending) {
+        startCloudBuild();
+    }
+}
+
+/**
+ * @brief 重建点云（异步入口，保持历史调用点兼容）
+ */
+void ViewportWidget::rebuildPointClouds() {
+    requestCloudBuild();
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +900,19 @@ void ViewportWidget::rebuildPointClouds() {
  * 因此这里只跟踪 FPS，不执行逐帧几何体重建。
  */
 void ViewportWidget::updateScene() {
+    // 分块点云渐进上传推进（每帧一块，摊平大 VBO 上传的 GPU 卡顿）
+    m_sceneViz->advanceChunkUpload();
+
+    // 点云渲染完成检测：渐进上传从"进行中"变为"完成"时通知 UI
+    // （MainWindow 据此停止加载动画，保证 spinner 持续到点云全部渲染出来）
+    {
+        const bool pending = m_sceneViz->chunkUploadPending();
+        if (m_chunkUploadWasPending && !pending) {
+            emit cloudRenderFinished();
+        }
+        m_chunkUploadWasPending = pending;
+    }
+
     // 正交投影模式下，动态跟踪摄像机距离
     if (m_useOrthographic) {
         osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
@@ -467,6 +940,38 @@ void ViewportWidget::updateScene() {
     }
 
     if (!m_graph) return;
+
+    // LOD 级别切换：手动模式固定层级，否则按相机到点云包围球的距离
+    // 自动切换（带迟滞防抖）。级别 0 = 全量（近处），级别 1 = 第一层
+    // 降采样（远处）。升级阈值 dist > R×2，降级阈值 dist < R×1.5，
+    // 两阈值之间存在死区，避免相机在边界来回导致频繁切换。
+    if (!m_lodManualMode && m_sceneViz->lodEnabled() &&
+        m_sceneViz->lodLevelCount() > 1) {
+        osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+        if (viewer) {
+            osg::Vec3d eye, center, up;
+            viewer->getCamera()->getViewMatrixAsLookAt(eye, center, up);
+            Eigen::Vector3d c = m_sceneViz->boundsCenter();
+            double R = m_sceneViz->boundsRadius();
+            if (R > 1e-6) {
+                double dist = (eye - osg::Vec3d(c.x(), c.y(), c.z())).length();
+                int cur = m_sceneViz->currentLodLevel();
+                int maxLevel = m_sceneViz->lodLevelCount() - 1;
+                int target = cur;
+                if (cur < maxLevel && dist > R * 2.0) {
+                    target = cur + 1;  // 拉远 → 低分辨率
+                } else if (cur > 0 && dist < R * 1.5) {
+                    target = cur - 1;  // 拉近 → 高分辨率
+                }
+                if (target != cur) {
+                    m_sceneViz->setLodLevel(target);
+                    // 提示层级切换（渲染面板持续显示 + 状态栏临时提示）
+                    emit lodLevelChanged(target, m_sceneViz->lodLevelCount());
+                    m_osgWidget->update();
+                }
+            }
+        }
+    }
 
     // FPS 跟踪（滚动 1 秒平均）
     m_frameCount++;
@@ -508,6 +1013,11 @@ void ViewportWidget::selectVertex(long vertexId) {
 
 void ViewportWidget::highlightPlaybackVertex(long vertexId) {
     m_sceneViz->highlightPlaybackVertex(vertexId);
+    m_osgWidget->update();
+}
+
+void ViewportWidget::setPlaybackRetain(bool retain) {
+    m_sceneViz->setPlaybackRetain(retain);
     m_osgWidget->update();
 }
 
