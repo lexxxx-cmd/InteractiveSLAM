@@ -232,10 +232,11 @@ public:
             m_uploadLevel = -1;
         }
 
-        // 全量数据已更新：若存在高亮，重建高亮几何体（全量白色）
-        if (!m_highlightIds.empty()) {
-            rebuildHighlightGeometry();
-        }
+        // 全量数据已更新：高亮几何体持有的是旧地图的点数据，必须按当前
+        // 高亮状态重建；前缀高亮走原地着色，也需要在新数据上重新着色。
+        // 无高亮时必须保持 builder 生成的全量不透明着色，不能走
+        // applyHighlight（它会把所有帧压到半透明）。
+        if (highlightActive()) refreshHighlight();
     }
 
     /**
@@ -299,7 +300,7 @@ public:
         // 构建后用户改过颜色范围/透明度时，切换级别需用当前参数重新着色；
         // 未改动时颜色已由 builder 生成，直接使用（零遍历）
         if (!m_colorParamsValid) recolorAll();
-        if (!m_highlightIds.empty()) applyHighlight();
+        if (highlightActive()) refreshHighlight();
 
         // 原始层跟随当前 LOD 级别（两层渲染索引语义一致，直接镜像级别号）
         m_odomActiveLevel = level;
@@ -338,6 +339,7 @@ public:
      */
     void clearHighlight() {
         m_highlightIds.clear();
+        m_highlightPrefixId = -1;
         recolorAll();
         m_highlightVertices->clear();
         m_highlightColors->clear();
@@ -354,10 +356,55 @@ public:
      * @param highlightIds 需要高亮的顶点 ID 集合（空集合 = 取消高亮）
      */
     void recolorHighlight(const std::set<long>& highlightIds) {
+        m_highlightPrefixId = -1;   // 集合语义：退出前缀模式
         m_highlightIds = highlightIds;
         applyHighlight();          // 主几何体：选中帧淡化，非选中帧半透明
         rebuildHighlightGeometry(); // 高亮几何体：选中帧全量白色点云
     }
+
+    /**
+     * @brief 前缀高亮：整帧高亮所有 vertexId <= endFrameId 的关键帧
+     *
+     * 与 recolorHighlight() 的「点集合」语义不同，本模式的被高亮帧是
+     * **由终点 ID 推导的前缀**（所有 id <= endFrameId 的关键帧），因此
+     * 调用是纯函数式的：终点回退（倒放、倒拖滑块、跳转回首帧）时高亮
+     * 自动缩小，不需要任何补偿/清理逻辑，也不会残留上一轮走过的帧。
+     *
+     * 渲染代价刻意与 recolorHighlight() 区分开：前缀会随播放推进增长到
+     * 接近整张地图，若沿用「独立全量高亮几何体」就必须每次更新重建一份
+     * 全图副本（O(N) 顶点拷贝），代价随播放时间线性增长。因此前缀帧改为
+     * **在主几何体上原地染白**，更新成本只等于一次 O(当前渲染级别点数)
+     * 的重着色；代价是前缀帧按当前 LOD 级别渲染（不再强制全量）。
+     *
+     * extraIds 用于叠加少量「集合语义」的高亮帧（如当前选中帧的时序
+     * 邻居），这部分仍走独立高亮几何体以获得全量白色——数量恒为常数，
+     * 内存与重建代价可忽略。
+     *
+     * @param endFrameId 前缀终点帧 ID（< 0 等价于 clearHighlight()）
+     * @param extraIds   额外按集合语义高亮的帧 ID（可空）
+     */
+    void recolorHighlightPrefix(long endFrameId,
+                                const std::set<long>& extraIds = {}) {
+        if (endFrameId < 0) {
+            clearHighlight();
+            return;
+        }
+        m_highlightPrefixId = endFrameId;
+        m_highlightIds = extraIds;
+        applyHighlight();
+        rebuildHighlightGeometry();  // 仅覆盖 extraIds（可为空 → 隐藏几何体）
+    }
+
+    /** @brief 当前是否处于前缀高亮模式 */
+    bool prefixHighlightActive() const { return m_highlightPrefixId >= 0; }
+
+    /** @brief 当前是否存在任意点云高亮（前缀或集合） */
+    bool highlightActive() const {
+        return m_highlightPrefixId >= 0 || !m_highlightIds.empty();
+    }
+
+    /** @brief 当前前缀高亮的终点帧 ID（-1 = 未启用前缀模式） */
+    long highlightPrefixEnd() const { return m_highlightPrefixId; }
 
     /**
      * @brief 清除所有数据（用于完全重建）
@@ -366,6 +413,7 @@ public:
         m_allWorldPoints.clear();
         m_cloudRanges.clear();
         m_highlightIds.clear();
+        m_highlightPrefixId = -1;
         m_lodLevels.clear();
         for (auto& chunk : m_allChunkGeoms) {
             m_geode->removeDrawable(chunk);
@@ -416,10 +464,9 @@ public:
         if (opacity == m_opacity) return;  // 无变化，避免无谓的全量重着色
         m_opacity = opacity;
         m_colorParamsValid = false;  // 颜色与构建时参数不一致，切换级别时需重着色
-        if (!m_highlightIds.empty()) {
+        if (highlightActive()) {
             // 高亮存在时同步更新主几何体着色与高亮几何体的 alpha
-            applyHighlight();
-            rebuildHighlightGeometry();
+            refreshHighlight();
         } else {
             recolorAll();
         }
@@ -465,6 +512,7 @@ public:
         m_useAutoColorRange = false;
         m_colorParamsValid = false;  // 颜色与构建时参数不一致，切换级别时需重着色
         recolorAll();
+        if (highlightActive()) refreshHighlight();  // recolorAll 会抹掉高亮，重新叠加
     }
 
     /** @brief 设置是否自动计算颜色范围 */
@@ -477,6 +525,7 @@ public:
         }
         m_colorParamsValid = false;  // 颜色与构建时参数不一致，切换级别时需重着色
         recolorAll();
+        if (highlightActive()) refreshHighlight();  // recolorAll 会抹掉高亮，重新叠加
     }
 
     /** @brief 查询是否使用自动颜色范围 */
@@ -635,9 +684,15 @@ private:
     /**
      * @brief 应用当前高亮集合到主几何体
      *
-     * 选中帧在主几何体中淡化（白色低 alpha，作为高亮几何体的底色），
-     * 其余帧半透明。遍历渲染范围而非全量范围，索引经 m_renderIndices
-     * 映射回全量点以获取正确的 Z 值。
+     * 被高亮的帧有两类来源，判定彼此独立、可叠加：
+     *   - 前缀模式（m_highlightPrefixId >= 0）：vertexId <= 前缀终点的帧，
+     *     直接在主几何体上染白（全 alpha），不依赖独立高亮几何体；
+     *   - 集合模式（m_highlightIds）：选中/额外帧在主几何体淡化（白色低
+     *     alpha），全量白色由独立高亮几何体叠加呈现。
+     * 其余帧统一半透明，形成"已播放/选中 vs 未播放"的层次。
+     *
+     * 遍历渲染范围而非全量范围，索引经 m_renderIndices 映射回全量点以
+     * 获取正确的 Z 值。
      */
     void applyHighlight() {
         if (m_lodLevels.empty()) return;
@@ -645,11 +700,18 @@ private:
         if (lg.renderRanges.empty()) return;
 
         const osg::Vec4 white(1.0f, 1.0f, 1.0f, 1.0f);
+        const bool prefixMode = (m_highlightPrefixId >= 0);
         // 遍历每个关键帧的渲染顶点范围
         for (const auto& range : lg.renderRanges) {
-            bool highlighted = m_highlightIds.count(range.vertexId) > 0;
-            // 选中帧：淡化（全量白色由高亮几何体承担）；非选中帧：半透明
-            float alpha = highlighted ? m_opacity * 0.35f : m_opacity * 0.5f;
+            const bool inSet = m_highlightIds.count(range.vertexId) > 0;
+            // 前缀判定按 ID 比较，不依赖帧在点数组中的先后顺序
+            //（graph->keyframes 为 unordered_map，构建出的帧序不保证递增）
+            const bool inPrefix = prefixMode && (range.vertexId <= m_highlightPrefixId);
+            const bool highlighted = inSet || inPrefix;
+            float alpha;
+            if (inSet)          alpha = m_opacity * 0.35f;  // 集合帧：淡化，白色由高亮几何体承担
+            else if (inPrefix)  alpha = m_opacity;          // 前缀帧：原地全量染白
+            else                alpha = m_opacity * 0.5f;   // 其余帧：半透明
             for (size_t i = range.startVertex;
                  i < range.startVertex + range.vertexCount; ++i) {
                 // 定位到所属分块（块间逻辑索引连续）
@@ -748,6 +810,17 @@ private:
     }
 
     /**
+     * @brief 按当前高亮状态重新落地（原地着色 + 独立高亮几何体）
+     *
+     * 供 LOD 切换、构建换入、颜色范围/透明度变化等"颜色被整体重写"
+     * 的路径调用，保证高亮不会因为这些操作被静默抹掉。
+     */
+    void refreshHighlight() {
+        applyHighlight();
+        rebuildHighlightGeometry();
+    }
+
+    /**
      * @brief 定位逻辑渲染索引所属的分块（块间连续，线性查找即可）
      */
     static const CloudChunk* chunkForIndex(const LodLevelGeoms& lg, size_t index) {
@@ -789,7 +862,8 @@ private:
     std::vector<hdl_graph_slam::CloudRange> m_cloudRanges;
 
     // —— 高亮状态 ——
-    std::set<long> m_highlightIds;         ///< 当前高亮的顶点 ID 集合（重建后重新应用）
+    std::set<long> m_highlightIds;         ///< 集合语义高亮的顶点 ID（选中/额外帧，独立几何体全量白色）
+    long m_highlightPrefixId = -1;         ///< 前缀语义高亮的终点帧 ID（-1 = 未启用；所有 id <= 终点的帧原地染白）
 
     // —— LOD 级别数据（分块） ——
     std::vector<LodLevelGeoms> m_lodLevels;  ///< 全部级别（level0 = 主级别）

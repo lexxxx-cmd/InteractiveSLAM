@@ -357,9 +357,7 @@ public:
      */
     void setSelectedVertex(long id) {
         m_selectedVertexId = id;
-        if (m_cloudViz) {
-            m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
-        }
+        syncCloudHighlight();
     }
 
     /** @brief 获取当前选中的顶点 ID */
@@ -393,8 +391,7 @@ public:
      * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
      *
      * @param id 顶点 ID（-1 = 清理播放通道：恢复上一个播放帧的视觉样式
-     *            并清空累积留存集合，不动其他点云高亮，避免抹掉刚建立的
-     *            选择高亮）
+     *            并保留已建立的留存前缀，不动其他点云高亮）
      */
     void highlightPlaybackVertex(long id) {
         long prev = m_playbackPrevId;
@@ -406,56 +403,86 @@ public:
         applyMarkerState(prev);
         applyMarkerState(id);
 
-        // 点云高亮（已很高效，只更新颜色数组）；
-        // id < 0 清理播放通道：会话结束，累积留存集合一并清空
-        //（随后的 selectVertex 会建立新的选中高亮，不受影响）
+        // 点云高亮：由状态推导（唯一事实来源）
+        // 会话结束（id < 0）不清前缀——留存高亮由 m_retainedPrefixEndId 承载，
+        // 随后的 selectVertex 只负责把当前帧切为选中态（红 2 倍标记）。
         if (id < 0) {
-            clearRetainedHighlight();
+            syncCloudHighlight();
             return;
         }
-        if (m_cloudViz) {
-            // 累积模式：历史帧的时序邻居保留在高亮集合中（不随播放消失）
-            if (m_playbackRetain) {
-                if (prev >= 0) {
-                    for (long nid : getTemporalNeighbors(prev))
-                        m_retainedHighlightIds.insert(nid);
-                }
-                std::set<long> combined = m_retainedHighlightIds;
-                for (long nid : getTemporalNeighbors(id))
-                    combined.insert(nid);
-                m_cloudViz->recolorHighlight(combined);
-            } else {
-                m_cloudViz->recolorHighlight(getTemporalNeighbors(id));
-            }
-        }
+        // 会话进行中：留存模式把前缀终点推进到当前帧。前缀范围 = f(终点)，
+        // 因此前进时增长、后退（倒放/倒拖滑块/跳回首帧）时自动缩小回退。
+        if (m_playbackRetain) m_retainedPrefixEndId = id;
+        syncCloudHighlight();
     }
 
     /**
-     * @brief 设置播放累积高亮开关（"播放包点云留存"）
+     * @brief 设置播放累积高亮开关（"播放留存已播放点云"）
      *
-     * 打开后，播放过程中每帧的时序邻居点云保留为白色高亮，
-     * 历史帧不随播放推进消失，形成"已播放区域留存"的视觉效果。
-     * 关闭或会话结束（highlightPlaybackVertex(-1)）时清空留存集合。
+     * 打开后，播放/拖动过程中**所有 id <= 当前帧的关键帧**整帧点云保持
+     * 白色高亮（前缀语义），历史帧不随播放推进消失，形成"已播放区域
+     * 留存"的视觉效果；终点回退时高亮同步缩小。
      *
-     * @param retain true = 累积模式；false = 仅当前帧高亮（默认）
+     * 与旧实现（只累加"播放经过的帧"）的区别：高亮范围完全由当前帧
+     * 推导，与播放路径无关——倒拖滑块、跳转回首帧都能正确回退。
+     *
+     * 关闭时立即丢弃留存前缀，恢复为仅高亮当前帧的时序邻居。
+     * 会话结束后前缀**保留**（点云继续显示已播放区域），直到关闭本
+     * 开关、关闭面板（复选框复位）或重新加载地图。
+     *
+     * @param retain true = 前缀留存模式；false = 仅当前帧高亮（默认）
      */
     void setPlaybackRetain(bool retain) {
+        if (m_playbackRetain == retain) return;
         m_playbackRetain = retain;
-        if (!retain && m_cloudViz) {
-            // 关闭时若正处于播放会话，立即恢复为仅当前帧高亮
-            if (m_playbackPrevId >= 0) {
-                m_cloudViz->recolorHighlight(getTemporalNeighbors(m_playbackPrevId));
-            }
-            m_retainedHighlightIds.clear();
+        if (!retain) {
+            m_retainedPrefixEndId = -1;   // 关闭：丢弃留存前缀
+        } else if (m_playbackPrevId >= 0) {
+            // 播放会话中打开：立即点亮已播放前缀（旧实现需等下一帧才生效）
+            m_retainedPrefixEndId = m_playbackPrevId;
         }
+        syncCloudHighlight();
     }
 
     /** @brief 查询播放累积高亮开关状态 */
     bool playbackRetain() const { return m_playbackRetain; }
 
 private:
-    /** @brief 清空累积高亮留存集合（会话结束路径调用） */
-    void clearRetainedHighlight() { m_retainedHighlightIds.clear(); }
+    /**
+     * @brief 依当前交互状态推导点云高亮并落地（点云高亮的唯一事实来源）
+     *
+     * 三种状态组合：
+     *   - 留存前缀（m_playbackRetain 且已播放过）：所有 id <= 前缀终点的
+     *     关键帧整帧染白；选中帧的时序邻居作为"集合语义"额外叠加
+     *     （继续享受独立几何体的全量白色）；
+     *   - 选中优先：无前缀留存时，高亮选中帧的时序邻居；
+     *   - 播放兜底：无选中时，高亮播放通道当前帧的时序邻居；
+     *   - 三者皆无：清除高亮，恢复默认高程着色。
+     *
+     * 所有会改变高亮状态的入口（选中、播放推进、留存开关、点云重建）
+     * 都只改状态再调用本函数，避免多头发散出不一致的高亮。
+     */
+    void syncCloudHighlight() {
+        if (!m_cloudViz) return;
+
+        if (m_playbackRetain && m_retainedPrefixEndId >= 0) {
+            std::set<long> extra;
+            // 选中帧落在前缀之外（如 Ctrl+Click 选了后面的帧）才额外叠加其
+            // 时序邻居；落在前缀内则不加，避免边界处多亮出 end+1 一帧，
+            // 使"高亮的永远是 <= 当前帧"这一语义保持严格。
+            if (m_selectedVertexId > m_retainedPrefixEndId)
+                extra = getTemporalNeighbors(m_selectedVertexId);
+            m_cloudViz->recolorHighlightPrefix(m_retainedPrefixEndId, extra);
+            return;
+        }
+
+        std::set<long> ids;
+        if (m_selectedVertexId >= 0)      ids = getTemporalNeighbors(m_selectedVertexId);
+        else if (m_playbackPrevId >= 0)   ids = getTemporalNeighbors(m_playbackPrevId);
+
+        if (ids.empty()) m_cloudViz->clearHighlight();
+        else             m_cloudViz->recolorHighlight(ids);
+    }
 
     /**
      * @brief 单个标记的视觉样式（颜色 + 尺寸缩放）
@@ -654,14 +681,8 @@ public:
             m_cloudViz->setColorZRange(savedColorMin, savedColorMax);
         }
 
-        // 恢复选中/播放高亮；无高亮状态时清除高亮并恢复默认着色
-        if (m_selectedVertexId >= 0) {
-            m_cloudViz->recolorHighlight(getTemporalNeighbors(m_selectedVertexId));
-        } else if (m_playbackPrevId >= 0) {
-            m_cloudViz->recolorHighlight(getTemporalNeighbors(m_playbackPrevId));
-        } else {
-            m_cloudViz->clearHighlight();
-        }
+        // 恢复选中/播放/留存高亮；无高亮状态时清除高亮并恢复默认着色
+        syncCloudHighlight();
     }
 
     /** @brief 是否已有点云可视化器（是否有已构建/构建中的点云） */
@@ -794,6 +815,7 @@ private:
         m_selectedVertexId = -1;
         m_playbackPrevId   = -1;
         m_focusedVertexId  = -1;
+        m_retainedPrefixEndId = -1;  // 上一张地图的留存前缀不可跨地图沿用
     }
 
     /**
@@ -878,6 +900,6 @@ private:
     float m_pointOpacity  = 1.0f; ///< 点云透明度（1.0 为不透明）
     bool  m_lodEnabled    = true; ///< LOD 渲染开关（渲染固定为全量 + 第一层两种）
     bool  m_odomLayerEnabled = false; ///< 原始层（里程计位姿参照底图）开关（默认关闭）
-    bool  m_playbackRetain   = false; ///< 播放累积高亮开关（历史帧点云留存）
-    std::set<long> m_retainedHighlightIds; ///< 累积模式下已播放帧的留存高亮集合
+    bool  m_playbackRetain   = false; ///< 播放留存开关（历史帧点云前缀高亮）
+    long  m_retainedPrefixEndId = -1; ///< 留存前缀的终点帧 ID（-1 = 无留存；会话结束后仍保留）
 };

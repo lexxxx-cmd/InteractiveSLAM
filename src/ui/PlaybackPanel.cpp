@@ -79,8 +79,9 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     // ── 留存选项 ──
     m_retainCloudCb = new QCheckBox(tr("Retain played cloud"), this);
     m_retainCloudCb->setToolTip(
-        tr("Keep played frames' point cloud highlighted (white) "
-           "instead of fading out as playback advances"));
+        tr("Keep every keyframe up to the current one highlighted (white) "
+           "instead of only the current frame. The highlight follows the "
+           "current frame, so it rolls back when you step or drag backwards."));
     connect(m_retainCloudCb, &QCheckBox::toggled, this, [this](bool checked) {
         m_viewport->setPlaybackRetain(checked);
     });
