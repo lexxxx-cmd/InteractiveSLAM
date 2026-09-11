@@ -47,8 +47,9 @@ constexpr uint32_t kL0Stride         = 12;
 constexpr uint32_t kPreviewStride    = 16;
 /** @brief 全局粗预览块的目标点数（常驻显存，约 16 MB） */
 constexpr uint64_t kPreviewTargetPoints = 1000000ull;
-/** @brief 某一级点数低于此值就不再生成更粗的级别 */
-constexpr uint32_t kMinLodPoints     = 4096;
+// 注意：逐帧 LOD 的最低目标点数 kMinLodPoints **不在本文件**——它是抽稀策略而非
+// 格式属性（文件里只记录每帧实际生成了几级，故级别数可变、不影响兼容性）。
+// 它已移到 IsfVoxel.h，与渲染侧 CloudRenderData 共用同一个门槛。
 /** @brief 默认每页帧数（页 = 文件中的一块连续区间） */
 constexpr uint32_t kDefaultFramesPerPage = 4096;
 /** @brief 默认每 chunk 帧数（chunk = 渲染期一个 Drawable 覆盖的帧段） */

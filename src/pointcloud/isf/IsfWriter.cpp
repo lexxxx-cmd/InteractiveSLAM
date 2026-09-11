@@ -298,6 +298,7 @@ WriteResult write(const std::shared_ptr<InteractiveGraph>& graph,
         // LOD 索引块（指向本帧自己的 L0 顶点，索引 < n）
         for (uint32_t L = 1; L < fh.lodLevelCount; ++L) {
             const size_t target = n >> L;          // N/2, N/4, N/8
+            // 逐帧门槛（IsfVoxel.h 的 kMinLodPoints）：帧太小就不再生成更粗级别
             if (target < kMinLodPoints) break;     // 太小不再生成更粗级别
             const auto tLod = PerfClock::now();
             decimateToTarget(xyz.data(), n, target, lo, hi, lodIdx);

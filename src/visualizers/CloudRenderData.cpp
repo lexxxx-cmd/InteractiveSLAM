@@ -383,7 +383,10 @@ ChunkBuildResult buildChunks(const std::shared_ptr<InteractiveGraph>& graph,
                 // （高亮/播放时该帧不会消失），且每帧的 LOD 不依赖邻帧是否驻留。
                 for (uint32_t L = 1; L < lodLevels; ++L) {
                     const size_t target = count >> L;  // N/2, N/4, N/8
-                    if (target < 8) break;  // 帧太小则不再生成更粗级别
+                    // 与 .isf 打包共用同一逐帧门槛（IsfVoxel.h 的 kMinLodPoints）：
+                    // 两条路径必须产生一致的逐帧 LOD，否则"从 .isf 分页"与"直接构建
+                    // chunk"在同一个切换级别上会显示不同点数（原先这里是写死的 8）
+                    if (target < isf::kMinLodPoints) break;
                     const auto tLod = PerfClock::now();
                     isf::decimateToTarget(xyz.data(), count, target, lo, hi, frameIdx);
                     res.lodMs += msSince(tLod);
