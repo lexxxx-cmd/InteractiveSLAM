@@ -118,6 +118,15 @@ set(VISUALIZER_SOURCES
     src/visualizers/CloudPerfLog.cpp                      # 性能日志 + NVML 显存查询（基线测量用）
 )
 
+# --- 点云帧存储（.isf）源文件 ---
+# 说明：Phase 1 产物。目前只被 tools/isf_pack 使用；Phase 2 接入渲染路径时
+#       会再加进主程序目标。刻意不提前塞进 appInteractiveSLAM，避免影响
+#       用户正在跑的 Phase 0 基线构建。
+set(ISF_SOURCES
+    src/pointcloud/isf/IsfWriter.cpp                      # .isf/.isf.idx 打包器
+    src/pointcloud/isf/IsfReader.cpp                      # .isf/.isf.idx 读取器（mmap + 顺序读兜底）
+)
+
 # ============================================================================
 # 第三方子项目
 # ============================================================================
@@ -223,6 +232,33 @@ target_link_libraries(test_data_loading PRIVATE
 )
 if(MSVC)
     target_compile_options(test_data_loading PRIVATE /W3 /wd4996)
+endif()
+
+# ============================================================================
+# .isf 打包/校验命令行工具（Phase 1 验收入口）
+# ============================================================================
+
+# 链接方式照抄 test_data_loading：不定义 HAS_PCLOMP，因此不必依赖 ndt_omp
+add_executable(isf_pack
+    tools/isf_pack.cpp            # 打包 + 结构校验 + 与源点云逐位往返比对
+    ${DATA_SOURCES}               # 数据层源文件（含 InteractiveGraph 加载）
+    ${ISF_SOURCES}                # .isf 读写器
+)
+target_include_directories(isf_pack PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${EIGEN3_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${G2O_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(isf_pack PRIVATE
+    ${PCL_LIBRARIES}
+    ${G2O_LIBRARIES}
+    Boost::filesystem
+    yaml-cpp
+)
+if(MSVC)
+    target_compile_options(isf_pack PRIVATE /W3 /wd4996)
 endif()
 
 # ============================================================================
