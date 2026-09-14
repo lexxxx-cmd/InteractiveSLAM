@@ -289,7 +289,13 @@ public:
         m_vertexOpacity = opacity;
         m_focusedVertexId = -1;  // 手动调透明度视为退出聚焦淡化状态
         if (m_sphereViz) {
-            m_sphereViz->setOpacity(opacity);
+            if (m_playbackSoloId >= 0) {
+                // 播放独显进行中：其余标记保持隐藏，当前帧用新不透明度点亮
+                m_sphereViz->setOpacity(0.0f);
+                m_sphereViz->updateSphereOpacityScaled(m_playbackSoloId, opacity);
+            } else {
+                m_sphereViz->setOpacity(opacity);
+            }
         }
     }
 
@@ -416,6 +422,10 @@ public:
      * 会话结束（暂停/单步/播完/关面板/关图/外部选择）由调用方传
      * id = -1 清理，视觉交还给"选中"高亮，避免两个红色标记并存。
      *
+     * 播放独显（applyPlaybackSolo）随本通道启停：会话进行中隐藏除
+     * 当前帧外的所有视锥体（其余标记 alpha = 0），仅当前帧保持用户
+     * 整体不透明度，随播放/拖动逐帧翻转；会话结束统一恢复。
+     *
      * @param id 顶点 ID（-1 = 清理播放通道：恢复上一个播放帧的视觉样式
      *            并保留已建立的留存前缀，不动其他点云高亮）
      */
@@ -428,6 +438,9 @@ public:
         applyMarkerState(oldSelected);  // 旧选中恢复普通态（若已被清除）
         applyMarkerState(prev);
         applyMarkerState(id);
+
+        // 播放独显：只保留当前帧视锥体的不透明度，其余全部隐藏
+        applyPlaybackSolo(id);
 
         // 点云高亮：由状态推导（唯一事实来源）
         // 会话结束（id < 0）不清前缀——留存高亮由 m_retainedPrefixEndId 承载，
@@ -562,6 +575,44 @@ private:
                 break;
             }
         }
+    }
+
+    /**
+     * @brief 播放独显：会话进行中隐藏除当前帧外的所有视锥体标记
+     *
+     * 与双击聚焦淡化（setFocusedVertex）共用同一条按标记 alpha 覆盖
+     * 管线，但语义相反：淡化是全体压低、目标稍高；独显是其余全隐藏
+     * （alpha = 0）、目标保持用户整体不透明度，随播放/拖动逐帧翻转
+     * （上一帧压回 0，当前帧点亮），单次 O(标记顶点数)，与总帧数无关。
+     *
+     * 会话开始（首次 id >= 0）通过全局 setOpacity(0) 一次性隐藏全部，
+     * 并顺带清除聚焦淡化等旧覆盖；会话结束（id < 0）恢复用户整体
+     * 不透明度，若聚焦淡化仍激活则交还其状态。
+     *
+     * @param id 播放通道当前帧 ID（-1 = 结束会话并恢复）
+     */
+    void applyPlaybackSolo(long id) {
+        if (!m_sphereViz) return;
+        if (id >= 0) {
+            if (m_playbackSoloId < 0) {
+                // 会话开始：整体压到全透明（同时清除聚焦淡化等旧覆盖）
+                m_sphereViz->setOpacity(0.0f);
+            } else if (m_playbackSoloId != id) {
+                // 推进：仅翻转上一帧的独显覆盖，不整表重写
+                m_sphereViz->updateSphereOpacityScaled(m_playbackSoloId, 0.0f);
+            }
+            m_playbackSoloId = id;
+            m_sphereViz->updateSphereOpacityScaled(id, m_vertexOpacity);
+            return;
+        }
+        // 会话结束：恢复用户整体不透明度（清除全部独显覆盖），
+        // 聚焦淡化若仍激活则一并交还
+        if (m_playbackSoloId < 0) return;
+        m_playbackSoloId = -1;
+        m_sphereViz->setOpacity(m_focusedVertexId >= 0 ? kFocusDimOpacity
+                                                       : m_vertexOpacity);
+        if (m_focusedVertexId >= 0)
+            m_sphereViz->updateSphereOpacity(m_focusedVertexId, kFocusTargetOpacity);
     }
 
 public:
@@ -776,8 +827,10 @@ private:
         }
         m_sphereViz->clear();
         m_sphereViz->setRadius(m_sphereRadius);
-        m_sphereViz->setOpacity(m_focusedVertexId >= 0 ? kFocusDimOpacity
-                                                       : m_vertexOpacity);
+        // 播放独显优先于聚焦淡化（会话中其余标记全隐藏）
+        if (m_playbackSoloId >= 0)       m_sphereViz->setOpacity(0.0f);
+        else if (m_focusedVertexId >= 0) m_sphereViz->setOpacity(kFocusDimOpacity);
+        else                             m_sphereViz->setOpacity(m_vertexOpacity);
         m_sphereViz->setDrawLocalAxes(m_drawLocalAxes);
 
         // 清空并预标记中心缓存
@@ -823,8 +876,11 @@ private:
 
             m_sphereViz->appendFrustum(center, rot, style.color, id, customRadius);
         }
-        // 聚焦淡化状态：目标标记在重建后仍保持稍高的不透明度
-        if (m_focusedVertexId >= 0) {
+        // 播放独显：重建后当前帧仍以用户整体不透明度点亮；
+        // 否则聚焦淡化状态：目标标记保持稍高的不透明度
+        if (m_playbackSoloId >= 0) {
+            m_sphereViz->updateSphereOpacityScaled(m_playbackSoloId, m_vertexOpacity);
+        } else if (m_focusedVertexId >= 0) {
             m_sphereViz->updateSphereOpacity(m_focusedVertexId, kFocusTargetOpacity);
         }
         m_sphereViz->finish();
@@ -851,6 +907,7 @@ private:
         m_selectedVertexId = -1;
         m_playbackPrevId   = -1;
         m_focusedVertexId  = -1;
+        m_playbackSoloId   = -1;  // 上一张地图的播放会话独显不可跨地图沿用
         m_retainedPrefixEndId = -1;  // 上一张地图的留存前缀不可跨地图沿用
     }
 
@@ -914,6 +971,7 @@ private:
     std::set<long> m_loopCandidateIds;     ///< 回环检测候选顶点 ID 集合
     long m_selectedVertexId = -1;          ///< 当前选中的顶点 ID（-1 表示无选中）
     long m_playbackPrevId = -1;            ///< 播放轴上一个高亮的顶点 ID（用于恢复颜色）
+    long m_playbackSoloId = -1;            ///< 播放独显的当前帧 ID（-1 = 无会话；会话中其余视锥体隐藏）
     long m_focusedVertexId = -1;           ///< 双击聚焦淡化的目标顶点 ID（-1 = 未聚焦）
     int  m_highlightWindowHalf = 1;        ///< 高亮窗口半宽（与 m_submapWindowHalfSize 一致）
 

@@ -323,6 +323,37 @@ public:
         m_axesColors->dirty();
     }
 
+    /**
+     * @brief 按"整体不透明度"语义更新单个标记的 alpha（不重建几何体）
+     *
+     * 与 updateSphereOpacity() 的平铺 alpha 不同，本方法对投影屏、
+     * 线框、坐标轴分别乘以各自的系数（kPlaneAlphaMul/kLineAlphaMul/
+     * kAxisAlpha），使目标标记的视觉与全局 setOpacity() 下的正常标记
+     * 完全一致。覆盖值同样记录进 m_alphaOverrides，后续
+     * updateSphereColor() 会保留。用于播放独显：其余标记全隐藏时，
+     * 单独以用户整体不透明度点亮当前帧标记。
+     *
+     * @param vertexId 顶点 ID（需已在 appendFrustum 中添加过）
+     * @param opacity  该标记的整体不透明度（0.0 ~ 1.0）
+     */
+    void updateSphereOpacityScaled(long vertexId, float opacity) {
+        auto it = m_sphereRanges.find(vertexId);
+        if (it == m_sphereRanges.end()) return;
+        m_alphaOverrides[vertexId] = opacity;
+        const auto& range = it->second;
+        unsigned int idx = range.startIndex;
+        auto apply = [this, &idx, &opacity](const float* mul, int count) {
+            for (int i = 0; i < count; ++i)
+                (*m_colors)[idx++].a() = opacity * mul[i];
+        };
+        apply(kPlaneAlphaMul, range.planeCount);
+        apply(kLineAlphaMul,  range.lineCount);
+        for (int i = 0; i < range.axisCount; ++i)
+            (*m_axesColors)[range.axisStartIndex + i].a() = opacity * kAxisAlpha;
+        m_colors->dirty();
+        m_axesColors->dirty();
+    }
+
     /** @brief 设置标记特征尺寸（触发外部调用方重建几何体） */
     void setRadius(float r) { m_radius = r; }
 

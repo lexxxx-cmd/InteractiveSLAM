@@ -77,6 +77,10 @@ public slots:
      * 用于播放轴滑块拖动/自动播放时实时更新球体颜色和点云高亮。
      * 只更新颜色数组，不触发完整的球体几何体重建。
      *
+     * 同时驱动播放独显：vertexId >= 0（会话进行中）时隐藏除当前帧外
+     * 的所有视锥体，仅当前帧保持用户设置的不透明度；vertexId = -1
+     * （会话结束）恢复全部视锥体显示。
+     *
      * @param vertexId 顶点 ID（-1 取消高亮）
      */
     void highlightPlaybackVertex(long vertexId);
