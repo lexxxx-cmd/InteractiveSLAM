@@ -9,7 +9,7 @@
         <translation>自动回环闭合</translation>
     </message>
     <message>
-        <location line="+33"/>
+        <location line="+37"/>
         <source>Automatic Loop Closure</source>
         <translation>自动回环闭合</translation>
     </message>
@@ -87,23 +87,23 @@
 <context>
     <name>AutoLoopClosurePanel</name>
     <message>
-        <location filename="../src/ui/AutoLoopClosurePanel.cpp" line="+55"/>
-        <location line="+35"/>
-        <location line="+78"/>
+        <location filename="../src/ui/AutoLoopClosurePanel.cpp" line="+60"/>
+        <location line="+46"/>
+        <location line="+143"/>
         <location line="+44"/>
         <source>Status: Stopped</source>
         <translation>状态：已停止</translation>
     </message>
     <message>
-        <location line="-156"/>
-        <location line="+26"/>
-        <location line="+88"/>
+        <location line="-232"/>
+        <location line="+37"/>
+        <location line="+153"/>
         <location line="+44"/>
         <source>Start</source>
         <translation>开始</translation>
     </message>
     <message>
-        <location line="-127"/>
+        <location line="-192"/>
         <source>Status</source>
         <translation>状态</translation>
     </message>
@@ -114,12 +114,12 @@
     </message>
     <message>
         <location line="+2"/>
-        <location line="+132"/>
+        <location line="+197"/>
         <source>Current source: —</source>
         <translation>当前源：—</translation>
     </message>
     <message>
-        <location line="-126"/>
+        <location line="-191"/>
         <source>Edges inserted: 0</source>
         <translation>已插入边：0</translation>
     </message>
@@ -149,7 +149,29 @@
         <translation>上次匹配：</translation>
     </message>
     <message>
-        <location line="+49"/>
+        <location line="+5"/>
+        <location line="+48"/>
+        <location line="+14"/>
+        <source>Stride dist: —</source>
+        <translation>采样步距：—</translation>
+    </message>
+    <message>
+        <location line="-61"/>
+        <source>Euclidean distances between consecutive sampled keyframes (min / avg / max). Use as reference for the distance threshold.</source>
+        <translation>相邻采样关键帧之间的欧氏距离（最小 / 平均 / 最大），可作为距离阈值的参考。</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Stride dist:</source>
+        <translation>采样步距：</translation>
+    </message>
+    <message>
+        <location line="+76"/>
+        <source>Stride dist: %1 / %2 / %3 m</source>
+        <translation>采样步距：%1 / %2 / %3 m</translation>
+    </message>
+    <message>
+        <location line="+25"/>
         <source>No Graph</source>
         <translation>无图</translation>
     </message>
@@ -159,7 +181,7 @@
         <translation>请先加载地图再开始回环检测。</translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+29"/>
         <source>Method Unavailable</source>
         <translation>方法不可用</translation>
     </message>
@@ -195,8 +217,8 @@
         <translation>上次：%1 → %2  配准评分=%3</translation>
     </message>
     <message>
-        <location line="-141"/>
-        <location line="+146"/>
+        <location line="-206"/>
+        <location line="+211"/>
         <source>Last: —</source>
         <translation>上次：—</translation>
     </message>
@@ -204,12 +226,12 @@
 <context>
     <name>BagOpenDialog</name>
     <message>
-        <location filename="../src/ui/BagOpenDialog.cpp" line="+28"/>
+        <location filename="../src/ui/BagOpenDialog.cpp" line="+26"/>
         <source>Import ROS Bag</source>
         <translation>导入 ROS Bag</translation>
     </message>
     <message>
-        <location line="+83"/>
+        <location line="+82"/>
         <source>Topics</source>
         <translation>话题</translation>
     </message>
@@ -269,27 +291,23 @@
         <translation>输出</translation>
     </message>
     <message>
-        <location line="+6"/>
         <source>(empty = temporary directory)</source>
-        <translation>（留空 = 临时目录）</translation>
+        <translation type="vanished">（留空 = 临时目录）</translation>
     </message>
     <message>
-        <location line="+2"/>
         <source>Browse...</source>
-        <translation>浏览...</translation>
+        <translation type="vanished">浏览...</translation>
+    </message>
+    <message>
+        <source>Choose Output Directory</source>
+        <translation type="vanished">选择输出目录</translation>
+    </message>
+    <message>
+        <source>Output directory:</source>
+        <translation type="vanished">输出目录：</translation>
     </message>
     <message>
         <location line="+3"/>
-        <source>Choose Output Directory</source>
-        <translation>选择输出目录</translation>
-    </message>
-    <message>
-        <location line="+4"/>
-        <source>Output directory:</source>
-        <translation>输出目录：</translation>
-    </message>
-    <message>
-        <location line="+2"/>
         <source>Save full-resolution raw.pcd</source>
         <translation>保存全分辨率 raw.pcd</translation>
     </message>
@@ -297,7 +315,7 @@
 <context>
     <name>ColorRangeSettingsDialog</name>
     <message>
-        <location filename="../src/ui/RenderingAdvancedDialogs.cpp" line="+142"/>
+        <location filename="../src/ui/RenderingAdvancedDialogs.cpp" line="+147"/>
         <location line="+10"/>
         <source>Elevation Color Range</source>
         <translation>高程颜色范围</translation>
@@ -400,31 +418,46 @@
     </message>
 </context>
 <context>
+    <name>LoadingOverlayWidget</name>
+    <message>
+        <location filename="../src/ui/LoadingOverlayWidget.cpp" line="+260"/>
+        <source>%1 / %2</source>
+        <translation>%1 / %2</translation>
+    </message>
+</context>
+<context>
     <name>LodSettingsDialog</name>
     <message>
-        <location filename="../src/ui/RenderingAdvancedDialogs.cpp" line="-155"/>
-        <location line="+24"/>
+        <location filename="../src/ui/RenderingAdvancedDialogs.cpp" line="-160"/>
+        <location line="+28"/>
         <source>Multi-level Rendering (LOD)</source>
         <translation>多级渲染（LOD）</translation>
     </message>
     <message>
-        <location line="-14"/>
-        <location line="+25"/>
+        <location line="-19"/>
+        <location line="+30"/>
         <source>Level 0 (full)</source>
         <translation>层级 0（完整）</translation>
     </message>
     <message>
-        <location line="-25"/>
         <source>Level %1</source>
-        <translation>层级 %1</translation>
+        <translation type="vanished">层级 %1</translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="-29"/>
+        <location line="+30"/>
+        <source>Level 1 (decimated)</source>
+        <translation>层级 1（抽稀）</translation>
+    </message>
+    <message>
+        <location line="-24"/>
+        <location line="+4"/>
         <source>%1 / %2</source>
         <translation>%1 / %2</translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="-3"/>
+        <location line="+4"/>
         <source>off</source>
         <translation>关闭</translation>
     </message>
@@ -444,7 +477,7 @@
         <translation>模式：</translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+7"/>
         <source>Level:</source>
         <translation>层级：</translation>
     </message>
@@ -462,20 +495,20 @@
 <context>
     <name>LoopClosureDialog</name>
     <message>
-        <location filename="../src/ui/LoopClosureDialog.cpp" line="+107"/>
+        <location filename="../src/ui/LoopClosureDialog.cpp" line="+138"/>
         <source>Loop Closure</source>
         <translation>回环闭合</translation>
     </message>
     <message>
         <location line="+7"/>
         <location line="+8"/>
-        <location line="+9"/>
-        <location line="+451"/>
+        <location line="+15"/>
+        <location line="+491"/>
         <source>Error</source>
         <translation>错误</translation>
     </message>
     <message>
-        <location line="-468"/>
+        <location line="-514"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
@@ -485,12 +518,12 @@
         <translation>一个或两个关键帧缺少点云数据</translation>
     </message>
     <message>
-        <location line="+8"/>
+        <location line="+14"/>
         <source>Keyframe not found</source>
         <translation>未找到关键帧</translation>
     </message>
     <message>
-        <location line="+53"/>
+        <location line="+73"/>
         <source>Match Result</source>
         <translation>匹配结果</translation>
     </message>
@@ -500,12 +533,17 @@
         <translation>配准评分：—</translation>
     </message>
     <message>
-        <location line="+208"/>
+        <location line="+212"/>
         <source>fitness_score: %1</source>
         <translation>配准评分：%1</translation>
     </message>
     <message>
-        <location line="-196"/>
+        <location line="+15"/>
+        <source>fitness_score: …</source>
+        <translation>配准评分：…</translation>
+    </message>
+    <message>
+        <location line="-215"/>
         <source>Manual Adjustment (local frame)</source>
         <translation>手动调整（局部坐标系）</translation>
     </message>
@@ -540,12 +578,12 @@
     </message>
     <message>
         <location line="+78"/>
-        <location line="+134"/>
+        <location line="+154"/>
         <source>Scan Matching</source>
         <translation>扫描匹配</translation>
     </message>
     <message>
-        <location line="-133"/>
+        <location line="-153"/>
         <source>Reset</source>
         <translation>重置</translation>
     </message>
@@ -572,7 +610,7 @@
         <translation type="vanished">FPFH 搜索半径：</translation>
     </message>
     <message>
-        <location line="+130"/>
+        <location line="+150"/>
         <source>Max iterations:</source>
         <translation>最大迭代次数：</translation>
     </message>
@@ -648,7 +686,7 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="+88"/>
+        <location filename="../src/ui/MainWindow.cpp" line="+107"/>
         <source>Selected vertex: %1</source>
         <translation>已选择顶点：%1</translation>
     </message>
@@ -708,18 +746,21 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+619"/>
-        <location line="+25"/>
-        <location line="+24"/>
+        <location line="+575"/>
+        <location line="+29"/>
+        <location line="+28"/>
         <source>No graph loaded</source>
         <translation>未加载图</translation>
     </message>
     <message>
+        <location line="-136"/>
+        <location line="+83"/>
+        <location line="+29"/>
         <source>Saving already in progress</source>
         <translation>已有保存正在进行</translation>
     </message>
     <message>
-        <location line="-661"/>
+        <location line="-601"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -795,19 +836,19 @@
     </message>
     <message>
         <location line="+31"/>
-        <location line="+166"/>
+        <location line="+188"/>
         <source>Graph Statistics</source>
         <translation>图统计</translation>
     </message>
     <message>
-        <location line="-165"/>
-        <location line="+176"/>
-        <location line="+95"/>
+        <location line="-187"/>
+        <location line="+198"/>
+        <location line="+98"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
     <message>
-        <location line="-155"/>
+        <location line="-144"/>
         <source>Open &amp;Project...</source>
         <translation>打开项目(&amp;P)...</translation>
     </message>
@@ -816,7 +857,7 @@
         <translation type="vanished">保存地图(&amp;S)...</translation>
     </message>
     <message>
-        <location line="+142"/>
+        <location line="+131"/>
         <source>Show Loop Edges Panel</source>
         <translation>显示回环边面板</translation>
     </message>
@@ -836,7 +877,7 @@
         <translation>高程颜色范围...</translation>
     </message>
     <message>
-        <location line="+148"/>
+        <location line="+71"/>
         <source>No output directory selected</source>
         <translation>未选择输出目录</translation>
     </message>
@@ -846,7 +887,7 @@
         <translation>未选择任何要保存的内容</translation>
     </message>
     <message>
-        <location line="+10"/>
+        <location line="+14"/>
         <source>The output directory is not empty:
 %1
 
@@ -874,7 +915,17 @@ Saving will permanently delete all existing content in this directory (cannot be
 %1</translation>
     </message>
     <message>
-        <location line="+270"/>
+        <location line="+13"/>
+        <source>Saving...</source>
+        <translation>保存中...</translation>
+    </message>
+    <message>
+        <location line="+202"/>
+        <source>Building point clouds...</source>
+        <translation>正在构建点云...</translation>
+    </message>
+    <message>
+        <location line="+78"/>
         <source>Interactive SLAM — %1</source>
         <translation>Interactive SLAM — %1</translation>
     </message>
@@ -894,13 +945,13 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>项目「%1」已打开（空白项目，可稍后导入数据）</translation>
     </message>
     <message>
-        <location line="-696"/>
-        <location line="+135"/>
+        <location line="-671"/>
+        <location line="+157"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-339"/>
+        <location line="-361"/>
         <source>First-person mode: drag to look, W/A/S/D to walk, Q up, E down, wheel adjusts speed, Shift to exit</source>
         <translation>第一人称模式：拖动鼠标转视角，W/A/S/D 行走，Q 上升，E 下降，滚轮调节速度，按 Shift 退出</translation>
     </message>
@@ -910,17 +961,17 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>回环边</translation>
     </message>
     <message>
-        <location line="+105"/>
+        <location line="+129"/>
         <source>&amp;Save</source>
         <translation>保存(&amp;S)</translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+4"/>
         <source>Save Map &amp;As...</source>
         <translation>地图另存为(&amp;A)...</translation>
     </message>
     <message>
-        <location line="+55"/>
+        <location line="+54"/>
         <source>Ad&amp;vanced</source>
         <translation>高级(&amp;A)</translation>
     </message>
@@ -942,22 +993,22 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>自动回环闭合...</translation>
     </message>
     <message>
-        <location line="+15"/>
+        <location line="+18"/>
         <source>Loop edge inserted by auto detection</source>
         <translation>由自动检测插入的回环边</translation>
     </message>
     <message>
-        <location line="-162"/>
+        <location line="-170"/>
         <source>Ready — open a map folder to begin</source>
         <translation>就绪 — 打开地图文件夹开始</translation>
     </message>
     <message>
-        <location line="+33"/>
+        <location line="+50"/>
         <source>&amp;File</source>
         <translation>文件(&amp;F)</translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+9"/>
         <source>&amp;Close Map</source>
         <translation>关闭地图(&amp;C)</translation>
     </message>
@@ -970,17 +1021,17 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation type="vanished">保存地图...</translation>
     </message>
     <message>
-        <location line="+19"/>
+        <location line="+16"/>
         <source>&amp;Quit</source>
         <translation>退出(&amp;Q)</translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+4"/>
         <source>&amp;View</source>
         <translation>视图(&amp;V)</translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+5"/>
         <source>&amp;Reset Camera</source>
         <translation>重置相机(&amp;R)</translation>
     </message>
@@ -990,7 +1041,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>优化(&amp;O)</translation>
     </message>
     <message>
-        <location line="+8"/>
+        <location line="+7"/>
         <source>Submap Window Size...</source>
         <translation>子图窗口大小...</translation>
     </message>
@@ -1000,13 +1051,12 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>子图合并窗口</translation>
     </message>
     <message>
-        <location line="+20"/>
-        <location line="+87"/>
+        <location line="+167"/>
         <source>Output Directory Not Empty</source>
         <translation>输出目录非空</translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="-54"/>
         <source>Map closed</source>
         <translation>地图已关闭</translation>
     </message>
@@ -1023,7 +1073,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation type="vanished">位姿图已保存：%1</translation>
     </message>
     <message>
-        <location line="+98"/>
+        <location line="-227"/>
         <source>Save failed: %1</source>
         <translation>保存失败：%1</translation>
     </message>
@@ -1032,12 +1082,12 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation type="vanished">保存地图目录</translation>
     </message>
     <message>
-        <location line="-3"/>
+        <location line="-2"/>
         <source>Map saved: %1</source>
         <translation>地图已保存：%1</translation>
     </message>
     <message>
-        <location line="+70"/>
+        <location line="+415"/>
         <source>Optimization already in progress</source>
         <translation>优化正在进行中</translation>
     </message>
@@ -1062,12 +1112,12 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>加载中...</translation>
     </message>
     <message>
-        <location line="+39"/>
+        <location line="+49"/>
         <source>Map loaded — %1 vertices, %2 edges, %3 keyframes</source>
         <translation>地图加载完成 — %1 个顶点，%2 条边，%3 个关键帧</translation>
     </message>
     <message>
-        <location line="+37"/>
+        <location line="+38"/>
         <source>Loading failed: %1</source>
         <translation>加载失败：%1</translation>
     </message>
@@ -1106,13 +1156,13 @@ for loop-closure matching (N=1 merges 3 frames):</source>
     </message>
     <message>
         <location line="+7"/>
-        <location line="+178"/>
-        <location line="+90"/>
+        <location line="+184"/>
+        <location line="+83"/>
         <source>0 / 0</source>
         <translation>0 / 0</translation>
     </message>
     <message>
-        <location line="-267"/>
+        <location line="-266"/>
         <source>Current frame / Total frames</source>
         <translation>当前帧 / 总帧数</translation>
     </message>
@@ -1122,12 +1172,22 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>播放速度倍率</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+10"/>
+        <source>Retain played cloud</source>
+        <translation>保留已播放点云</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Keep every keyframe up to the current one highlighted (white) instead of only the current frame. The highlight follows the current frame, so it rolls back when you step or drag backwards.</source>
+        <translation>将截至当前帧的所有关键帧一并保持高亮（白色），而不是仅高亮当前帧。高亮跟随当前帧变化，因此单步后退或拖动回退时高亮也会随之回退。</translation>
+    </message>
+    <message>
+        <location line="+10"/>
         <source>Drag to seek through keyframes</source>
         <translation>拖动以浏览关键帧</translation>
     </message>
     <message>
-        <location line="+286"/>
+        <location line="+275"/>
         <source>%1 / %2</source>
         <translation>%1 / %2</translation>
     </message>
@@ -1151,13 +1211,15 @@ for loop-closure matching (N=1 merges 3 frames):</source>
     </message>
     <message>
         <location line="+4"/>
-        <location line="+385"/>
-        <location line="+47"/>
+        <location line="+386"/>
+        <location line="+69"/>
+        <location line="+8"/>
+        <location line="+5"/>
         <source>New Project</source>
         <translation>新建项目</translation>
     </message>
     <message>
-        <location line="-429"/>
+        <location line="-465"/>
         <source>Set project name and location; optionally link a raw Bag file</source>
         <translation>设置项目名称和保存位置，可关联 Bag 原始数据</translation>
     </message>
@@ -1378,24 +1440,25 @@ Importing will permanently delete all existing content in this directory (cannot
 %1</translation>
     </message>
     <message>
-        <location line="+40"/>
+        <location line="+41"/>
         <source>Project name</source>
         <translation>项目名称</translation>
     </message>
     <message>
-        <location line="-263"/>
-        <location line="+264"/>
+        <location line="-264"/>
+        <location line="+265"/>
         <source>Project name:</source>
         <translation>项目名称:</translation>
     </message>
     <message>
         <location line="+3"/>
         <location line="+14"/>
+        <location line="+16"/>
         <source>Browse...</source>
         <translation>浏览...</translation>
     </message>
     <message>
-        <location line="-10"/>
+        <location line="-26"/>
         <source>Save location:</source>
         <translation>保存位置:</translation>
     </message>
@@ -1425,12 +1488,12 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>ROS Bag 文件 (*.bag);;所有文件 (*)</translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+21"/>
         <source>Data directory name:</source>
         <translation>数据目录名:</translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+9"/>
         <source>Create</source>
         <translation>创建</translation>
     </message>
@@ -1440,12 +1503,12 @@ Importing will permanently delete all existing content in this directory (cannot
         <translation>项目名称不能为空</translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+25"/>
         <source>Create Project Failed</source>
         <translation>新建项目失败</translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+16"/>
         <source>Bag File Not Found</source>
         <translation>Bag 文件不存在</translation>
     </message>
@@ -1469,22 +1532,27 @@ You can import data later in the main window.</source>
 进入主界面后可稍后导入数据。</translation>
     </message>
     <message>
+        <location line="-86"/>
         <source>Existing map directory:</source>
         <translation>已有地图目录：</translation>
     </message>
     <message>
+        <location line="-5"/>
         <source>(Optional) Link an existing map directory (graph.g2o)</source>
         <translation>（可选）关联已有地图目录（含 graph.g2o）</translation>
     </message>
     <message>
+        <location line="+8"/>
         <source>Choose Map Directory</source>
         <translation>选择地图目录</translation>
     </message>
     <message>
+        <location line="+33"/>
         <source>Choose either an existing map directory or a Bag file — not both.</source>
         <translation>已有地图目录和 Bag 文件只能二选一。</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>Not a valid map directory (missing graph.g2o):
 %1</source>
         <translation>不是有效的地图目录（缺少 graph.g2o）：
@@ -1504,7 +1572,7 @@ You can import data later in the main window.</source>
         <translation>project.json 解析失败：%1</translation>
     </message>
     <message>
-        <location line="+59"/>
+        <location line="+61"/>
         <source>Directory already contains a project file</source>
         <translation>该目录已包含项目文件</translation>
     </message>
@@ -1522,7 +1590,7 @@ You can import data later in the main window.</source>
 <context>
     <name>RenderingPanel</name>
     <message>
-        <location filename="../src/ui/RenderingPanel.cpp" line="+88"/>
+        <location filename="../src/ui/RenderingPanel.cpp" line="+89"/>
         <source>Rendering</source>
         <translation>渲染</translation>
     </message>
@@ -1540,6 +1608,16 @@ You can import data later in the main window.</source>
         <location line="+2"/>
         <source>Show Point Cloud</source>
         <translation>点云</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Show Original Cloud (odometry)</source>
+        <translation>显示原始点云（里程计）</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Overlay the point cloud transformed by raw odometry poses (gray) for comparison with the optimized cloud</source>
+        <translation>叠加显示由原始里程计位姿变换得到的点云（灰色），用于与优化后的点云对比</translation>
     </message>
     <message>
         <location line="+9"/>
@@ -1667,7 +1745,7 @@ You can import data later in the main window.</source>
 <context>
     <name>osgQOpenGLWidget</name>
     <message>
-        <location filename="../src/osgQOpenGL/osgQOpenGLWidget.cpp" line="+180"/>
+        <location filename="../src/osgQOpenGL/osgQOpenGLWidget.cpp" line="+222"/>
         <source>Screen %1</source>
         <translation>屏幕 %1</translation>
     </message>
