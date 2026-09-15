@@ -93,9 +93,18 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
     });
 
     // 点云全部渲染完成后停止加载动画并隐藏遮罩（spinner/遮罩持续到
-    // LOD 分块上传完毕，而非数据加载完成就消失）
+    // LOD 分块上传完毕，而非数据加载完成就消失）。
+    // 按加载会话代际过滤：图更换/关闭后 ViewportWidget 会把上一轮被
+    // 丢弃的构建结果以 cloudRenderFinished 立即补发（onCloudBuildFinished
+    // 的丢弃分支），若此信号晚于新一轮 loadingStarted 到达，会误关刚
+    // 显示的新遮罩——只在代际与遮罩所属会话一致（或无跟踪会话）时隐藏。
     connect(m_viewport, &ViewportWidget::cloudRenderFinished,
             this, [this]() {
+        const int session = m_loadSessionSeq;
+        if (session != -1 && session != m_viewport->cloudBuildSeq()) {
+            return;  // 过期信号：上一轮被丢弃的构建结果补发，不关本轮遮罩
+        }
+        m_loadSessionSeq = -1;  // 会话完成（或无跟踪），停止跟踪
         stopLoadingSpinner();
         m_loadingOverlay->hideOverlay();
     });
@@ -625,6 +634,7 @@ void MainWindow::onCloseMap() {
     if (m_edgeListPanel) {
         m_edgeListPanel->clearList();
     }
+    hideLoadingUi();  // 上一轮遮罩可能仍在显示（点云渐进上传中关图），不留僵尸遮罩
     m_loopBeginVertexId = -1;
     statusBar()->showMessage(tr("Map closed"));
 }
@@ -866,6 +876,9 @@ void MainWindow::onLoadingStarted() {
     statusBar()->showMessage(tr("Loading map..."));
     // 通用加载文案（地图加载与 bag 导入共用）
     startLoadingSpinner(tr("Loading..."));
+    // 记录遮罩所属的加载会话代际：cloudRenderFinished 消费方据此
+    // 过期过滤（防上一轮被丢弃构建的补发信号误关本轮遮罩）
+    m_loadSessionSeq = m_viewport->cloudBuildSeq();
     // 全屏加载遮罩：忙碌模式直到后端报告具体进度，期间冻结底层交互；
     // 先清空上一轮残留文案，等待后端进度信号填充
     m_loadingOverlay->setTitle(QString());
@@ -892,6 +905,19 @@ void MainWindow::startLoadingSpinner(const QString& text) {
 void MainWindow::stopLoadingSpinner() {
     m_loadingTimer->stop();
     m_loadingSpinner->hide();
+}
+
+/**
+ * @brief 隐藏加载 UI（遮罩 + 状态栏 spinner）
+ *
+ * 关图路径（onCloseMap / onOpenProjectCenter 的 closeMap 之后）统一调用：
+ * 上一轮遮罩若仍在显示（如点云渐进上传未完成时关图），不留僵尸遮罩
+ * （AC-4.5）。onOpenProjectCenter 随后的新加载先清后显，顺序不互咬。
+ */
+void MainWindow::hideLoadingUi() {
+    m_loadSessionSeq = -1;  // 关图即结束当前加载会话跟踪
+    m_loadingOverlay->hideOverlay();
+    stopLoadingSpinner();
 }
 
 /**
@@ -945,6 +971,7 @@ void MainWindow::onLoadingSucceeded() {
  * 在状态栏和消息框中显示错误信息。
  */
 void MainWindow::onLoadingFailed(const QString& error) {
+    m_loadSessionSeq = -1;  // 加载会话以失败结束
     stopLoadingSpinner();
     m_loadingOverlay->hideOverlay();
     // Bag 导入失败 → 回写项目状态 failed（保留 processing 前的状态信息）
@@ -1016,6 +1043,10 @@ void MainWindow::onOpenProjectCenter() {
 
     if (m_manager->isLoaded()) {
         m_manager->closeMap();
+        // closeMap 不触碰加载 UI；上一轮遮罩可能仍在显示（点云渐进
+        // 上传中关图），先清掉，随后 launchFromProject 触发的新加载
+        // 会经 onLoadingStarted 重新显示遮罩（先清后显，不互咬）
+        hideLoadingUi();
     }
     setWindowTitle("Interactive SLAM");  // launchFromProject 会按需设置项目名
     m_activeProjectDir.clear();

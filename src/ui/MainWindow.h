@@ -86,6 +86,7 @@ private:
     void setupUi();     ///< 初始化界面组件（视口、叠加面板）
     void startLoadingSpinner(const QString& text);  ///< 启动状态栏加载动画
     void stopLoadingSpinner();                      ///< 停止并隐藏加载动画
+    void hideLoadingUi();  ///< 隐藏加载遮罩并停止加载动画（关图路径清理用）
 
     QString defaultSaveDir() const;  ///< 默认保存目录（项目数据目录，否则地图来源目录）
     /**
@@ -143,6 +144,12 @@ private:
     QString m_loadingText;                ///< 加载中的基础文案（如"Loading map..."）
 
     LoadingOverlayWidget* m_loadingOverlay = nullptr;  ///< 全屏加载遮罩进度覆盖层
+
+    // === 加载会话代际（防过期完成信号误关新一轮遮罩） ===
+    // onLoadingStarted 时记录当前 cloudBuildSeq；cloudRenderFinished
+    // 处理器只在代际一致时隐藏遮罩。遮罩可能属于保存等非加载流程
+    // （-1 = 无加载会话，完成信号一律忽略隐藏动作之外的处理）。
+    int m_loadSessionSeq = -1;  ///< 遮罩所属加载会话的 cloudBuildSeq，-1 = 未跟踪
 
     // === 异步保存 ===
     QFutureWatcher<QString> m_saveWatcher; ///< 后台保存结果监视器（结果为空串 = 成功，否则为错误信息）

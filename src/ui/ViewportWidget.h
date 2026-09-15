@@ -60,6 +60,16 @@ public:
     explicit ViewportWidget(QWidget* parent = nullptr);
     ~ViewportWidget() override;
 
+    /**
+     * @brief 当前点云构建会话代际号（只读查询）
+     *
+     * 即 m_cloudBuildSeq：onGraphLoaded/onGraphClosed 每次递增，
+     * 使在途构建结果作废。MainWindow 的 cloudRenderFinished 消费方
+     * 借此区分"本轮加载会话"的完成信号与上一轮补发的过期信号，
+     * 防止过期信号误关新一轮加载刚显示的遮罩。
+     */
+    int cloudBuildSeq() const { return m_cloudBuildSeq; }
+
 public slots:
     /**
      * @brief 程序化选中指定顶点（等价于 Ctrl+Click）
