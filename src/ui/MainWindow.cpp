@@ -206,6 +206,7 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                 if (dlg.exec() == QDialog::Accepted) {
                     m_viewport->refreshScene();
                     m_viewport->rebuildPointClouds();
+                    if (m_edgeListPanel) m_edgeListPanel->refreshList();
                     statusBar()->showMessage(
                         tr("Loop edge added: %1 → %2").arg(beginId).arg(vertexId), 5000);
                 } else {
