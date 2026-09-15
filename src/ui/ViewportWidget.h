@@ -212,8 +212,14 @@ signals:
      *
      * 在点云分块渐进上传全部完成时发射（含"无点云/构建被丢弃"的兜底，
      * 保证 UI 的加载指示一定能结束）。MainWindow 据此停止加载动画。
+     *
+     * @param buildSeq 发射本信号的结果所属的构建代际：丢弃分支携带被
+     *                 丢弃结果的 m_cloudBuildActiveSeq（旧代际），正常
+     *                 完成/渐进上传完成携带当前 m_cloudBuildSeq。消费方
+     *                 （MainWindow）据此区分本轮加载会话与过期信号，
+     *                 防止上一轮丢弃结果的补发误关新一轮遮罩。
      */
-    void cloudRenderFinished();
+    void cloudRenderFinished(int buildSeq);
 
     /**
      * @brief LOD 层级状态信号

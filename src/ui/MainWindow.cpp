@@ -94,14 +94,13 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
 
     // 点云全部渲染完成后停止加载动画并隐藏遮罩（spinner/遮罩持续到
     // LOD 分块上传完毕，而非数据加载完成就消失）。
-    // 按加载会话代际过滤：图更换/关闭后 ViewportWidget 会把上一轮被
-    // 丢弃的构建结果以 cloudRenderFinished 立即补发（onCloudBuildFinished
-    // 的丢弃分支），若此信号晚于新一轮 loadingStarted 到达，会误关刚
-    // 显示的新遮罩——只在代际与遮罩所属会话一致（或无跟踪会话）时隐藏。
+    // 按信号自带的构建代际过滤：图更换/关闭后 ViewportWidget 会把上一轮
+    // 被丢弃的构建结果以 cloudRenderFinished 立即补发（onCloudBuildFinished
+    // 的丢弃分支），若此信号晚于新一轮 loadingStarted 到达，会误关刚显示
+    // 的新遮罩——只在信号代际与遮罩所属会话一致（或无跟踪会话）时隐藏。
     connect(m_viewport, &ViewportWidget::cloudRenderFinished,
-            this, [this]() {
-        const int session = m_loadSessionSeq;
-        if (session != -1 && session != m_viewport->cloudBuildSeq()) {
+            this, [this](int buildSeq) {
+        if (m_loadSessionSeq != -1 && m_loadSessionSeq != buildSeq) {
             return;  // 过期信号：上一轮被丢弃的构建结果补发，不关本轮遮罩
         }
         m_loadSessionSeq = -1;  // 会话完成（或无跟踪），停止跟踪
@@ -947,6 +946,10 @@ void MainWindow::onLoadingSucceeded() {
         5000);
 
     m_viewport->onGraphLoaded(m_manager->sharedGraph());
+    // 刷新加载会话代际基准：onGraphLoaded 内部 ++m_cloudBuildSeq，本轮
+    // 点云构建的完成信号携带的是这个新代际，不刷新会把正常完成信号
+    // 误判为过期、首次加载遮罩永不消失
+    m_loadSessionSeq = m_viewport->cloudBuildSeq();
     m_viewport->setHighlightWindowHalf(m_submapWindowHalfSize);
     if (m_edgeListPanel) {
         m_edgeListPanel->refreshList();

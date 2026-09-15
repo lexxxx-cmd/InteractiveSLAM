@@ -946,12 +946,15 @@ void ViewportWidget::onCloudBuildFinished() {
         if (!m_chunkUploadWasPending) {
             // Phase 0：本次构建无分块（空点云）→ 无渐进上传阶段，直接结束计时
             m_perfCycleActive = false;
-            emit cloudRenderFinished();
+            emit cloudRenderFinished(m_cloudBuildSeq);
         }
     } else {
-        // 构建被丢弃（图已更换/关闭）：没有新点云要渲染，立即通知完成
+        // 构建被丢弃（图已更换/关闭）：没有新点云要渲染，立即通知完成。
+        // 注意携带被丢弃结果的代际（activeSeq，旧值）：消费方按信号自带
+        // 代际过滤，若此刻新图已加载（seq 已递增），此过期信号不会误关
+        // 新一轮加载的遮罩
         m_perfCycleActive = false;  // Phase 0：本轮无有效结果，结束计时
-        emit cloudRenderFinished();
+        emit cloudRenderFinished(m_cloudBuildActiveSeq);
     }
 
     // 构建期间有新请求（预算变化/优化完成等）→ 用最新状态再构建一次
@@ -1117,7 +1120,8 @@ void ViewportWidget::updateScene() {
                 }
                 m_perfCycleActive = false;
             }
-            emit cloudRenderFinished();
+            // 渐进上传完成：携带当前代际（正常完成路径）
+            emit cloudRenderFinished(m_cloudBuildSeq);
         }
         m_chunkUploadWasPending = pending;
     }
