@@ -37,6 +37,23 @@ public:
     /** @brief 设置进度文本描述（如 "正在处理文件 3/10"） */
     void set_text(const std::string& text) override;
 
+    /**
+     * @brief 设置进度标题（带参模板，跨线程安全）
+     *
+     * key 为不含参数的模板（如 "progress.opening"），arg 为运行期参数。
+     * 发射前按 key 查 QT_TRANSLATE_NOOP 登记的翻译模板（含 %1），
+     * QCoreApplication::translate 翻译后 .arg() 填参再发射（spec C-3.3）。
+     */
+    void set_title_fmt(const std::string& key, const std::string& arg) override;
+
+    /**
+     * @brief 设置进度文本描述（带参模板，两个整型参数，跨线程安全）
+     *
+     * 典型场景：计数文案 "keyframe %1/%2"。翻译发生在含 %1/%2 的
+     * 模板上，参数在翻译之后填入（spec C-3.3）。
+     */
+    void set_text_fmt(const std::string& key, int a, int b) override;
+
     /** @brief 设置进度最大值（如总文件数） */
     void set_maximum(int max) override;
 

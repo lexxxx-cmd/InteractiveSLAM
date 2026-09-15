@@ -71,7 +71,7 @@ InteractiveGraph::~InteractiveGraph() = default;
  */
 bool InteractiveGraph::load_map_data(const std::string& directory,
                                       hdl_graph_slam::ProgressInterface& progress) {
-    progress.set_title("Opening " + directory);
+    progress.set_title_fmt("progress.opening", directory);
     progress.set_text("loading graph");
     // 第1步：加载 g2o 图文件
     if (!load(directory + "/graph.g2o")) {

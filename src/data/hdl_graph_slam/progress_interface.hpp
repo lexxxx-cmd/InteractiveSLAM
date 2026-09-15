@@ -57,6 +57,35 @@ struct ProgressInterface {
     virtual void set_text(const std::string&) {}
 
     /**
+     * @brief 设置进度标题（带参模板）
+     *
+     * 与 set_title() 的区别：key 是不含参数的模板（如 "progress.opening"），
+     * arg 是运行期参数（如目录路径）。UI 侧按 key 查翻译模板（含 %1）
+     * 后填参，保证翻译发生在含参格式串上（spec C-3.3）。
+     * 默认实现退化为把 key 原样传出（无翻译需求的后端调用方可忽略）。
+     *
+     * @param key 模板 key（登记于 UI 翻译层）
+     * @param arg 填入模板 %1 的参数
+     */
+    virtual void set_title_fmt(const std::string& key, const std::string& arg) {
+        set_title(key);
+    }
+
+    /**
+     * @brief 设置进度描述文本（带参模板，两个整型参数）
+     *
+     * 典型场景：计数文案 "keyframe %1/%2"。key/参数分开传，
+     * 翻译发生在含 %1/%2 的模板上（spec C-3.3）。
+     *
+     * @param key 模板 key（登记于 UI 翻译层）
+     * @param a   填入模板 %1 的参数
+     * @param b   填入模板 %2 的参数
+     */
+    virtual void set_text_fmt(const std::string& key, int a, int b) {
+        set_text(key);
+    }
+
+    /**
      * @brief 设置进度最大值（即总量）
      * @param max 最大值
      */

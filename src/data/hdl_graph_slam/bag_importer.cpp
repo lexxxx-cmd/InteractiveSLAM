@@ -348,7 +348,7 @@ BagImportResult BagImporter::import(const BagImportConfig& cfg,
 BagImportResult BagImporter::importImpl(const BagImportConfig& cfg,
                                         ProgressInterface& progress) {
     BagImportResult result;
-    progress.set_title("Opening " + cfg.bagPath);
+    progress.set_title_fmt("progress.opening", cfg.bagPath);
 
     if (cfg.bagPath.empty() || !isRosbagFile(cfg.bagPath)) {
         result.error = "not a ROS1 bag file: " + cfg.bagPath;
@@ -525,7 +525,7 @@ BagImportResult BagImporter::importImpl(const BagImportConfig& cfg,
         prevWorldPose = T_WI;
 
         ++count;
-        progress.set_text((boost::format("keyframe %d/%d") % count % keyframeIdx.size()).str());
+        progress.set_text_fmt("progress.keyframe", count, (int)keyframeIdx.size());
         progress.increment();
     }
     g2oStream.close();
