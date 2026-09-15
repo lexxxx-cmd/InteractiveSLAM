@@ -383,6 +383,26 @@
         <source>Show All</source>
         <translation>全部显示</translation>
     </message>
+    <message>
+        <location line="+103"/>
+        <source>Unknown</source>
+        <translation>未知</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Manual</source>
+        <translation>手动</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Auto</source>
+        <translation>自动</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Anchor</source>
+        <translation>锚点</translation>
+    </message>
 </context>
 <context>
     <name>GraphStatsPanel</name>
@@ -686,7 +706,7 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="+107"/>
+        <location filename="../src/ui/MainWindow.cpp" line="+115"/>
         <source>Selected vertex: %1</source>
         <translation>已选择顶点：%1</translation>
     </message>
@@ -746,7 +766,7 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+575"/>
+        <location line="+577"/>
         <location line="+29"/>
         <location line="+28"/>
         <source>No graph loaded</source>
@@ -760,7 +780,7 @@
         <translation>已有保存正在进行</translation>
     </message>
     <message>
-        <location line="-601"/>
+        <location line="-603"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -770,7 +790,7 @@
         <translation>顶点没有点云数据</translation>
     </message>
     <message>
-        <location line="+15"/>
+        <location line="+16"/>
         <source>Loop edge added: %1 → %2</source>
         <translation>回环边已添加：%1 → %2</translation>
     </message>
@@ -877,7 +897,7 @@
         <translation>高程颜色范围...</translation>
     </message>
     <message>
-        <location line="+71"/>
+        <location line="+72"/>
         <source>No output directory selected</source>
         <translation>未选择输出目录</translation>
     </message>
@@ -920,12 +940,12 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>保存中...</translation>
     </message>
     <message>
-        <location line="+202"/>
+        <location line="+222"/>
         <source>Building point clouds...</source>
         <translation>正在构建点云...</translation>
     </message>
     <message>
-        <location line="+78"/>
+        <location line="+83"/>
         <source>Interactive SLAM — %1</source>
         <translation>Interactive SLAM — %1</translation>
     </message>
@@ -945,18 +965,18 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>项目「%1」已打开（空白项目，可稍后导入数据）</translation>
     </message>
     <message>
-        <location line="-671"/>
+        <location line="-697"/>
         <location line="+157"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-361"/>
+        <location line="-362"/>
         <source>First-person mode: drag to look, W/A/S/D to walk, Q up, E down, wheel adjusts speed, Shift to exit</source>
         <translation>第一人称模式：拖动鼠标转视角，W/A/S/D 行走，Q 上升，E 下降，滚轮调节速度，按 Shift 退出</translation>
     </message>
     <message>
-        <location line="+185"/>
+        <location line="+186"/>
         <source>Loop Edges</source>
         <translation>回环边</translation>
     </message>
@@ -1051,7 +1071,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>子图合并窗口</translation>
     </message>
     <message>
-        <location line="+167"/>
+        <location line="+168"/>
         <source>Output Directory Not Empty</source>
         <translation>输出目录非空</translation>
     </message>
@@ -1073,7 +1093,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation type="vanished">位姿图已保存：%1</translation>
     </message>
     <message>
-        <location line="-227"/>
+        <location line="-228"/>
         <source>Save failed: %1</source>
         <translation>保存失败：%1</translation>
     </message>
@@ -1087,7 +1107,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>地图已保存：%1</translation>
     </message>
     <message>
-        <location line="+415"/>
+        <location line="+416"/>
         <source>Optimization already in progress</source>
         <translation>优化正在进行中</translation>
     </message>
@@ -1112,12 +1132,12 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>加载中...</translation>
     </message>
     <message>
-        <location line="+49"/>
+        <location line="+69"/>
         <source>Map loaded — %1 vertices, %2 edges, %3 keyframes</source>
         <translation>地图加载完成 — %1 个顶点，%2 条边，%3 个关键帧</translation>
     </message>
     <message>
-        <location line="+38"/>
+        <location line="+43"/>
         <source>Loading failed: %1</source>
         <translation>加载失败：%1</translation>
     </message>
@@ -1190,6 +1210,69 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <location line="+275"/>
         <source>%1 / %2</source>
         <translation>%1 / %2</translation>
+    </message>
+</context>
+<context>
+    <name>ProgressReporter</name>
+    <message>
+        <location filename="../src/backend/progress_reporter.cpp" line="+31"/>
+        <source>Opening %1</source>
+        <translation>打开 %1</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>keyframe %1/%2</source>
+        <translation>关键帧 %1/%2</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>loading graph</source>
+        <translation>正在加载位姿图</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>loading keyframes</source>
+        <translation>正在加载关键帧</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>saving graph</source>
+        <translation>正在保存位姿图</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>saving keyframes</source>
+        <translation>正在保存关键帧</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>accumulate points</source>
+        <translation>正在累积点云</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>saving pcd</source>
+        <translation>正在保存点云</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>saving LVBA format</source>
+        <translation>正在保存 LVBA 格式</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>reading odometry</source>
+        <translation>正在读取里程计</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>reading point clouds</source>
+        <translation>正在读取点云</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>writing keyframes</source>
+        <translation>正在写出关键帧</translation>
     </message>
 </context>
 <context>
@@ -1562,29 +1645,24 @@ You can import data later in the main window.</source>
 <context>
     <name>QObject</name>
     <message>
-        <location filename="../src/backend/project_manager.h" line="+109"/>
         <source>Cannot read project.json</source>
-        <translation>无法读取 project.json</translation>
+        <translation type="vanished">无法读取 project.json</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Failed to parse project.json: %1</source>
-        <translation>project.json 解析失败：%1</translation>
+        <translation type="vanished">project.json 解析失败：%1</translation>
     </message>
     <message>
-        <location line="+61"/>
         <source>Directory already contains a project file</source>
-        <translation>该目录已包含项目文件</translation>
+        <translation type="vanished">该目录已包含项目文件</translation>
     </message>
     <message>
-        <location line="+4"/>
         <source>Cannot create project directories</source>
-        <translation>无法创建项目目录</translation>
+        <translation type="vanished">无法创建项目目录</translation>
     </message>
     <message>
-        <location line="+4"/>
         <source>Cannot write project.json</source>
-        <translation>无法写入 project.json</translation>
+        <translation type="vanished">无法写入 project.json</translation>
     </message>
 </context>
 <context>

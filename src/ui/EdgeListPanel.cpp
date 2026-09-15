@@ -198,15 +198,15 @@ void EdgeListPanel::addEdgeRow(long edgeId, long fromId, long toId,
     // 第 2 列：From → To
     item->setText(2, QString("%1 → %2").arg(fromId).arg(toId));
 
-    // 第 3 列：类型
-    const char* typeStr = "Unknown";
+    // 第 3 列：类型（tr 化：面向用户的分类标签，spec C-3.4 拍板翻译）
+    QString typeStr = tr("Unknown");
     switch (source) {
-        case EdgeSource::ManualLoop: typeStr = "Manual"; break;
-        case EdgeSource::AutoLoop:   typeStr = "Auto";   break;
-        case EdgeSource::Anchor:     typeStr = "Anchor"; break;
+        case EdgeSource::ManualLoop: typeStr = tr("Manual"); break;
+        case EdgeSource::AutoLoop:   typeStr = tr("Auto");   break;
+        case EdgeSource::Anchor:     typeStr = tr("Anchor"); break;
         default: break;
     }
-    item->setText(3, QString::fromUtf8(typeStr));
+    item->setText(3, typeStr);
 
     // 第 4 列：距离
     item->setText(4, QString::number(distance, 'f', 2));
