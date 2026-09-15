@@ -180,6 +180,9 @@ void GraphManager::openMapData(const QUrl& folderUrl) {
     m_isLoading = true;
     m_mapSourceDir = QDir::cleanPath(localPath);  // 记录来源目录（保存时预填）
     emit isLoadingChanged();
+    // 重置进度报告器（清零 + 后续信号自然覆盖）：上一轮的 m_current/m_maximum
+    // 从不重置，二次加载更小的图时首批 increment 会从旧值起步显示满格残留
+    m_progress->reset();
     emit loadingStarted();
     logInfo(QString("Loading map: %1").arg(localPath));
 
@@ -254,6 +257,8 @@ void GraphManager::openBagFile(const QUrl& bagUrl,
 
     m_isImportingBag = true;
     logInfo(QString("Importing bag: %1").arg(bagPath));
+    // 重置进度报告器：与 openMapData 同理，导入进度从 0 起算（AC-4.3）
+    m_progress->reset();
     emit loadingStarted();
 
     auto future = QtConcurrent::run(

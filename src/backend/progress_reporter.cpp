@@ -116,6 +116,19 @@ void ProgressReporter::set_current(int current) {
 }
 
 /**
+ * @brief 重置进度状态到构造初值（仅主线程调用，不发射信号）
+ *
+ * 由 GraphManager 的加载入口在 emit loadingStarted 之前同步调用，
+ * 与工作线程首批 queued 进度调用满足 happens-before。
+ * 语义为"清零 + 后续信号自然覆盖"：只清内部状态，立即由
+ * set_maximum/increment/set_text 等真实信号接管遮罩显示。
+ */
+void ProgressReporter::reset() {
+    m_maximum = 100;
+    m_current = 0;
+}
+
+/**
  * @brief 进度值递增 1（跨线程安全）
  *
  * 适用于循环遍历等场景，每次处理完一个项目后调用。

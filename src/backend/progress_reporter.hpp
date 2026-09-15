@@ -46,6 +46,18 @@ public:
     /** @brief 进度值递增 1 */
     void increment() override;
 
+    /**
+     * @brief 重置进度状态到构造初值（仅主线程调用）
+     *
+     * 置 m_current = 0、m_maximum = 100，与构造函数一致。
+     * 只清状态、不发射信号：采用"清零 + 后续信号自然覆盖"语义——
+     * 新一轮加载开始（emit loadingStarted 之前）由 GraphManager 同步调用，
+     * 若上一轮工作线程还有未消费的 queued 进度调用晚于本 reset 到达，
+     * 残留旧值会被新图首批信号冲掉；不 emit 可避免遮罩在 indeterminate
+     * 忙碌态下闪现 0/100 确定模式。
+     */
+    void reset();
+
 signals:
     /** @brief 进度标题变化信号 */
     void titleChanged(const QString& title);
