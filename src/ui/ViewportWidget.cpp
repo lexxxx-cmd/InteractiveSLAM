@@ -297,6 +297,10 @@ void ViewportWidget::initOsg() {
             QMetaObject::invokeMethod(this, [this, vertexId]() {
                 onFrameView(vertexId);
             }, Qt::QueuedConnection);
+        },
+        // --- 实时球体半径提供器（右键边命中阈值随渲染面板尺寸调整保持正确） ---
+        [this]() -> float {
+            return m_sceneViz->sphereRadius();
         });
     viewer->addEventHandler(m_pickingHandler);
 
