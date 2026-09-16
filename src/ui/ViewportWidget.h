@@ -111,7 +111,7 @@ public slots:
      */
     void onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph);
 
-    /// 图谱关闭后的回调（清空场景）
+    /** @brief 图谱关闭后的回调（清空场景） */
     void onGraphClosed();
 
     /// 刷新场景（更新顶点/边位姿）
@@ -239,6 +239,7 @@ signals:
      *
      * 当用户通过 RenderingPanel 调整 sampleStride 时发射，
      * PlaybackPanel 监听此信号以重建采样后的播放帧列表。
+     * 图谱关闭/清空时也会以 stride=1 发射（采样状态随图重置）。
      */
     void sampleStrideChanged(int stride);
 

@@ -353,11 +353,19 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
  * @brief 图谱关闭
  *
  * 重置共享指针，清空场景可视化器，并使在途点云构建结果作废。
+ * 场景清空时采样步长/隐藏边集合随之重置（新图边 ID 从 0 重编号，
+ * 旧快照会误隐藏同号新边），这里把重置以 stride=1 广播给播放轴、
+ * 自动回环与渲染面板，保持 UI 与场景一致。
  */
 void ViewportWidget::onGraphClosed() {
     m_graph.reset();
     ++m_cloudBuildSeq;  // 使在途构建结果作废
+    const int prevStride = m_sceneViz->sampleStride();
     m_sceneViz->clear();
+    if (prevStride != 1) {
+        m_flags.sample_stride = 1;
+        emit sampleStrideChanged(1);
+    }
     m_osgWidget->update();
 }
 

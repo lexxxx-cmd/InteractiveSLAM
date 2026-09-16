@@ -177,3 +177,10 @@ void RenderingPanel::setupUi() {
     mainLayout->addWidget(renderGroup);
     mainLayout->addStretch();
 }
+
+void RenderingPanel::resetSampleStride() {
+    m_sampleStrideSpin->blockSignals(true);
+    m_sampleStrideSpin->setValue(1);
+    m_sampleStrideSpin->blockSignals(false);
+    m_sampleStrideLabel->setText(QStringLiteral("1"));
+}

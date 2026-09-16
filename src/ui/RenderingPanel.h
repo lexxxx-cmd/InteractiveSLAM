@@ -38,6 +38,16 @@ public:
      */
     explicit RenderingPanel(ViewportWidget* viewport, QWidget* parent = nullptr);
 
+    /**
+     * @brief 重置采样步长显示为 1（图谱关闭后调用）
+     *
+     * 场景侧在关图时已把采样步长重置回全量渲染（新图边 ID 从 0
+     * 重编号，旧的采样隐藏快照会误隐藏新加回环边），本方法把
+     * SpinBox 显示同步回 1。用 blockSignals 避免触发 valueChanged
+     * 反向再设一次场景（无害但多余）。
+     */
+    void resetSampleStride();
+
 private:
     void setupUi();  ///< 初始化 UI 控件和布局
 

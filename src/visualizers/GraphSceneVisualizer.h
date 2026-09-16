@@ -909,6 +909,14 @@ private:
         m_focusedVertexId  = -1;
         m_playbackSoloId   = -1;  // 上一张地图的播放会话独显不可跨地图沿用
         m_retainedPrefixEndId = -1;  // 上一张地图的留存前缀不可跨地图沿用
+
+        // 重置按边 ID 过滤的集合：load_map_data 会把新图的边 ID 从 0
+        // 顺序重编号（interactive_graph.cpp load_map_data），旧地图的
+        // 隐藏边 ID 快照必然与新图同号边冲突——采样步长回到全量渲染，
+        // 用户手动隐藏集合同步清空（EdgeListPanel 会随新图刷新重发）
+        m_sampleStride = 1;
+        m_sampleHiddenEdgeIds.clear();
+        m_hiddenEdgeIds.clear();
     }
 
     /**

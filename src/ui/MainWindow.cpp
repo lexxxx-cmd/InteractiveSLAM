@@ -962,6 +962,13 @@ void MainWindow::onLoadingSucceeded() {
         std::sort(ids.begin(), ids.end());
         m_playbackPanel->setKeyframeIds(ids);
     }
+
+    // 渲染面板的采样步长 SpinBox 同步回 1：关图时场景侧已重置采样
+    // （旧隐藏边 ID 快照与新图从 0 重编号的边冲突会误隐藏新加回环边），
+    // 这里把 UI 显示对齐，避免面板显示 100 而场景实际全量渲染的错位
+    if (m_renderPanel) {
+        m_renderPanel->resetSampleStride();
+    }
 }
 
 /**
