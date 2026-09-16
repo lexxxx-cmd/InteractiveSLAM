@@ -11,8 +11,14 @@
 //     未命中点云时回退为拾取最近顶点球体（旧行为，含空白取消聚焦）
 //   - Ctrl + 左键双击：拾取最近的顶点球体（触发帧视角回调）
 //   - 右键点击：按交点归属仲裁——射线实际打到视锥体标记几何 → 顶点
-//     菜单；否则边线附近距离匹配命中 → 边菜单；皆未命中 → 空命中
-//     （回调方据此弹出场景菜单）
+//     菜单；否则用 PolytopeIntersector 窗口小矩形拾取边线（GL_LINES
+//     线图元）命中 → 边菜单；主路径漏检时回退全交点距离匹配兜底；
+//     皆未命中 → 空命中（回调方据此弹出场景菜单）
+//
+// 注：OSG 3.6.5 的 LineSegmentIntersector 对 GL_LINES / GL_POINTS 图元
+// 是空实现（src/osgUtil/LineSegmentIntersector.cpp 中线/点分支为空壳），
+// 因此边线拾取不能依赖射线投射，必须走 PolytopeIntersector 的线图元
+// 相交测试（真实实现）。
 //
 // 使用延迟提供者函数（lazy provider），确保处理器始终获取最新的
 // 球心/边线段数据（在每次图加载后更新），而非构造时的快照。
@@ -26,6 +32,7 @@
 #include <osgUtil/LineSegmentIntersector>
 #include <osgUtil/PolytopeIntersector>
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <vector>
@@ -62,6 +69,11 @@ struct PickingHit {
  *   - Vertex：交点位于 "Spheres" 子树（顶点视锥体标记几何本身）
  *   - Edge：  交点位于 "Edges"  子树（边线 GL_LINES 几何）
  *   - Other： 其余（地面网格、点云、坐标轴等）
+ *
+ * 注意：LineSegmentIntersector 在 OSG 3.6.5 下对线/点图元不做相交
+ * 测试（空实现），因此 Edge 归属交点在 raycast() 返回结果中实际
+ * 不会出现；该分类保留供 PolytopeIntersector 线拾取路径
+ * （raycastEdges）复用。
  *
  * 归属判据是"nodePath 上是否存在该名字的节点"而非尾节点名——
  * nodePath 尾部通常是 Geode/Geometry，子组在其上层。
@@ -249,28 +261,62 @@ public:
                 if (!vertexHits.empty() && centers && !centers->empty())
                     vertexId = nearestCenter(vertexHits, *centers);
 
-                // —— 边命中（距离匹配兜底） ——
-                // 边线是 GL_LINES 数学线（无宽度），射线常未精确穿过线
-                // 几何而只打到其附近的网格/点云，因此边判定必须支持用
-                // 全部交点做 nearestSegment 距离匹配，不能只认 Edge 归属。
-                // 阈值 = 实时球体半径 × 2.5，与 pickRadius 系数对齐
-                // （m_sphereRadius 是构造快照，运行期调尺寸会失真）。
-                // 仲裁：射线真穿过边线几何（Edge 归属交点）优先，
-                // 无 Edge 交点命中时才用全部交点距离匹配兜底。
+                // —— 边命中（窗口矩形线图元拾取 + 距离匹配兜底） ——
+                // 主路径：OSG 3.6.5 的 LineSegmentIntersector 对线图元
+                // 不做相交测试（空实现），Edge 归属交点永远不会出现，
+                // 必须用 PolytopeIntersector 的窗口小矩形 + LINE_PRIMITIVES
+                // 掩码做线拾取（见 raycastEdges 注释）。
+                // 兜底：主路径只认「线段穿过点击点约 5 像素邻域」的命中，
+                // 点击偏移略大而射线恰在贴地边附近打到地面网格时，全交点
+                // nearestSegment 距离匹配仍可命中。阈值 = 实时球体
+                // 半径 × 2.5，与 pickRadius 系数对齐（m_sphereRadius 是
+                // 构造快照，运行期调尺寸会失真）。
+                // 仲裁：顶点未命中时先走线图元拾取主路径，主路径无候选
+                // 才回退全交点距离匹配兜底。
                 if (vertexId < 0) {
                     auto* edges = m_edgeProvider();
                     if (edges && !edges->empty()) {
-                        const float threshold = currentSphereRadius() * 2.5f;
-                        std::vector<RayHit> edgeHits;
-                        for (const auto& hit : hits) {
-                            if (hit.kind == RayHit::Kind::Edge) edgeHits.push_back(hit);
+                        bool edgeMatched = false;
+                        // 主路径：窗口矩形拾取 GL_LINES 线图元
+                        std::vector<size_t> candidates;
+                        raycastEdges(ea, viewer, candidates);
+                        if (!candidates.empty()) {
+                            // 过滤越界下标（防御性，正常不会发生）
+                            candidates.erase(
+                                std::remove_if(candidates.begin(), candidates.end(),
+                                               [edges](size_t i) { return i >= edges->size(); }),
+                                candidates.end());
+                            if (!candidates.empty()) {
+                                // 多候选（多条边共用端点/交叉重叠）时按
+                                // "视线射线到线段的最短距离"取最近一条
+                                osg::Vec3d rayStart, rayDir;
+                                if (!windowRay(ea, viewer, rayStart, rayDir)) {
+                                    rayStart = osg::Vec3d();
+                                    rayDir   = osg::Vec3d(0, 0, -1);
+                                }
+                                size_t bestIdx = candidates.front();
+                                double bestD2 = std::numeric_limits<double>::max();
+                                for (size_t idx : candidates) {
+                                    const double d2 =
+                                        raySegmentDist2(rayStart, rayDir, (*edges)[idx]);
+                                    if (d2 < bestD2) { bestD2 = d2; bestIdx = idx; }
+                                }
+                                // 命中：从 m_edgeSegments[bestIdx] 填充边字段
+                                const auto& seg = (*edges)[bestIdx];
+                                hitInfo.edgeId    = seg.id;
+                                hitInfo.edgeV1    = seg.v1_id;
+                                hitInfo.edgeV2    = seg.v2_id;
+                                hitInfo.edgeDist  = seg.distance;
+                                hitInfo.edgeKernel = seg.kernel;
+                                edgeMatched = true;
+                            }
                         }
-                        // 先用 Edge 归属交点（射线真穿过边几何）匹配
-                        bool edgeMatched = !edgeHits.empty() &&
-                            matchEdge(edgeHits, *edges, threshold, hitInfo);
-                        // 兜底：无 Edge 交点命中时，任何交点距离匹配均可
-                        if (!edgeMatched)
+                        // 兜底：原全交点距离匹配（处理贴地轨迹等主路径
+                        // 漏检场景），逻辑保持不变
+                        if (!edgeMatched) {
+                            const float threshold = currentSphereRadius() * 2.5f;
                             matchEdge(hits, *edges, threshold, hitInfo);
+                        }
                     }
                 }
 
@@ -435,6 +481,127 @@ private:
             }
         }
         return found;
+    }
+
+    /**
+     * @brief 右键边线拾取主路径：窗口小矩形拾取 GL_LINES 线图元
+     *
+     * 为什么不能用 LineSegmentIntersector：OSG 3.6.5 对 GL_LINES /
+     * GL_POINTS 图元的相交测试是空实现（vcpkg 源码
+     * src/osgUtil/LineSegmentIntersector.cpp 第 352-361 / 377-383 行
+     * 的线/点分支为空壳，只有三角面片走真实测试），因此射线永远打不中
+     * 边线几何，必须改用 PolytopeIntersector——其对线图元的相交测试
+     * 是真实实现（判断线段是否穿过拾取体积，见
+     * src/osgUtil/PolytopeIntersector.cpp 第 299-319 行），即本文件
+     * raycastCloudPoint() 用 POINT_PRIMITIVES 拾点云的同一模式。
+     *
+     * primitiveIndex → EdgeSegment 下标映射依据（跨模块隐式耦合约定）：
+     * PolytopeIntersector 的 _primitiveIndex 逐图元递增，而
+     * EdgeLineVisualizer 只有一个 DrawArrays(GL_LINES, 0, N) 图元集，
+     * 且其 rebuild() 中顶点对与 m_edgeSegments 按同一循环同序填充，
+     * 故 Intersection::primitiveIndex 直接就是 m_edgeSegments 的下标。
+     * 若 EdgeLineVisualizer 改为多图元集/乱序构建，此映射需要同步修改。
+     *
+     * 视锥体线框与坐标轴同为 GL_LINES，但 PolytopeIntersector 的交点
+     * 记录 nodePath，用 classifyHit() 过滤后只保留 "Edges" 子树的
+     * 命中（与 raycast()/classifyHit 同一套归属判定）。
+     *
+     * @param ea           事件适配器（取归一化窗口坐标与窗口尺寸）
+     * @param viewer       OSG 查看器
+     * @param outCandidates 输出：命中的边线段下标候选（已去重，
+     *                     顺序为交点遍历顺序，未按距离排序）
+     */
+    static void raycastEdges(const osgGA::GUIEventAdapter& ea,
+                             osgViewer::Viewer* viewer,
+                             std::vector<size_t>& outCandidates) {
+        outCandidates.clear();
+        // 拾取半径：像素 → 归一化窗口坐标（WINDOW 坐标系即 [0,1] 归一化）
+        const float kEdgePickRadiusPx = 5.0f;
+        float radius = kEdgePickRadiusPx;
+        if (ea.getWindowWidth() > 0)
+            radius /= static_cast<float>(ea.getWindowWidth());
+        else
+            radius = 0.005f;  // 窗口宽度非法时退回约半百分比
+        osg::ref_ptr<osgUtil::PolytopeIntersector> picker =
+            new osgUtil::PolytopeIntersector(osgUtil::Intersector::WINDOW,
+                                             ea.getX() - radius,
+                                             ea.getY() - radius,
+                                             ea.getX() + radius,
+                                             ea.getY() + radius);
+        // 只检查线图元（GL_LINES）：三角面片（网格/视锥体标记）与点不计
+        picker->setPrimitiveMask(osgUtil::PolytopeIntersector::LINE_PRIMITIVES);
+        osgUtil::IntersectionVisitor iv(picker.get());
+        viewer->getCamera()->accept(iv);
+        if (!picker->containsIntersections()) return;
+
+        for (const auto& isect : picker->getIntersections()) {
+            // 归属过滤：只收 "Edges" 子树的线命中，剔除视锥体线框、
+            // 坐标轴等同为 GL_LINES 的几何
+            if (classifyHit(isect.nodePath) != RayHit::Kind::Edge) continue;
+            const size_t idx = static_cast<size_t>(isect.primitiveIndex);
+            if (std::find(outCandidates.begin(), outCandidates.end(), idx)
+                    == outCandidates.end())
+                outCandidates.push_back(idx);  // 同一线段可能被多个线-体相交记录
+        }
+    }
+
+    /**
+     * @brief 由窗口坐标反投影得到世界坐标视线射线
+     *
+     * 与 raycastCloudPoint 同款方法：点击点（归一化窗口坐标）→ NDC →
+     * 逆(view*proj) 变换近/远两点得到射线起点与方向。
+     *
+     * @param ea       事件适配器
+     * @param viewer   OSG 查看器
+     * @param rayStart 输出：射线上的一点（近平面反投影点，世界坐标）
+     * @param rayDir   输出：射线方向（单位向量）
+     * @return 是否成功（viewer/矩阵退化时返回 false）
+     */
+    static bool windowRay(const osgGA::GUIEventAdapter& ea,
+                          osgViewer::Viewer* viewer,
+                          osg::Vec3d& rayStart, osg::Vec3d& rayDir) {
+        const osg::Camera* cam = viewer->getCamera();
+        if (!cam) return false;
+        const osg::Matrix invVP = osg::Matrix::inverse(
+            cam->getViewMatrix() * cam->getProjectionMatrix());
+        const double x = ea.getX(), y = ea.getY();
+        const double ndcX = x * 2.0 - 1.0;
+        const double ndcY = y * 2.0 - 1.0;
+        const osg::Vec3d nearPt = osg::Vec3d(ndcX, ndcY, -1.0) * invVP;
+        const osg::Vec3d farPt  = osg::Vec3d(ndcX, ndcY,  1.0) * invVP;
+        osg::Vec3d dir = farPt - nearPt;
+        if (dir.length2() < 1e-18) return false;
+        rayStart = nearPt;
+        rayDir   = dir / dir.length();
+        return true;
+    }
+
+    /**
+     * @brief 计算视线射线到边线段的最短距离平方
+     *
+     * 用于多候选排序：PolytopeIntersector 的窗口矩形命中不区分远近，
+     * 多条边同时穿过拾取体积（共用端点/交叉重叠）时取距视线最近者。
+     * 这里采用点到线段的垂距近似（射线自身长度远大于拾取容差，把
+     * "射线-线段"距离退化为"线段到射线起点+方向所在直线"的垂距即可
+     * 满足排序需要，无需完整的线段-线段距离）。
+     *
+     * @param rayStart 视线射线上一点（世界坐标）
+     * @param rayDir   视线射线方向（单位向量）
+     * @param seg      边线段
+     * @return 最短距离平方；零长度线段退化为起点垂距平方
+     */
+    static double raySegmentDist2(const osg::Vec3d& rayStart,
+                                  const osg::Vec3d& rayDir,
+                                  const EdgeSegment& seg) {
+        // 采样线段两端点到视线直线的垂距，取较小者：
+        // 拾取体积仅数像素宽，两端点垂距的较小值足以排序，
+        // 无需精确的线段-线段最短距离
+        const osg::Vec3d v1 = seg.p1 - rayStart;
+        const osg::Vec3d v2 = seg.p2 - rayStart;
+        const double d1 = (v1 ^ rayDir).length2();
+        const double d2 = (v2 ^ rayDir).length2();
+        if (seg.p1 == seg.p2) return d1;  // 零长度线段（退化）
+        return std::min(d1, d2);
     }
 
     /**
