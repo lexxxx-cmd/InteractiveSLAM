@@ -222,10 +222,6 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                 }
             });
 
-            menu.addSeparator();
-            menu.addAction(tr("Go to Vertex"))->setEnabled(false);
-            menu.addAction(tr("Vertex Details..."))->setEnabled(false);
-
         // === 边右键菜单 ===
         } else if (edgeId >= 0) {
             // 边信息展示（只读）
@@ -235,10 +231,6 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             menu.addAction(tr("Length: %1 m").arg(edgeDist, 0, 'f', 2))
                 ->setEnabled(false);
             menu.addAction(tr("Kernel: %1").arg(edgeKernel))->setEnabled(false);
-            menu.addSeparator();
-            menu.addAction(tr("Go to Edge"))->setEnabled(false);
-            menu.addAction(tr("Edge Details..."))->setEnabled(false);
-            menu.addSeparator();
 
             // 删除边操作：从图中移除选中边并刷新视口
             QAction* deleteAction = menu.addAction(tr("Delete Edge"));
