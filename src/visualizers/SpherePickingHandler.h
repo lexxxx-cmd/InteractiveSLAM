@@ -58,7 +58,9 @@ struct PickingHit {
     long edgeV1   = -1, edgeV2 = -1;  ///< 边连接的两个顶点 ID
     double edgeDist = 0;      ///< 边的长度
     std::string edgeKernel;   ///< 边的鲁棒核函数类型
-    float screenX = 0, screenY = 0;  ///< 点击时的屏幕坐标
+    // 点击时的视口坐标（设备像素，OSG 口径：原点左下、Y 向上）。
+    // ViewportWidget 消费时需翻 Y 并除以 DPR 换算成 Qt 逻辑坐标。
+    float screenX = 0, screenY = 0;
 };
 
 /**
@@ -449,8 +451,11 @@ private:
      * 已知限制：柱体受投影近平面（0.1m）限定，相机贴得过近时
      * 目标点可能落在近平面内导致拾取失效。
      *
-     * @param x        屏幕 X 坐标（归一化）
-     * @param y        屏幕 Y 坐标（归一化）
+     * 坐标语义：x/y 是窗口设备像素（原点左下、Y 向上），拾取半径同样
+     * 以设备像素计（见 raycastEdges 的坐标语义说明）。
+     *
+     * @param x        屏幕 X 坐标（窗口设备像素）
+     * @param y        屏幕 Y 坐标（窗口设备像素）
      * @param viewer   OSG 查看器
      * @param outPoint 输出：命中的点云点（世界坐标）
      * @return 是否命中点云
@@ -458,8 +463,8 @@ private:
     static bool raycastCloudPoint(float x, float y,
                                   osgViewer::Viewer* viewer,
                                   osg::Vec3d& outPoint) {
-        // 射线柱半径：归一化窗口坐标
-        const double kCloudPickRadius = 0.1;
+        // 射线柱半径：设备像素（双击点云聚焦的点击容差）
+        const double kCloudPickRadius = 10.0;
         osg::ref_ptr<osgUtil::PolytopeIntersector> picker =
             new osgUtil::PolytopeIntersector(osgUtil::Intersector::WINDOW,
                                              x - kCloudPickRadius,
@@ -472,13 +477,15 @@ private:
         viewer->getCamera()->accept(iv);
         if (!picker->containsIntersections()) return false;
 
-        // 相机视线（世界坐标）：双击点窗口坐标 → NDC → 逆(view*proj)
-        // 反投影近/远两点得到射线，用于计算各命中点的垂距
+        // 相机视线（世界坐标）：双击点窗口像素 → 视口 → NDC →
+        // 逆(view*proj) 反投影近/远两点得到射线，用于计算各命中点的垂距
         const osg::Camera* cam = viewer->getCamera();
+        const osg::Viewport* vp = cam->getViewport();
+        if (!vp || vp->width() <= 0 || vp->height() <= 0) return false;
         osg::Matrix invVP = osg::Matrix::inverse(
             cam->getViewMatrix() * cam->getProjectionMatrix());
-        const double ndcX = x * 2.0 - 1.0;
-        const double ndcY = y * 2.0 - 1.0;
+        const double ndcX = 2.0 * x / vp->width() - 1.0;
+        const double ndcY = 2.0 * y / vp->height() - 1.0;
         const osg::Vec3d rayStart = osg::Vec3d(ndcX, ndcY, -1.0) * invVP;
         const osg::Vec3d rayEnd   = osg::Vec3d(ndcX, ndcY,  1.0) * invVP;
         osg::Vec3d dir = rayEnd - rayStart;
@@ -513,6 +520,15 @@ private:
      * src/osgUtil/PolytopeIntersector.cpp 第 299-319 行），即本文件
      * raycastCloudPoint() 用 POINT_PRIMITIVES 拾点云的同一模式。
      *
+     * 坐标语义（重要）：Intersector::WINDOW 是**相机视口的像素坐标**
+     * （原点左下、Y 向上，见 Viewport::computeWindowMatrix() 把 NDC
+     * 放大到 0~width/height），而本工程的事件坐标也是设备像素
+     * （OSGRenderer 转发 Qt 事件时已乘 windowScale/DPR，事件队列输入
+     * 范围同步为 0~width*DPR）。因此拾取半径直接用**设备像素**；
+     * /windowWidth 的"归一化"换算会让半径退化为 1/width 像素，
+     * 拾取盒比一个像素还小，任何情况下都命不中。
+     * DPR > 1 的高分屏上逻辑像素点击容差需乘 DPR 保持手感。
+     *
      * primitiveIndex → EdgeSegment 下标映射依据（跨模块隐式耦合约定）：
      * PolytopeIntersector 的 _primitiveIndex 逐图元递增，而
      * EdgeLineVisualizer 只有一个 DrawArrays(GL_LINES, 0, N) 图元集，
@@ -524,7 +540,7 @@ private:
      * 记录 nodePath，用 classifyHit() 过滤后只保留 "Edges" 子树的
      * 命中（与 raycast()/classifyHit 同一套归属判定）。
      *
-     * @param ea           事件适配器（取归一化窗口坐标与窗口尺寸）
+     * @param ea           事件适配器（取窗口像素坐标）
      * @param viewer       OSG 查看器
      * @param outCandidates 输出：命中的边线段下标候选（已去重，
      *                     顺序为交点遍历顺序，未按距离排序）
@@ -533,13 +549,10 @@ private:
                              osgViewer::Viewer* viewer,
                              std::vector<size_t>& outCandidates) {
         outCandidates.clear();
-        // 拾取半径：像素 → 归一化窗口坐标（WINDOW 坐标系即 [0,1] 归一化）
-        const float kEdgePickRadiusPx = 5.0f;
-        float radius = kEdgePickRadiusPx;
-        if (ea.getWindowWidth() > 0)
-            radius /= static_cast<float>(ea.getWindowWidth());
-        else
-            radius = 0.005f;  // 窗口宽度非法时退回约半百分比
+        // 拾取半径：设备像素（事件坐标与视口同为 DPR 缩放后的设备像素，
+        // 直接可比）。取 6 设备像素：DPR=1 屏上 6 逻辑像素；DPR=2 屏上
+        // 3 逻辑像素，仍大于 1~2 像素宽的渲染线，可正常点击。
+        const float radius = 6.0f;
         osg::ref_ptr<osgUtil::PolytopeIntersector> picker =
             new osgUtil::PolytopeIntersector(osgUtil::Intersector::WINDOW,
                                              ea.getX() - radius,
@@ -564,12 +577,12 @@ private:
     }
 
     /**
-     * @brief 由窗口坐标反投影得到世界坐标视线射线
+     * @brief 由事件坐标反投影得到世界坐标视线射线
      *
-     * 与 raycastCloudPoint 同款方法：点击点（归一化窗口坐标）→ NDC →
-     * 逆(view*proj) 变换近/远两点得到射线起点与方向。
+     * 与 raycastCloudPoint 同款方法：点击点（窗口像素坐标）→ 视口内
+     * 像素 → NDC → 逆(view*proj) 变换近/远两点得到射线起点与方向。
      *
-     * @param ea       事件适配器
+     * @param ea       事件适配器（像素坐标，Y 向上，原点在视口左下）
      * @param viewer   OSG 查看器
      * @param rayStart 输出：射线上的一点（近平面反投影点，世界坐标）
      * @param rayDir   输出：射线方向（单位向量）
@@ -580,11 +593,14 @@ private:
                           osg::Vec3d& rayStart, osg::Vec3d& rayDir) {
         const osg::Camera* cam = viewer->getCamera();
         if (!cam) return false;
+        const osg::Viewport* vp = cam->getViewport();
+        if (!vp || vp->width() <= 0 || vp->height() <= 0) return false;
         const osg::Matrix invVP = osg::Matrix::inverse(
             cam->getViewMatrix() * cam->getProjectionMatrix());
         const double x = ea.getX(), y = ea.getY();
-        const double ndcX = x * 2.0 - 1.0;
-        const double ndcY = y * 2.0 - 1.0;
+        // 像素 → NDC（像素坐标与相机视口同以左下为原点、Y 向上）
+        const double ndcX = 2.0 * x / vp->width() - 1.0;
+        const double ndcY = 2.0 * y / vp->height() - 1.0;
         const osg::Vec3d nearPt = osg::Vec3d(ndcX, ndcY, -1.0) * invVP;
         const osg::Vec3d farPt  = osg::Vec3d(ndcX, ndcY,  1.0) * invVP;
         osg::Vec3d dir = farPt - nearPt;

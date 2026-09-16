@@ -259,9 +259,18 @@ void ViewportWidget::initOsg() {
                         enriched.vtxDegree = static_cast<int>(kf->node->edges().size());
                     }
                 }
-                QPoint globalPos = m_osgWidget->mapToGlobal(
-                    QPoint(static_cast<int>(hit.screenX),
-                           static_cast<int>(hit.screenY)));
+                // hit.screenX/Y 是 OSG 视口的设备像素坐标（原点左下、
+                // Y 向上）。换算成 Qt 逻辑坐标（原点左上、Y 向下）后
+                // 才能映射为全局坐标：先除 DPR 回逻辑像素，再翻 Y
+                // （OSG Y 最大值是 traits 高度 - 1，与 Qt 高度差 1 像素，
+                // 取整误差可忽略）。
+                const double dpr = m_osgWidget->devicePixelRatioF();
+                const int qtX = (dpr > 0.0)
+                    ? static_cast<int>(hit.screenX / dpr) : static_cast<int>(hit.screenX);
+                const int qtY = (dpr > 0.0)
+                    ? static_cast<int>(m_osgWidget->height() - hit.screenY / dpr)
+                    : static_cast<int>(m_osgWidget->height() - hit.screenY);
+                QPoint globalPos = m_osgWidget->mapToGlobal(QPoint(qtX, qtY));
                 emit contextMenuRequested(
                     enriched.vertexId, enriched.edgeId,
                     enriched.edgeV1, enriched.edgeV2,
