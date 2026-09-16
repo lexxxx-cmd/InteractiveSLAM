@@ -242,9 +242,17 @@ public:
             hitInfo.screenX = ea.getX();
             hitInfo.screenY = ea.getY();
 
-            // 射线检测场景交点（全部，近 → 远，含归属类别）
+            // 射线检测场景交点（全部，近 → 远，含归属类别）。
+            // 可命中三角面片只有视锥体标记与地面网格（边线/坐标轴是
+            // GL_LINES，点云被 CloudGeometry 屏蔽）——但地面网格 z=0
+            // 且仅 ±100m 覆盖，大场景中点击射线常打到网格之外或朝
+            // 地平线以上（典型：全局视角看地图外围的回环边），
+            // hits 可能为空。因此顶点判定空过即可，边判定不受此
+            // 门控约束（raycastEdges 的窗口矩形拾取不依赖三角面片
+            // 交点，见下方注释）。
             auto hits = raycast(ea.getX(), ea.getY(), viewer);
-            if (!hits.empty()) {
+            long vertexId = -1;
+            {
                 // —— 顶点命中（收紧版） ——
                 // 旧逻辑是"任何交点落入标记 2.5R 拾取球即命中"，而边线
                 // 端点恰为标记中心（拾取球球心），点边几乎必然先落进顶点
@@ -252,7 +260,6 @@ public:
                 // 几何本身（Vertex 归属交点）且该交点落在标记 pickRadius
                 // 内"才命中顶点——点锥体本体仍出顶点菜单（AC-1.3），
                 // 点边线/空白不再被大球吞掉（AC-1.1/1.2）。
-                long vertexId = -1;
                 std::vector<RayHit> vertexHits;
                 for (const auto& hit : hits) {
                     if (hit.kind == RayHit::Kind::Vertex) vertexHits.push_back(hit);
@@ -260,68 +267,79 @@ public:
                 auto* centers = m_sphereProvider();
                 if (!vertexHits.empty() && centers && !centers->empty())
                     vertexId = nearestCenter(vertexHits, *centers);
+            }
 
-                // —— 边命中（窗口矩形线图元拾取 + 距离匹配兜底） ——
-                // 主路径：OSG 3.6.5 的 LineSegmentIntersector 对线图元
-                // 不做相交测试（空实现），Edge 归属交点永远不会出现，
-                // 必须用 PolytopeIntersector 的窗口小矩形 + LINE_PRIMITIVES
-                // 掩码做线拾取（见 raycastEdges 注释）。
-                // 兜底：主路径只认「线段穿过点击点约 5 像素邻域」的命中，
-                // 点击偏移略大而射线恰在贴地边附近打到地面网格时，全交点
-                // nearestSegment 距离匹配仍可命中。阈值 = 实时球体
-                // 半径 × 2.5，与 pickRadius 系数对齐（m_sphereRadius 是
-                // 构造快照，运行期调尺寸会失真）。
-                // 仲裁：顶点未命中时先走线图元拾取主路径，主路径无候选
-                // 才回退全交点距离匹配兜底。
-                if (vertexId < 0) {
-                    auto* edges = m_edgeProvider();
-                    if (edges && !edges->empty()) {
-                        bool edgeMatched = false;
-                        // 主路径：窗口矩形拾取 GL_LINES 线图元
-                        std::vector<size_t> candidates;
-                        raycastEdges(ea, viewer, candidates);
+            // —— 边命中（窗口矩形线图元拾取 + 距离匹配兜底） ——
+            // 主路径：OSG 3.6.5 的 LineSegmentIntersector 对线图元
+            // 不做相交测试（空实现），Edge 归属交点永远不会出现，
+            // 必须用 PolytopeIntersector 的窗口小矩形 + LINE_PRIMITIVES
+            // 掩码做线拾取（见 raycastEdges 注释）。
+            // 兜底：主路径只认「线段穿过点击点约 5 像素邻域」的命中，
+            // 点击偏移略大且射线在边附近打到场景几何时，全交点
+            // nearestSegment 距离匹配仍可命中。**仅用 Vertex 归属交点
+            // 参与匹配**——地面网格交点不参与：网格是 z=0 的整片平面，
+            // 距离匹配会把「点到网格的交点恰好落在某条边附近」误判为
+            // 点击了那条边（典型：俯视时点轨迹下方的空地弹出边菜单），
+            // 而真正需要兜底的贴地边场景由 Vertex 交点（视锥体锥面）覆盖。
+            // 阈值 = 实时球体半径 × 2.5，与 pickRadius 系数对齐
+            // （m_sphereRadius 是构造快照，运行期调尺寸会失真）。
+            // 仲裁：顶点未命中时先走线图元拾取主路径，主路径无候选
+            // 才回退 Vertex 交点距离匹配兜底。
+            if (vertexId < 0) {
+                auto* edges = m_edgeProvider();
+                if (edges && !edges->empty()) {
+                    bool edgeMatched = false;
+                    // 主路径：窗口矩形拾取 GL_LINES 线图元
+                    std::vector<size_t> candidates;
+                    raycastEdges(ea, viewer, candidates);
+                    if (!candidates.empty()) {
+                        // 过滤越界下标（防御性，正常不会发生）
+                        candidates.erase(
+                            std::remove_if(candidates.begin(), candidates.end(),
+                                           [edges](size_t i) { return i >= edges->size(); }),
+                            candidates.end());
                         if (!candidates.empty()) {
-                            // 过滤越界下标（防御性，正常不会发生）
-                            candidates.erase(
-                                std::remove_if(candidates.begin(), candidates.end(),
-                                               [edges](size_t i) { return i >= edges->size(); }),
-                                candidates.end());
-                            if (!candidates.empty()) {
-                                // 多候选（多条边共用端点/交叉重叠）时按
-                                // "视线射线到线段的最短距离"取最近一条
-                                osg::Vec3d rayStart, rayDir;
-                                if (!windowRay(ea, viewer, rayStart, rayDir)) {
-                                    rayStart = osg::Vec3d();
-                                    rayDir   = osg::Vec3d(0, 0, -1);
-                                }
-                                size_t bestIdx = candidates.front();
-                                double bestD2 = std::numeric_limits<double>::max();
-                                for (size_t idx : candidates) {
-                                    const double d2 =
-                                        raySegmentDist2(rayStart, rayDir, (*edges)[idx]);
-                                    if (d2 < bestD2) { bestD2 = d2; bestIdx = idx; }
-                                }
-                                // 命中：从 m_edgeSegments[bestIdx] 填充边字段
-                                const auto& seg = (*edges)[bestIdx];
-                                hitInfo.edgeId    = seg.id;
-                                hitInfo.edgeV1    = seg.v1_id;
-                                hitInfo.edgeV2    = seg.v2_id;
-                                hitInfo.edgeDist  = seg.distance;
-                                hitInfo.edgeKernel = seg.kernel;
-                                edgeMatched = true;
+                            // 多候选（多条边共用端点/交叉重叠）时按
+                            // "视线射线到线段的最短距离"取最近一条
+                            osg::Vec3d rayStart, rayDir;
+                            if (!windowRay(ea, viewer, rayStart, rayDir)) {
+                                rayStart = osg::Vec3d();
+                                rayDir   = osg::Vec3d(0, 0, -1);
                             }
+                            size_t bestIdx = candidates.front();
+                            double bestD2 = std::numeric_limits<double>::max();
+                            for (size_t idx : candidates) {
+                                const double d2 =
+                                    raySegmentDist2(rayStart, rayDir, (*edges)[idx]);
+                                if (d2 < bestD2) { bestD2 = d2; bestIdx = idx; }
+                            }
+                            // 命中：从 m_edgeSegments[bestIdx] 填充边字段
+                            const auto& seg = (*edges)[bestIdx];
+                            hitInfo.edgeId    = seg.id;
+                            hitInfo.edgeV1    = seg.v1_id;
+                            hitInfo.edgeV2    = seg.v2_id;
+                            hitInfo.edgeDist  = seg.distance;
+                            hitInfo.edgeKernel = seg.kernel;
+                            edgeMatched = true;
                         }
-                        // 兜底：原全交点距离匹配（处理贴地轨迹等主路径
-                        // 漏检场景），逻辑保持不变
-                        if (!edgeMatched) {
+                    }
+                    // 兜底：Vertex 归属交点距离匹配（视锥体锥面交点，
+                    // 不含地面网格），逻辑与原全交点版本相同
+                    if (!edgeMatched) {
+                        std::vector<RayHit> vertexHitsOnly;
+                        for (const auto& hit : hits) {
+                            if (hit.kind == RayHit::Kind::Vertex)
+                                vertexHitsOnly.push_back(hit);
+                        }
+                        if (!vertexHitsOnly.empty()) {
                             const float threshold = currentSphereRadius() * 2.5f;
-                            matchEdge(hits, *edges, threshold, hitInfo);
+                            matchEdge(vertexHitsOnly, *edges, threshold, hitInfo);
                         }
                     }
                 }
-
-                hitInfo.vertexId = vertexId;
             }
+
+            hitInfo.vertexId = vertexId;
             m_onContextMenu(hitInfo);
             return true;
         }
