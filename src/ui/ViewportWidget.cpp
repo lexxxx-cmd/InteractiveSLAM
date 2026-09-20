@@ -250,7 +250,10 @@ void ViewportWidget::initOsg() {
                     auto it = m_graph->keyframes.find(hit.vertexId);
                     if (it != m_graph->keyframes.end()) {
                         auto& kf = it->second;
-                        auto pos = kf->estimate().translation();
+                        // estimate() 按值返回临时量，translation() 只是引用该
+                        // 临时量的表达式；必须显式拷贝成 Eigen::Vector3d，
+                        // 否则 auto 推出的 Block 在语句结束即悬垂。
+                        const Eigen::Vector3d pos = kf->estimate().translation();
                         enriched.vtxPosX = pos.x();
                         enriched.vtxPosY = pos.y();
                         enriched.vtxPosZ = pos.z();

@@ -8,6 +8,7 @@
  * - 滑块拖动与 30ms 节流防抖
  * - 采样步长联动过滤帧列表
  * - 增量球体颜色更新（不重建几何体）
+ * - 当前帧菜单（"⋮"按钮或面板右键）：等价于右键当前帧视锥体
  */
 
 #include "ui/PlaybackPanel.h"
@@ -15,6 +16,7 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QContextMenuEvent>
 #include <algorithm>
 
 // ── 基础播放间隔（毫秒） ──
@@ -52,6 +54,14 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     m_playBtn      = makeBtn(QStringLiteral("▶"),  tr("Play / Pause"));
     m_nextBtn      = makeBtn(QStringLiteral("▶"),  tr("Next frame"));
     m_skipEndBtn   = makeBtn(QStringLiteral("⏭"), tr("Skip to end"));
+    // 当前帧菜单：等价于右键该帧视锥体（为视锥体过密、又不想用采样丢帧时提供入口）
+    m_frameMenuBtn = makeBtn(QStringLiteral("⋮"),
+        tr("Menu for the current frame (Loop Begin / Loop End) — "
+           "same as right-clicking this frame's frustum"));
+    connect(m_frameMenuBtn, &QPushButton::clicked, this, [this]() {
+        // 弹在按钮下方
+        showCurrentFrameMenu(m_frameMenuBtn->mapToGlobal(QPoint(0, m_frameMenuBtn->height())));
+    });
 
     // 设置播放按钮样式（占位稍宽以容纳文字变化）
     m_playBtn->setFixedWidth(40);
@@ -415,4 +425,38 @@ void PlaybackPanel::applyFollowView() {
     if (m_playbackFrames.empty()) return;
     if (m_currentIndex < 0 || m_currentIndex >= (int)m_playbackFrames.size()) return;
     m_viewport->followFrameView(m_playbackFrames[m_currentIndex]);
+}
+
+// ============================================================================
+// 当前帧菜单（等价右键该帧视锥体）
+// ============================================================================
+
+/**
+ * @brief 右键上下文菜单事件重写
+ *
+ * 面板上任意位置（含 QSlider / QLabel / QCheckBox / QPushButton 等子控件）
+ * 的右键都会冒泡到本重写并弹出当前帧菜单。
+ */
+void PlaybackPanel::contextMenuEvent(QContextMenuEvent* event) {
+    showCurrentFrameMenu(event->globalPos());
+    event->accept();
+}
+
+/**
+ * @brief 以当前帧为对象弹出顶点菜单（暂停播放并选中该帧后发信号）
+ *
+ * 菜单构建统一由 MainWindow::showVertexContextMenu 完成，
+ * 本方法只负责确定"当前帧"并把状态切换到位。
+ */
+void PlaybackPanel::showCurrentFrameMenu(const QPoint& globalPos) {
+    if (m_playbackFrames.empty()) return;
+    if (m_currentIndex < 0 || m_currentIndex >= (int)m_playbackFrames.size()) return;
+    // 菜单是模态的（QMenu::exec 起嵌套事件循环）：必须先停掉播放定时器，
+    // 否则菜单期间帧号仍在推进，"当前帧"语义会漂移。
+    pausePlayback();
+    // 与暂停/单步/拖动释放同一套会话结束语义：清理播放通道后再完整选中，
+    // 让该帧以选中态（红 2 倍）明确标出菜单作用于哪一帧。
+    m_viewport->highlightPlaybackVertex(-1);
+    m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+    emit frameContextMenuRequested(m_playbackFrames[m_currentIndex], globalPos);
 }
