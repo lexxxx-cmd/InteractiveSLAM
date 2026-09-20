@@ -8,6 +8,7 @@
  * - 滑块拖动与 30ms 节流防抖
  * - 采样步长联动过滤帧列表
  * - 增量球体颜色更新（不重建几何体）
+ * - 当前帧菜单（"⋮"按钮或面板右键）：等价于右键当前帧视锥体
  */
 
 #include "ui/PlaybackPanel.h"
@@ -15,6 +16,7 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QContextMenuEvent>
 #include <algorithm>
 
 // ── 基础播放间隔（毫秒） ──
@@ -52,6 +54,14 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     m_playBtn      = makeBtn(QStringLiteral("▶"),  tr("Play / Pause"));
     m_nextBtn      = makeBtn(QStringLiteral("▶"),  tr("Next frame"));
     m_skipEndBtn   = makeBtn(QStringLiteral("⏭"), tr("Skip to end"));
+    // 当前帧菜单：等价于右键该帧视锥体（为视锥体过密、又不想用采样丢帧时提供入口）
+    m_frameMenuBtn = makeBtn(QStringLiteral("⋮"),
+        tr("Menu for the current frame (Loop Begin / Loop End) — "
+           "same as right-clicking this frame's frustum"));
+    connect(m_frameMenuBtn, &QPushButton::clicked, this, [this]() {
+        // 弹在按钮下方
+        showCurrentFrameMenu(m_frameMenuBtn->mapToGlobal(QPoint(0, m_frameMenuBtn->height())));
+    });
 
     // 设置播放按钮样式（占位稍宽以容纳文字变化）
     m_playBtn->setFixedWidth(40);
@@ -86,6 +96,17 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->setPlaybackRetain(checked);
     });
 
+    // ── 跟随视角选项 ──
+    m_followViewCb = new QCheckBox(tr("Follow frame view"), this);
+    m_followViewCb->setToolTip(
+        tr("Jump the camera to the current keyframe's pose view on every playback "
+           "step (same camera move as Ctrl+double-click on that frame). Works while "
+           "playing, stepping and dragging."));
+    connect(m_followViewCb, &QCheckBox::toggled, this, [this](bool checked) {
+        // 勾选立即跳到当前帧视角；取消勾选不做任何相机操作（相机停在原处）
+        if (checked) applyFollowView();
+    });
+
     // ── 滑块 ──
     m_slider = new QSlider(Qt::Horizontal, this);
     m_slider->setRange(0, 0);
@@ -99,6 +120,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
     mainLayout->addLayout(infoLayout);
     mainLayout->addWidget(m_slider);
     mainLayout->addWidget(m_retainCloudCb);
+    mainLayout->addWidget(m_followViewCb);
 
     // ── 定时器 ──
     m_playTimer = new QTimer(this);
@@ -134,6 +156,8 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
 
             // 立即高亮当前帧
             goToIndex(m_currentIndex);
+            // 开始播放前先对齐一次相机（跟随开关打开时）
+            applyFollowView();
 
             // 计算播放间隔（基础间隔 / 倍率）
             int speedIdx = m_speedCombo->currentIndex();
@@ -150,6 +174,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
         if (newIdx < 0) newIdx = 0;
         goToIndex(newIdx);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+        applyFollowView();
     });
 
     // 下一帧
@@ -161,6 +186,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
         if (newIdx >= (int)m_playbackFrames.size()) newIdx = (int)m_playbackFrames.size() - 1;
         goToIndex(newIdx);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+        applyFollowView();
     });
 
     // 跳转开头
@@ -170,6 +196,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->highlightPlaybackVertex(-1);
         goToIndex(0);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+        applyFollowView();
     });
 
     // 跳转末尾
@@ -179,6 +206,7 @@ PlaybackPanel::PlaybackPanel(ViewportWidget* viewport, QWidget* parent)
         m_viewport->highlightPlaybackVertex(-1);
         goToIndex((int)m_playbackFrames.size() - 1);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+        applyFollowView();
     });
 
     // 滑块拖动（拖拽中 —— 使用节流定时器防抖）
@@ -236,6 +264,11 @@ void PlaybackPanel::onGraphClosed() {
     m_retainCloudCb->blockSignals(false);
     m_viewport->setPlaybackRetain(false);
 
+    // 复位跟随视角选项（跟随开关随地图关闭一并复位，且不触发相机操作）
+    m_followViewCb->blockSignals(true);
+    m_followViewCb->setChecked(false);
+    m_followViewCb->blockSignals(false);
+
     // 清空数据
     m_allKeyframeIds.clear();
     m_playbackFrames.clear();
@@ -271,6 +304,8 @@ void PlaybackPanel::onPlayTick() {
     // 前进一帧（使用轻量级高亮）
     goToIndex(nextIdx);
     m_viewport->highlightPlaybackVertex(m_playbackFrames[m_currentIndex]);
+    // 跟随开关打开时，播放推进同步把相机切到该帧位姿视角
+    applyFollowView();
 }
 
 void PlaybackPanel::onThrottleTick() {
@@ -284,6 +319,8 @@ void PlaybackPanel::onThrottleTick() {
 
         // 轻量级高亮（不重建球体几何体）
         m_viewport->highlightPlaybackVertex(m_playbackFrames[m_currentIndex]);
+        // 拖动过程中的节流跟随（跟随开关打开时逐帧对齐相机）
+        applyFollowView();
     }
 }
 
@@ -312,6 +349,7 @@ void PlaybackPanel::onSliderReleased() {
         // 拖动结束 = 会话结束：清理播放通道后完整选中（含点云高亮 + 信号）
         m_viewport->highlightPlaybackVertex(-1);
         m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+        applyFollowView();
     }
 }
 
@@ -373,4 +411,52 @@ void PlaybackPanel::clampIndex() {
         return;
     }
     m_currentIndex = std::max(0, std::min(m_currentIndex, (int)m_playbackFrames.size() - 1));
+}
+
+/**
+ * @brief 若勾选跟随则把相机切到当前帧视角
+ *
+ * 三条前置校验保证幂等安全：未勾选 / 无播放帧 / 下标越界时静默返回。
+ * 刻意不做会话/暂停判断——跟随只关心"当前帧"，播放、单步、拖动
+ * 三条路径共用本方法。
+ */
+void PlaybackPanel::applyFollowView() {
+    if (!m_followViewCb || !m_followViewCb->isChecked()) return;
+    if (m_playbackFrames.empty()) return;
+    if (m_currentIndex < 0 || m_currentIndex >= (int)m_playbackFrames.size()) return;
+    m_viewport->followFrameView(m_playbackFrames[m_currentIndex]);
+}
+
+// ============================================================================
+// 当前帧菜单（等价右键该帧视锥体）
+// ============================================================================
+
+/**
+ * @brief 右键上下文菜单事件重写
+ *
+ * 面板上任意位置（含 QSlider / QLabel / QCheckBox / QPushButton 等子控件）
+ * 的右键都会冒泡到本重写并弹出当前帧菜单。
+ */
+void PlaybackPanel::contextMenuEvent(QContextMenuEvent* event) {
+    showCurrentFrameMenu(event->globalPos());
+    event->accept();
+}
+
+/**
+ * @brief 以当前帧为对象弹出顶点菜单（暂停播放并选中该帧后发信号）
+ *
+ * 菜单构建统一由 MainWindow::showVertexContextMenu 完成，
+ * 本方法只负责确定"当前帧"并把状态切换到位。
+ */
+void PlaybackPanel::showCurrentFrameMenu(const QPoint& globalPos) {
+    if (m_playbackFrames.empty()) return;
+    if (m_currentIndex < 0 || m_currentIndex >= (int)m_playbackFrames.size()) return;
+    // 菜单是模态的（QMenu::exec 起嵌套事件循环）：必须先停掉播放定时器，
+    // 否则菜单期间帧号仍在推进，"当前帧"语义会漂移。
+    pausePlayback();
+    // 与暂停/单步/拖动释放同一套会话结束语义：清理播放通道后再完整选中，
+    // 让该帧以选中态（红 2 倍）明确标出菜单作用于哪一帧。
+    m_viewport->highlightPlaybackVertex(-1);
+    m_viewport->selectVertex(m_playbackFrames[m_currentIndex]);
+    emit frameContextMenuRequested(m_playbackFrames[m_currentIndex], globalPos);
 }

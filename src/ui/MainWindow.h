@@ -101,6 +101,18 @@ private:
     bool performSave(const QString& dir,
                      bool savePoseGraph, bool saveKeyframes, bool saveGlobalCloud);
 
+    /**
+     * @brief 弹出「顶点」右键菜单（帧信息 + 手动闭环起点/终点）
+     *
+     * 右键视锥体与播放轴面板的「当前帧菜单」共用本方法，保证两条入口
+     * 的操作项与启用条件完全一致。顶点信息在此处从 GraphManager 现场
+     * 查询，调用方只需给出顶点 ID。
+     *
+     * @param vertexId  目标顶点 ID（<0 直接返回）
+     * @param globalPos 菜单弹出的全局坐标
+     */
+    void showVertexContextMenu(long vertexId, const QPoint& globalPos);
+
     GraphManager* m_manager;    ///< 图数据管理器，非拥有指针
     ViewportWidget* m_viewport; ///< 中央 3D 视口部件
 

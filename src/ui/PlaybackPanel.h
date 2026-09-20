@@ -8,6 +8,10 @@
  * - 位置滑块拖动
  * - 播放倍速切换（1x/2x/4x/8x）
  * - 采样步长联动（仅播放已渲染的球体）
+ * - 当前帧菜单（"⋮"按钮或面板右键）：等价于右键当前帧视锥体，
+ *   弹出该帧的顶点上下文菜单（Loop Begin / Loop End）
+ * - 跟随视角（"Follow frame view"）：勾选后播放/单步/拖动每到一帧，
+ *   相机同步切到该帧位姿视角（等价于对该帧做 Ctrl+双击）
  *
  * 性能设计：
  * - 滑块拖动时使用 highlightPlaybackVertex() 增量更新球体颜色
@@ -39,6 +43,7 @@
 #include <vector>
 
 class ViewportWidget;
+class QContextMenuEvent;
 
 /**
  * @brief 播放轴浮动面板
@@ -84,6 +89,27 @@ public slots:
     /** @brief 重置面板状态（关闭地图时调用） */
     void onGraphClosed();
 
+signals:
+    /**
+     * @brief 请求弹出「当前帧」的顶点上下文菜单（等价于右键该帧视锥体）
+     * @param vertexId  当前帧顶点 ID
+     * @param globalPos 菜单弹出的全局屏幕坐标
+     */
+    void frameContextMenuRequested(long vertexId, const QPoint& globalPos);
+
+protected:
+    /**
+     * @brief 右键上下文菜单事件重写
+     * @param event 上下文菜单事件
+     *
+     * Qt 会把未被接受的 QEvent::ContextMenu 逐级上抛到父控件
+     * （见 qapplication.cpp 的 ContextMenu 分支），而 QSlider / QLabel /
+     * QCheckBox / QPushButton 都不消费右键，因此右键落在面板任意位置
+     * （含子控件）都会走到本重写，无需 Qt::CustomContextMenu 策略，
+     * 也无需 eventFilter。
+     */
+    void contextMenuEvent(QContextMenuEvent* event) override;
+
 private slots:
     /** @brief 播放定时器 tick，前进一帧 */
     void onPlayTick();
@@ -103,6 +129,10 @@ private:
     void updateLabel();
     /** @brief 确保当前索引在有效范围内 */
     void clampIndex();
+    /** @brief 若勾选跟随则把相机切到当前帧视角 */
+    void applyFollowView();
+    /** @brief 以当前帧为对象弹出顶点菜单（暂停播放并选中该帧后发信号） */
+    void showCurrentFrameMenu(const QPoint& globalPos);
 
     // ── UI 控件 ──
     QPushButton* m_skipStartBtn = nullptr;  ///< 跳转到开头
@@ -110,10 +140,12 @@ private:
     QPushButton* m_playBtn = nullptr;       ///< 播放/暂停
     QPushButton* m_nextBtn = nullptr;       ///< 下一帧
     QPushButton* m_skipEndBtn = nullptr;    ///< 跳转到末尾
+    QPushButton* m_frameMenuBtn = nullptr;  ///< 当前帧菜单按钮（等价右键该帧视锥体）
     QSlider*     m_slider = nullptr;        ///< 位置滑块
     QLabel*      m_frameLabel = nullptr;    ///< 帧号标签 "42 / 15000"
     QComboBox*   m_speedCombo = nullptr;    ///< 倍速选择
     QCheckBox*   m_retainCloudCb = nullptr; ///< "留存已播放点云"复选框
+    QCheckBox*   m_followViewCb = nullptr;  ///< 跟随当前帧视角复选框
 
     // ── 播放状态 ──
     ViewportWidget* m_viewport = nullptr;   ///< 关联的 3D 视口

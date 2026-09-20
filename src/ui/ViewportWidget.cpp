@@ -250,7 +250,10 @@ void ViewportWidget::initOsg() {
                     auto it = m_graph->keyframes.find(hit.vertexId);
                     if (it != m_graph->keyframes.end()) {
                         auto& kf = it->second;
-                        auto pos = kf->estimate().translation();
+                        // estimate() 按值返回临时量，translation() 只是引用该
+                        // 临时量的表达式；必须显式拷贝成 Eigen::Vector3d，
+                        // 否则 auto 推出的 Block 在语句结束即悬垂。
+                        const Eigen::Vector3d pos = kf->estimate().translation();
                         enriched.vtxPosX = pos.x();
                         enriched.vtxPosY = pos.y();
                         enriched.vtxPosZ = pos.z();
@@ -332,6 +335,7 @@ void ViewportWidget::initOsg() {
 void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
     m_graph = graph;
     ++m_cloudBuildSeq;  // 使任何在途构建结果作废
+    m_fpSavedSpeed = -1.0;  // 换图后速度按新场景尺度重新推导（旧速度可能不适用）
     m_sceneViz->buildFromGraph(graph, m_flags);
 
     // 应用当前设置
@@ -360,6 +364,7 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
 void ViewportWidget::onGraphClosed() {
     m_graph.reset();
     ++m_cloudBuildSeq;  // 使在途构建结果作废
+    m_fpSavedSpeed = -1.0;  // 图已关闭，下次加载按新场景尺度重新推导速度
     const int prevStride = m_sceneViz->sampleStride();
     m_sceneViz->clear();
     if (prevStride != 1) {
@@ -605,6 +610,9 @@ void ViewportWidget::restoreWheelZoomFactor() {
  * 从当前相机位姿取视线方向初始化 yaw/pitch，行走速度按场景包围球
  * 半径设定；切换操作器到 FirstPersonManipulator（保留轨迹球实例，
  * 退出时恢复并以第一人称位姿无缝衔接）。
+ *
+ * 滚轮调速后经操作器回调回传当前速度，在状态栏回显；同一张图内
+ * Shift 反复切换时沿用用户上次调好的速度（m_fpSavedSpeed）。
  */
 void ViewportWidget::enterFirstPersonMode() {
     if (m_fpActive) return;
@@ -620,13 +628,25 @@ void ViewportWidget::enterFirstPersonMode() {
     if (dir.length2() < 1e-12) dir.set(0.0, 1.0, 0.0);
 
     if (!m_fpManip) m_fpManip = new FirstPersonManipulator;
+    // 速度回调在 OSG 渲染线程被调用，不能直接碰 Qt UI：
+    // 用 QueuedConnection 投递回本对象所在（Qt 主）线程后再发信号
+    m_fpManip->setSpeedCallback([this](double speed) {
+        QMetaObject::invokeMethod(this, [this, speed]() {
+            emit firstPersonSpeedChanged(speed);
+        }, Qt::QueuedConnection);
+    });
     const double sceneR = viewer->getSceneData()->getBound().radius();
-    const double speed = std::max(sceneR * 0.15, 1.5);  // 米/秒，随场景尺度
+    // 同一张图内保留用户上次调好的速度；否则按场景尺度推导（米/秒）
+    const double speed = (m_fpSavedSpeed > 0.0)
+        ? m_fpSavedSpeed
+        : std::max(sceneR * 0.15, 1.5);
     m_fpManip->startFrom(eye, dir, speed);
 
     m_savedManip = viewer->getCameraManipulator();
     viewer->setCameraManipulator(m_fpManip.get(), false);  // false = 不重置 home
     m_fpActive = true;
+    // 先回显初始速度，再发模式提示：状态栏最终留下的是操作帮助文案
+    emit firstPersonSpeedChanged(m_fpManip->walkSpeed());
     emit firstPersonModeChanged(true);
 }
 
@@ -643,6 +663,7 @@ void ViewportWidget::exitFirstPersonMode() {
 
     osg::Vec3d eye, dir;
     m_fpManip->getPose(eye, dir);
+    m_fpSavedSpeed = m_fpManip->walkSpeed();  // 保留本次调好的速度，同图内下次进入沿用
 
     viewer->setCameraManipulator(m_savedManip.get(), false);
     auto* trackball = dynamic_cast<osgGA::TrackballManipulator*>(
@@ -837,6 +858,52 @@ void ViewportWidget::onFrameView(long vertexId) {
     }
     manip->setWheelZoomFactor(0.5);
     m_sceneViz->setFocusedVertex(vertexId);
+    m_osgWidget->update();
+}
+
+/**
+ * @brief 播放跟随：切换到指定关键帧的位姿视角（仅相机，不改标记不透明度）
+ *
+ * 相机数学与 onFrameView 完全一致：eye = 位姿平移，forward = 局部 +Z，
+ * up = 局部 −Y，轨迹球中心放在前方 lookAhead 处。
+ *
+ * 与 onFrameView 的两点差异（见头文件注释）：
+ *   - 不调用 setFocusedVertex()，避免与播放独显的不透明度覆盖互相打架；
+ *   - 不保存/改写滚轮缩放系数，逐帧调用不污染全局缩放手感。
+ * 另加退化保护：逐帧调用必须安全，绝不把 inf/NaN 写进轨迹球。
+ */
+void ViewportWidget::followFrameView(long vertexId) {
+    if (vertexId < 0 || !m_graph) return;
+    if (m_fpActive) exitFirstPersonMode();  // 第一人称操作器不认轨迹球位姿
+    auto it = m_graph->keyframes.find(vertexId);
+    if (it == m_graph->keyframes.end()) return;
+    const auto& pose = it->second->estimate();
+
+    osg::Vec3d eye(pose.translation().x(),
+                   pose.translation().y(),
+                   pose.translation().z());
+    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
+    osg::Vec3d forward(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(-dirY.x(), -dirY.y(), -dirY.z());
+
+    // 退化保护：旋转矩阵异常导致零向量时直接放弃，避免归一化产生 inf
+    if (forward.length2() < 1e-18 || up.length2() < 1e-18) return;
+    forward.normalize();
+    up.normalize();
+
+    // 轨迹球中心放在前方（帧视角下的注视点）
+    double radius = m_sceneViz->sphereRadius();
+    double lookAhead = (radius > 1e-6) ? radius * 10.0 : 5.0;
+    osg::Vec3d center = eye + forward * lookAhead;
+
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!manip) return;
+    manip->setTransformation(eye, center, up);
+    // 注意：此处刻意不改滚轮缩放系数、不做聚焦淡化（播放独显已接管标记不透明度）
     m_osgWidget->update();
 }
 

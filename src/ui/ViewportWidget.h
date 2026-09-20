@@ -171,6 +171,20 @@ public slots:
     void onFocusPoint(const osg::Vec3d& point);  ///< 双击点云居中（旋转中心=命中点）
     void onFrameView(long vertexId);             ///< Ctrl+双击：切换到帧位姿视角
 
+    /**
+     * @brief 播放跟随：把相机切到指定关键帧的位姿视角（不改变标记不透明度）
+     *
+     * 与 onFrameView()（Ctrl+双击）的区别：
+     *   - 不调用 setFocusedVertex()：播放独显（applyPlaybackSolo）已接管标记
+     *     不透明度，再叠加聚焦淡化会互相覆盖；
+     *   - 不改动轨迹球滚轮缩放系数：跟随会逐帧反复调用，不应反复改写全局
+     *     缩放手感（onFrameView 会保存并提高缩放系数）；
+     *   - 幂等且廉价，可在播放 tick / 拖动节流 tick 中逐帧调用。
+     *
+     * @param vertexId 目标关键帧顶点 ID（<0 或图中不存在时静默忽略）
+     */
+    void followFrameView(long vertexId);
+
     // === Z 裁剪 + 高程颜色范围 ===
     void setZClipping(bool enabled);          ///< 启用/禁用 Z 裁剪
     void setZClipMin(double minZ);            ///< 设置 Z 裁剪最小值
@@ -248,6 +262,12 @@ signals:
      * @param active true = 进入第一人称模式，false = 退出
      */
     void firstPersonModeChanged(bool active);
+
+    /**
+     * @brief 第一人称行走速度变化信号（滚轮调速后回显）
+     * @param speed 当前行走速度（米/秒）
+     */
+    void firstPersonSpeedChanged(double speed);
 
     /**
      * @brief 右键上下文菜单请求信号
@@ -352,4 +372,5 @@ private:
     osg::ref_ptr<FirstPersonManipulator> m_fpManip;   ///< 第一人称操作器
     osg::ref_ptr<osgGA::CameraManipulator> m_savedManip; ///< 进入前保存的轨迹球操作器
     bool m_fpActive = false;                          ///< 是否处于第一人称模式
+    double m_fpSavedSpeed = -1.0;  ///< 上次第一人称行走速度（同图内 Shift 反复切换时保留，-1 = 未设置）
 };

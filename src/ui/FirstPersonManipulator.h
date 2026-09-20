@@ -13,7 +13,8 @@
 //     OSG 事件队列的键盘路径不可靠）；
 //   - 世界 Z 轴向上（与场景地面网格/坐标轴一致），行走始终保持在
 //     水平面内，视线俯仰独立于行走方向（FPS 惯例）；
-//   - 行走速度默认按场景包围球半径设定，滚轮实时增减。
+//   - 行走速度默认按场景包围球半径设定，滚轮等比调速（与场景尺度无关，
+//     可从几十 m/s 一路降到 0.05 m/s 精细移动）；速度变化经回调回传 UI。
 // ============================================================================
 
 #pragma once
@@ -22,6 +23,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <utility>
 
 /**
  * @brief 第一人称相机操作器
@@ -35,18 +38,27 @@ public:
 
     META_Object(osgGA, FirstPersonManipulator);
 
+    /// 行走速度下限（米/秒）：大场景下也能降到慢速做局部精细移动
+    static constexpr double kSpeedMin = 0.05;
+    /// 行走速度上限（米/秒）：避免连续滚轮放大后速度失控
+    static constexpr double kSpeedMax = 1000.0;
+    /// 滚轮每档的等比步进系数（向上 ×1.25，向下 ÷1.25）
+    static constexpr double kSpeedStep = 1.25;
+
     /**
      * @brief 从当前相机位姿启动（进入第一人称模式时调用）
      * @param eye      相机世界坐标
      * @param dir      视线方向（会被归一化，不能与世界上向平行）
-     * @param speed    行走速度（米/秒）
+     * @param speed    行走速度（米/秒，会被夹到 [kSpeedMin, kSpeedMax]）
+     * @note 此处的 clamp 不触发速度回调：进入模式时的速度回显由
+     *       ViewportWidget 负责。
      */
     void startFrom(const osg::Vec3d& eye, osg::Vec3d dir, double speed) {
         m_eye = eye;
         dir.normalize();
         m_pitchDeg = std::asin(std::clamp(dir.z(), -1.0, 1.0)) * 57.29577951308232;
         m_yawDeg   = std::atan2(dir.x(), dir.y()) * 57.29577951308232;
-        m_speed    = speed;
+        m_speed    = std::clamp(speed, kSpeedMin, kSpeedMax);
         m_lastFrameTime = -1.0;
         clearKeys();
     }
@@ -70,9 +82,22 @@ public:
         }
     }
 
-    /** @brief 行走速度（米/秒） */
-    void setWalkSpeed(double speed) { m_speed = std::max(0.1, speed); }
+    /**
+     * @brief 设置行走速度（米/秒）
+     *
+     * 速度会被夹到 [kSpeedMin, kSpeedMax]；与当前值相同（差值 < 1e-9）时
+     * 直接返回且不回调，否则更新速度并在回调存在时通知 UI 回显。
+     */
+    void setWalkSpeed(double speed) {
+        const double clamped = std::clamp(speed, kSpeedMin, kSpeedMax);
+        if (std::abs(clamped - m_speed) < 1e-9) return;  // 无变化则不回调
+        m_speed = clamped;
+        if (m_speedCallback) m_speedCallback(m_speed);
+    }
     double walkSpeed() const { return m_speed; }
+
+    /** @brief 注册速度变化回调（滚轮调速后回传当前速度，供 UI 回显；空 = 不回调） */
+    void setSpeedCallback(std::function<void(double)> cb) { m_speedCallback = std::move(cb); }
 
     // --- osgGA::CameraManipulator 接口 ---
     void setByMatrix(const osg::Matrixd& matrix) override {
@@ -135,11 +160,12 @@ protected:
             break;
 
         case osgGA::GUIEventAdapter::SCROLL:
-            // 滚轮调节行走速度（放大 1.25× / 缩小 0.8×）
+            // 滚轮等比调节行走速度（向上 ×kSpeedStep / 向下 ÷kSpeedStep），
+            // 与场景尺度无关：连续下滚可从几十 m/s 一路降到 kSpeedMin
             if (ea.getScrollingMotion() == osgGA::GUIEventAdapter::SCROLL_UP)
-                setWalkSpeed(m_speed * 1.25);
+                setWalkSpeed(m_speed * kSpeedStep);
             else if (ea.getScrollingMotion() == osgGA::GUIEventAdapter::SCROLL_DOWN)
-                setWalkSpeed(m_speed * 0.8);
+                setWalkSpeed(m_speed / kSpeedStep);
             return true;
 
         case osgGA::GUIEventAdapter::FRAME: {
@@ -194,6 +220,7 @@ private:
     double m_yawDeg   = 0.0;    ///< 偏航角（绕世界 Z，0 = 朝 +Y）
     double m_pitchDeg = 0.0;    ///< 俯仰角（±85° 限制，避免翻转）
     double m_speed    = 5.0;    ///< 行走速度（米/秒）
+    std::function<void(double)> m_speedCallback;  ///< 速度变化回调（供 UI 回显，空 = 不回调）
     bool   m_keyW = false, m_keyA = false, m_keyS = false, m_keyD = false;
         bool   m_keyUp = false, m_keyDown = false;  // Q 上升 / E 下降
     bool   m_dragging = false;

@@ -135,6 +135,13 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             : tr("First-person mode off"), 5000);
     });
 
+    // 第一人称滚轮调速回显：速度变化时在状态栏显示当前速度
+    connect(m_viewport, &ViewportWidget::firstPersonSpeedChanged,
+            this, [this](double speed) {
+        statusBar()->showMessage(
+            tr("First-person speed: %1 m/s").arg(speed, 0, 'g', 3), 3000);
+    });
+
     // 右键上下文菜单：显示顶点/边信息，支持手动闭环操作和边删除
     connect(m_viewport, &ViewportWidget::contextMenuRequested,
             this, [this](long vertexId, long edgeId,
@@ -145,85 +152,20 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
                          double vtxPosX, double vtxPosY, double vtxPosZ,
                          double vtxAccumDist, int vtxDegree) {
         if (vertexId < 0 && edgeId < 0) return;
+
+        // 顶点分支：顶点信息与手动闭环操作改由 showVertexContextMenu 现场
+        // 查询构建，与播放轴面板的「当前帧菜单」共用同一条菜单构建路径。
+        // 顶点信息已改为现场查询，这里的 vtx* 形参仅保留以兼容信号签名
+        // （ViewportWidget 侧不作改动）。
+        if (vertexId >= 0) {
+            showVertexContextMenu(vertexId, pos);
+            return;
+        }
+
         QMenu menu;
 
-        // === 顶点右键菜单 ===
-        if (vertexId >= 0) {
-            // 顶点信息展示（只读）
-            menu.addAction(tr("Vertex ID: %1").arg(vertexId))->setEnabled(false);
-            menu.addAction(tr("Position: (%1, %2, %3)")
-                .arg(vtxPosX, 0, 'f', 2)
-                .arg(vtxPosY, 0, 'f', 2)
-                .arg(vtxPosZ, 0, 'f', 2))->setEnabled(false);
-            menu.addAction(tr("Distance: %1 m").arg(vtxAccumDist, 0, 'f', 2))
-                ->setEnabled(false);
-            menu.addAction(tr("Degree: %1 edges").arg(vtxDegree))->setEnabled(false);
-            menu.addAction(tr("Cloud: %1 points").arg(vtxCloudSize))->setEnabled(false);
-            menu.addSeparator();
-
-            // --- 设置闭环起点 ---
-            // 记录当前顶点 ID，状态栏提示用户右键另一个顶点作为终点
-            QAction* loopBeginAction = menu.addAction(tr("Loop Begin"));
-            connect(loopBeginAction, &QAction::triggered, this, [this, vertexId]() {
-                m_loopBeginVertexId = vertexId;
-                statusBar()->showMessage(
-                    tr("Loop begin set to vertex %1. Right-click another vertex → Loop End.")
-                        .arg(vertexId), 5000);
-            });
-
-            // --- 设置闭环终点并打开确认对话框 ---
-            // 如果尚未选择起点，禁用该选项
-            QAction* loopEndAction = menu.addAction(tr("Loop End"));
-            if (m_loopBeginVertexId < 0) {
-                loopEndAction->setEnabled(false);
-            }
-            connect(loopEndAction, &QAction::triggered, this, [this, vertexId]() {
-                if (m_loopBeginVertexId < 0) return;
-
-                auto* graph = m_manager->graph();
-                if (!graph) {
-                    statusBar()->showMessage(tr("No graph loaded"), 3000);
-                    m_loopBeginVertexId = -1;
-                    return;
-                }
-
-                // 不能与自身形成闭环
-                if (m_loopBeginVertexId == vertexId) {
-                    statusBar()->showMessage(tr("Cannot loop to the same vertex"), 3000);
-                    m_loopBeginVertexId = -1;
-                    return;
-                }
-
-                // 合并相邻关键帧的点云（用于闭环匹配）
-                auto mergedBegin = mergeAdjacentClouds(graph, m_loopBeginVertexId, m_submapWindowHalfSize);
-                auto mergedEnd   = mergeAdjacentClouds(graph, vertexId, m_submapWindowHalfSize);
-                if (!mergedBegin || !mergedEnd ||
-                    mergedBegin->empty() || mergedEnd->empty()) {
-                    statusBar()->showMessage(
-                        tr("Vertex has no point cloud data"), 3000);
-                    m_loopBeginVertexId = -1;
-                    return;
-                }
-
-                long beginId = m_loopBeginVertexId;
-                m_loopBeginVertexId = -1;
-
-                // 打开闭环确认对话框，允许用户调整相对位姿后添加闭环边
-                LoopClosureDialog dlg(beginId, vertexId, m_manager,
-                                      mergedBegin, mergedEnd, this);
-                if (dlg.exec() == QDialog::Accepted) {
-                    m_viewport->refreshScene();
-                    m_viewport->rebuildPointClouds();
-                    if (m_edgeListPanel) m_edgeListPanel->refreshList();
-                    statusBar()->showMessage(
-                        tr("Loop edge added: %1 → %2").arg(beginId).arg(vertexId), 5000);
-                } else {
-                    statusBar()->showMessage(tr("Loop closure cancelled"), 3000);
-                }
-            });
-
         // === 边右键菜单 ===
-        } else if (edgeId >= 0) {
+        if (edgeId >= 0) {
             // 边信息展示（只读）
             menu.addAction(tr("Edge ID: %1").arg(edgeId))->setEnabled(false);
             menu.addAction(tr("Vertices: %1 → %2").arg(edgeV1).arg(edgeV2))
@@ -250,6 +192,107 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
         }
         menu.exec(pos);
     });
+}
+
+/**
+ * @brief 弹出「顶点」右键菜单（帧信息 + 手动闭环起点/终点）
+ *
+ * 右键视锥体（ViewportWidget::contextMenuRequested）与播放轴面板的
+ * 「当前帧菜单」（PlaybackPanel::frameContextMenuRequested）共用本方法，
+ * 保证两条入口的操作项与启用条件完全一致。
+ */
+void MainWindow::showVertexContextMenu(long vertexId, const QPoint& globalPos) {
+    if (vertexId < 0) return;
+
+    // 顶点信息现场查询（调用方只给出顶点 ID）
+    auto* graph = m_manager->graph();
+    if (!graph) return;
+    auto it = graph->keyframes.find(vertexId);
+    if (it == graph->keyframes.end()) return;
+    auto& kf = it->second;
+    // estimate() 返回按值的临时量，translation() 只是引用该临时量的表达式，
+    // 必须显式拷贝求值成 Eigen::Vector3d，避免悬垂引用。
+    const Eigen::Vector3d pos = kf->estimate().translation();
+    const long cloudSize = kf->cloud ? static_cast<long>(kf->cloud->size()) : 0;
+    const double accumDist = kf->accum_distance;
+    const int degree = static_cast<int>(kf->node->edges().size());
+
+    QMenu menu;
+
+    // 顶点信息展示（只读）
+    menu.addAction(tr("Vertex ID: %1").arg(vertexId))->setEnabled(false);
+    menu.addAction(tr("Position: (%1, %2, %3)")
+        .arg(pos.x(), 0, 'f', 2)
+        .arg(pos.y(), 0, 'f', 2)
+        .arg(pos.z(), 0, 'f', 2))->setEnabled(false);
+    menu.addAction(tr("Distance: %1 m").arg(accumDist, 0, 'f', 2))
+        ->setEnabled(false);
+    menu.addAction(tr("Degree: %1 edges").arg(degree))->setEnabled(false);
+    menu.addAction(tr("Cloud: %1 points").arg(cloudSize))->setEnabled(false);
+    menu.addSeparator();
+
+    // --- 设置闭环起点 ---
+    // 记录当前顶点 ID，状态栏提示用户右键另一个顶点作为终点
+    QAction* loopBeginAction = menu.addAction(tr("Loop Begin"));
+    connect(loopBeginAction, &QAction::triggered, this, [this, vertexId]() {
+        m_loopBeginVertexId = vertexId;
+        statusBar()->showMessage(
+            tr("Loop begin set to vertex %1. Right-click another vertex → Loop End.")
+                .arg(vertexId), 5000);
+    });
+
+    // --- 设置闭环终点并打开确认对话框 ---
+    // 如果尚未选择起点，禁用该选项
+    QAction* loopEndAction = menu.addAction(tr("Loop End"));
+    if (m_loopBeginVertexId < 0) {
+        loopEndAction->setEnabled(false);
+    }
+    connect(loopEndAction, &QAction::triggered, this, [this, vertexId]() {
+        if (m_loopBeginVertexId < 0) return;
+
+        auto* graph = m_manager->graph();
+        if (!graph) {
+            statusBar()->showMessage(tr("No graph loaded"), 3000);
+            m_loopBeginVertexId = -1;
+            return;
+        }
+
+        // 不能与自身形成闭环
+        if (m_loopBeginVertexId == vertexId) {
+            statusBar()->showMessage(tr("Cannot loop to the same vertex"), 3000);
+            m_loopBeginVertexId = -1;
+            return;
+        }
+
+        // 合并相邻关键帧的点云（用于闭环匹配）
+        auto mergedBegin = mergeAdjacentClouds(graph, m_loopBeginVertexId, m_submapWindowHalfSize);
+        auto mergedEnd   = mergeAdjacentClouds(graph, vertexId, m_submapWindowHalfSize);
+        if (!mergedBegin || !mergedEnd ||
+            mergedBegin->empty() || mergedEnd->empty()) {
+            statusBar()->showMessage(
+                tr("Vertex has no point cloud data"), 3000);
+            m_loopBeginVertexId = -1;
+            return;
+        }
+
+        long beginId = m_loopBeginVertexId;
+        m_loopBeginVertexId = -1;
+
+        // 打开闭环确认对话框，允许用户调整相对位姿后添加闭环边
+        LoopClosureDialog dlg(beginId, vertexId, m_manager,
+                              mergedBegin, mergedEnd, this);
+        if (dlg.exec() == QDialog::Accepted) {
+            m_viewport->refreshScene();
+            m_viewport->rebuildPointClouds();
+            if (m_edgeListPanel) m_edgeListPanel->refreshList();
+            statusBar()->showMessage(
+                tr("Loop edge added: %1 → %2").arg(beginId).arg(vertexId), 5000);
+        } else {
+            statusBar()->showMessage(tr("Loop closure cancelled"), 3000);
+        }
+    });
+
+    menu.exec(globalPos);
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +392,13 @@ void MainWindow::setupUi() {
     // 采样步长变化 → 通知 PlaybackPanel 重建帧列表
     connect(m_viewport, &ViewportWidget::sampleStrideChanged,
             m_playbackPanel, &PlaybackPanel::onSampleStrideChanged);
+
+    // 播放轴面板的「当前帧菜单」：与右键该帧视锥体共用同一条菜单构建路径，
+    // 视锥体过密（又不想用采样丢帧）时可先用播放轴定位到帧再加回环
+    connect(m_playbackPanel, &PlaybackPanel::frameContextMenuRequested,
+            this, [this](long vertexId, const QPoint& pos) {
+        showVertexContextMenu(vertexId, pos);
+    });
 
     // 采样步长变化 → 同步自动回环检测（内部变量，对话框可能尚未创建）
     connect(m_viewport, &ViewportWidget::sampleStrideChanged,
