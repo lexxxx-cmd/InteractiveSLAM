@@ -8,6 +8,8 @@
  * - 位置滑块拖动
  * - 播放倍速切换（1x/2x/4x/8x）
  * - 采样步长联动（仅播放已渲染的球体）
+ * - 跟随视角（"Follow frame view"）：勾选后播放/单步/拖动每到一帧，
+ *   相机同步切到该帧位姿视角（等价于对该帧做 Ctrl+双击）
  *
  * 性能设计：
  * - 滑块拖动时使用 highlightPlaybackVertex() 增量更新球体颜色
@@ -103,6 +105,8 @@ private:
     void updateLabel();
     /** @brief 确保当前索引在有效范围内 */
     void clampIndex();
+    /** @brief 若勾选跟随则把相机切到当前帧视角 */
+    void applyFollowView();
 
     // ── UI 控件 ──
     QPushButton* m_skipStartBtn = nullptr;  ///< 跳转到开头
@@ -114,6 +118,7 @@ private:
     QLabel*      m_frameLabel = nullptr;    ///< 帧号标签 "42 / 15000"
     QComboBox*   m_speedCombo = nullptr;    ///< 倍速选择
     QCheckBox*   m_retainCloudCb = nullptr; ///< "留存已播放点云"复选框
+    QCheckBox*   m_followViewCb = nullptr;  ///< 跟随当前帧视角复选框
 
     // ── 播放状态 ──
     ViewportWidget* m_viewport = nullptr;   ///< 关联的 3D 视口

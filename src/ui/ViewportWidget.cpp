@@ -858,6 +858,52 @@ void ViewportWidget::onFrameView(long vertexId) {
     m_osgWidget->update();
 }
 
+/**
+ * @brief 播放跟随：切换到指定关键帧的位姿视角（仅相机，不改标记不透明度）
+ *
+ * 相机数学与 onFrameView 完全一致：eye = 位姿平移，forward = 局部 +Z，
+ * up = 局部 −Y，轨迹球中心放在前方 lookAhead 处。
+ *
+ * 与 onFrameView 的两点差异（见头文件注释）：
+ *   - 不调用 setFocusedVertex()，避免与播放独显的不透明度覆盖互相打架；
+ *   - 不保存/改写滚轮缩放系数，逐帧调用不污染全局缩放手感。
+ * 另加退化保护：逐帧调用必须安全，绝不把 inf/NaN 写进轨迹球。
+ */
+void ViewportWidget::followFrameView(long vertexId) {
+    if (vertexId < 0 || !m_graph) return;
+    if (m_fpActive) exitFirstPersonMode();  // 第一人称操作器不认轨迹球位姿
+    auto it = m_graph->keyframes.find(vertexId);
+    if (it == m_graph->keyframes.end()) return;
+    const auto& pose = it->second->estimate();
+
+    osg::Vec3d eye(pose.translation().x(),
+                   pose.translation().y(),
+                   pose.translation().z());
+    Eigen::Vector3d dirZ = pose.rotation() * Eigen::Vector3d::UnitZ();
+    Eigen::Vector3d dirY = pose.rotation() * Eigen::Vector3d::UnitY();
+    osg::Vec3d forward(dirZ.x(), dirZ.y(), dirZ.z());
+    osg::Vec3d up(-dirY.x(), -dirY.y(), -dirY.z());
+
+    // 退化保护：旋转矩阵异常导致零向量时直接放弃，避免归一化产生 inf
+    if (forward.length2() < 1e-18 || up.length2() < 1e-18) return;
+    forward.normalize();
+    up.normalize();
+
+    // 轨迹球中心放在前方（帧视角下的注视点）
+    double radius = m_sceneViz->sphereRadius();
+    double lookAhead = (radius > 1e-6) ? radius * 10.0 : 5.0;
+    osg::Vec3d center = eye + forward * lookAhead;
+
+    osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
+    if (!viewer) return;
+    auto* manip = dynamic_cast<osgGA::TrackballManipulator*>(
+        viewer->getCameraManipulator());
+    if (!manip) return;
+    manip->setTransformation(eye, center, up);
+    // 注意：此处刻意不改滚轮缩放系数、不做聚焦淡化（播放独显已接管标记不透明度）
+    m_osgWidget->update();
+}
+
 // ---------------------------------------------------------------------------
 // 手动场景刷新（边删除等数据变化后调用）
 // ---------------------------------------------------------------------------
