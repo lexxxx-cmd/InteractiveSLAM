@@ -250,6 +250,12 @@ signals:
     void firstPersonModeChanged(bool active);
 
     /**
+     * @brief 第一人称行走速度变化信号（滚轮调速后回显）
+     * @param speed 当前行走速度（米/秒）
+     */
+    void firstPersonSpeedChanged(double speed);
+
+    /**
      * @brief 右键上下文菜单请求信号
      * @param vertexId 选中顶点 ID（-1 表示未选中顶点）
      * @param edgeId   选中边 ID（-1 表示未选中边）
@@ -352,4 +358,5 @@ private:
     osg::ref_ptr<FirstPersonManipulator> m_fpManip;   ///< 第一人称操作器
     osg::ref_ptr<osgGA::CameraManipulator> m_savedManip; ///< 进入前保存的轨迹球操作器
     bool m_fpActive = false;                          ///< 是否处于第一人称模式
+    double m_fpSavedSpeed = -1.0;  ///< 上次第一人称行走速度（同图内 Shift 反复切换时保留，-1 = 未设置）
 };

@@ -332,6 +332,7 @@ void ViewportWidget::initOsg() {
 void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGraph> graph) {
     m_graph = graph;
     ++m_cloudBuildSeq;  // 使任何在途构建结果作废
+    m_fpSavedSpeed = -1.0;  // 换图后速度按新场景尺度重新推导（旧速度可能不适用）
     m_sceneViz->buildFromGraph(graph, m_flags);
 
     // 应用当前设置
@@ -360,6 +361,7 @@ void ViewportWidget::onGraphLoaded(std::shared_ptr<hdl_graph_slam::InteractiveGr
 void ViewportWidget::onGraphClosed() {
     m_graph.reset();
     ++m_cloudBuildSeq;  // 使在途构建结果作废
+    m_fpSavedSpeed = -1.0;  // 图已关闭，下次加载按新场景尺度重新推导速度
     const int prevStride = m_sceneViz->sampleStride();
     m_sceneViz->clear();
     if (prevStride != 1) {
@@ -605,6 +607,9 @@ void ViewportWidget::restoreWheelZoomFactor() {
  * 从当前相机位姿取视线方向初始化 yaw/pitch，行走速度按场景包围球
  * 半径设定；切换操作器到 FirstPersonManipulator（保留轨迹球实例，
  * 退出时恢复并以第一人称位姿无缝衔接）。
+ *
+ * 滚轮调速后经操作器回调回传当前速度，在状态栏回显；同一张图内
+ * Shift 反复切换时沿用用户上次调好的速度（m_fpSavedSpeed）。
  */
 void ViewportWidget::enterFirstPersonMode() {
     if (m_fpActive) return;
@@ -620,13 +625,25 @@ void ViewportWidget::enterFirstPersonMode() {
     if (dir.length2() < 1e-12) dir.set(0.0, 1.0, 0.0);
 
     if (!m_fpManip) m_fpManip = new FirstPersonManipulator;
+    // 速度回调在 OSG 渲染线程被调用，不能直接碰 Qt UI：
+    // 用 QueuedConnection 投递回本对象所在（Qt 主）线程后再发信号
+    m_fpManip->setSpeedCallback([this](double speed) {
+        QMetaObject::invokeMethod(this, [this, speed]() {
+            emit firstPersonSpeedChanged(speed);
+        }, Qt::QueuedConnection);
+    });
     const double sceneR = viewer->getSceneData()->getBound().radius();
-    const double speed = std::max(sceneR * 0.15, 1.5);  // 米/秒，随场景尺度
+    // 同一张图内保留用户上次调好的速度；否则按场景尺度推导（米/秒）
+    const double speed = (m_fpSavedSpeed > 0.0)
+        ? m_fpSavedSpeed
+        : std::max(sceneR * 0.15, 1.5);
     m_fpManip->startFrom(eye, dir, speed);
 
     m_savedManip = viewer->getCameraManipulator();
     viewer->setCameraManipulator(m_fpManip.get(), false);  // false = 不重置 home
     m_fpActive = true;
+    // 先回显初始速度，再发模式提示：状态栏最终留下的是操作帮助文案
+    emit firstPersonSpeedChanged(m_fpManip->walkSpeed());
     emit firstPersonModeChanged(true);
 }
 
@@ -643,6 +660,7 @@ void ViewportWidget::exitFirstPersonMode() {
 
     osg::Vec3d eye, dir;
     m_fpManip->getPose(eye, dir);
+    m_fpSavedSpeed = m_fpManip->walkSpeed();  // 保留本次调好的速度，同图内下次进入沿用
 
     viewer->setCameraManipulator(m_savedManip.get(), false);
     auto* trackball = dynamic_cast<osgGA::TrackballManipulator*>(

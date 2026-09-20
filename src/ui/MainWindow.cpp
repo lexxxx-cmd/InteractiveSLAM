@@ -135,6 +135,13 @@ MainWindow::MainWindow(GraphManager* manager, QWidget* parent)
             : tr("First-person mode off"), 5000);
     });
 
+    // 第一人称滚轮调速回显：速度变化时在状态栏显示当前速度
+    connect(m_viewport, &ViewportWidget::firstPersonSpeedChanged,
+            this, [this](double speed) {
+        statusBar()->showMessage(
+            tr("First-person speed: %1 m/s").arg(speed, 0, 'g', 3), 3000);
+    });
+
     // 右键上下文菜单：显示顶点/边信息，支持手动闭环操作和边删除
     connect(m_viewport, &ViewportWidget::contextMenuRequested,
             this, [this](long vertexId, long edgeId,
