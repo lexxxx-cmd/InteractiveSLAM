@@ -725,7 +725,12 @@
         <translation>已退出第一人称模式</translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+7"/>
+        <source>First-person speed: %1 m/s</source>
+        <translation>第一人称速度：%1 m/s</translation>
+    </message>
+    <message>
+        <location line="+81"/>
         <source>Vertex ID: %1</source>
         <translation>顶点 ID：%1</translation>
     </message>
@@ -766,7 +771,7 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+577"/>
+        <location line="+549"/>
         <location line="+29"/>
         <location line="+28"/>
         <source>No graph loaded</source>
@@ -780,7 +785,7 @@
         <translation>已有保存正在进行</translation>
     </message>
     <message>
-        <location line="-603"/>
+        <location line="-575"/>
         <source>Cannot loop to the same vertex</source>
         <translation>不能对同一顶点建立回环</translation>
     </message>
@@ -800,17 +805,15 @@
         <translation>回环已取消</translation>
     </message>
     <message>
-        <location line="+5"/>
         <source>Go to Vertex</source>
-        <translation>转到顶点</translation>
+        <translation type="vanished">转到顶点</translation>
     </message>
     <message>
-        <location line="+1"/>
         <source>Vertex Details...</source>
-        <translation>顶点详情...</translation>
+        <translation type="vanished">顶点详情...</translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="-121"/>
         <source>Edge ID: %1</source>
         <translation>边 ID：%1</translation>
     </message>
@@ -830,17 +833,15 @@
         <translation>核函数：%1</translation>
     </message>
     <message>
-        <location line="+2"/>
         <source>Go to Edge</source>
-        <translation>转到边</translation>
+        <translation type="vanished">转到边</translation>
     </message>
     <message>
-        <location line="+1"/>
         <source>Edge Details...</source>
-        <translation>边详情...</translation>
+        <translation type="vanished">边详情...</translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+3"/>
         <source>Delete Edge</source>
         <translation>删除边</translation>
     </message>
@@ -855,14 +856,14 @@
         <translation>无法删除边 %1 — 优化正在运行，请稍后重试</translation>
     </message>
     <message>
-        <location line="+31"/>
-        <location line="+188"/>
+        <location line="+132"/>
+        <location line="+195"/>
         <source>Graph Statistics</source>
         <translation>图统计</translation>
     </message>
     <message>
-        <location line="-187"/>
-        <location line="+198"/>
+        <location line="-194"/>
+        <location line="+205"/>
         <location line="+98"/>
         <source>Rendering</source>
         <translation>渲染</translation>
@@ -945,7 +946,7 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>正在构建点云...</translation>
     </message>
     <message>
-        <location line="+83"/>
+        <location line="+90"/>
         <source>Interactive SLAM — %1</source>
         <translation>Interactive SLAM — %1</translation>
     </message>
@@ -965,23 +966,23 @@ Saving will permanently delete all existing content in this directory (cannot be
         <translation>项目「%1」已打开（空白项目，可稍后导入数据）</translation>
     </message>
     <message>
-        <location line="-697"/>
-        <location line="+157"/>
+        <location line="-711"/>
+        <location line="+164"/>
         <source>Playback</source>
         <translation>播放轴</translation>
     </message>
     <message>
-        <location line="-362"/>
+        <location line="-404"/>
         <source>First-person mode: drag to look, W/A/S/D to walk, Q up, E down, wheel adjusts speed, Shift to exit</source>
         <translation>第一人称模式：拖动鼠标转视角，W/A/S/D 行走，Q 上升，E 下降，滚轮调节速度，按 Shift 退出</translation>
     </message>
     <message>
-        <location line="+186"/>
+        <location line="+221"/>
         <source>Loop Edges</source>
         <translation>回环边</translation>
     </message>
     <message>
-        <location line="+129"/>
+        <location line="+136"/>
         <source>&amp;Save</source>
         <translation>保存(&amp;S)</translation>
     </message>
@@ -1137,7 +1138,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>地图加载完成 — %1 个顶点，%2 条边，%3 个关键帧</translation>
     </message>
     <message>
-        <location line="+43"/>
+        <location line="+50"/>
         <source>Loading failed: %1</source>
         <translation>加载失败：%1</translation>
     </message>
@@ -1150,7 +1151,7 @@ for loop-closure matching (N=1 merges 3 frames):</source>
 <context>
     <name>PlaybackPanel</name>
     <message>
-        <location filename="../src/ui/PlaybackPanel.cpp" line="+50"/>
+        <location filename="../src/ui/PlaybackPanel.cpp" line="+52"/>
         <source>Skip to start</source>
         <translation>跳转到开头</translation>
     </message>
@@ -1175,14 +1176,19 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>跳转到末尾</translation>
     </message>
     <message>
-        <location line="+7"/>
-        <location line="+184"/>
-        <location line="+83"/>
+        <location line="+3"/>
+        <source>Menu for the current frame (Loop Begin / Loop End) — same as right-clicking this frame&apos;s frustum</source>
+        <translation>当前帧菜单（Loop Begin / Loop End）——等价于右键该帧视锥体</translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <location line="+207"/>
+        <location line="+88"/>
         <source>0 / 0</source>
         <translation>0 / 0</translation>
     </message>
     <message>
-        <location line="-266"/>
+        <location line="-294"/>
         <source>Current frame / Total frames</source>
         <translation>当前帧 / 总帧数</translation>
     </message>
@@ -1202,12 +1208,22 @@ for loop-closure matching (N=1 merges 3 frames):</source>
         <translation>将截至当前帧的所有关键帧一并保持高亮（白色），而不是仅高亮当前帧。高亮跟随当前帧变化，因此单步后退或拖动回退时高亮也会随之回退。</translation>
     </message>
     <message>
-        <location line="+10"/>
+        <location line="+8"/>
+        <source>Follow frame view</source>
+        <translation>跟随当前帧视角</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Jump the camera to the current keyframe&apos;s pose view on every playback step (same camera move as Ctrl+double-click on that frame). Works while playing, stepping and dragging.</source>
+        <translation>播放/单步/拖动每到一帧都把相机切到该关键帧的位姿视角（与该帧 Ctrl+双击的相机切换相同）。</translation>
+    </message>
+    <message>
+        <location line="+11"/>
         <source>Drag to seek through keyframes</source>
         <translation>拖动以浏览关键帧</translation>
     </message>
     <message>
-        <location line="+275"/>
+        <location line="+292"/>
         <source>%1 / %2</source>
         <translation>%1 / %2</translation>
     </message>
