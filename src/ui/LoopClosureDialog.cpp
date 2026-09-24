@@ -197,25 +197,22 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
 /**
  * @brief 析构函数
  *
- * 等待后台配准线程与后台分数计算完成（如果仍在运行）。
+ * ⚠️ 这里**刻意不等待**后台任务结束——这是"点取消回主界面卡一下"的根因之一。
  *
- * 两个任务都只持有 shared_ptr（点云、KD-Tree）与按值拷贝的位姿，**不碰 this**，
- * 因此"等一下"只是为了让销毁时序确定（避免任务在线程池里继续跑、而 GUI 侧
- * 已在拆 watcher），不是为了防悬空指针——即便不等，任务也不会访问已销毁的
- * 对话框。任务本身耗时上限就是一次全量最近邻搜索（19.5 万点实测 130–180 ms），
- * 所以这里的等待是有限的、不会挂住关闭流程。
+ * 两个后台任务都不持有本对象：
+ *   - 扫描匹配：`[=]` 捕获的是 beginCloud / endCloud / 两个位姿的**副本**，函数体内
+ *     一行成员都没用，因此连 `this` 都没有被捕获（任务里自己 new 一套配准实例）；
+ *   - 适应度评分：只捕获 KD-Tree / 点云的 shared_ptr 与位姿值拷贝。
+ * 两个 watcher 又都是本对象的子对象，销毁时会把自己在 future 上的 call-out 注册摘掉，
+ * 所以任务算完只会把结果丢进一个已经没人收的 future。
+ *
+ * 反过来，如果在这里 waitForFinished()，用户点"取消"时就要**冻结 GUI 线程**：
+ * 评分任务最长约 180 ms（19.5 万点实测 126~180 ms），而扫描匹配是 GICP，19.5 万点
+ * 可能要好几秒——表现就是对话框关掉后主界面"卡住不动"。代价是取消后任务仍会在
+ * 后台跑完（白烧几秒 CPU）并把结果丢弃，这是刻意的取舍：宁可浪费后台算力，
+ * 也不阻塞界面。
  */
 LoopClosureDialog::~LoopClosureDialog() {
-    // 如果监听器正在运行，等待完成（它们持有 shared_ptr，安全）
-    if (m_scanMatchWatcher && m_scanMatchWatcher->isRunning()) {
-        m_scanMatchWatcher->waitForFinished();
-    }
-    // 分数任务同理：lambda 只捕获 m_beginTree / m_endCloud / relative 的拷贝，
-    // 没有任何一行读 this（见 updateFitnessScore()），所以析构期间它只是在
-    // 算自己的数、算完把结果丢进一个没人收的 QFuture 里
-    if (m_fitnessWatcher && m_fitnessWatcher->isRunning()) {
-        m_fitnessWatcher->waitForFinished();
-    }
 }
 
 // ---------------------------------------------------------------------------
