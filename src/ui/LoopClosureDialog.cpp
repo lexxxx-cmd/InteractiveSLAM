@@ -257,14 +257,30 @@ void LoopClosureDialog::setupUi() {
     auto* sliderGroup = new QGroupBox(tr("Manual Adjustment (local frame)"));
     auto* sliderLayout = new QVBoxLayout(sliderGroup);
 
-    // 步长档位选择器（Fine / Medium / Coarse / Large）
+    // 步长档位选择器
+    //
+    // 设计要点：标签用**字面量 tr()**（lupdate 必须能提取到），而步长值随选项一起
+    // 存进 item data（Qt::UserRole = 平移米，+1 = 旋转弧度）。⚠️ 不要把"下标 → 步长"
+    // 写成别处的硬编码数组下标：旧实现只把下标 clamp 到 0..3，新增档位后会**静默退回
+    // 1m**（界面显示选了 100m、实际按 1m 走），是这类改动最难发现的一种错。
     auto* stepRow = new QHBoxLayout;
     stepRow->addWidget(new QLabel(tr("Step:")));
     m_stepCombo = new QComboBox;
-    m_stepCombo->addItem(tr("Fine     — 0.01m /  0.6°"),  0);
-    m_stepCombo->addItem(tr("Medium   — 0.10m /  2.9°"),  1);
-    m_stepCombo->addItem(tr("Coarse   — 0.50m / 11.5°"),  2);
-    m_stepCombo->addItem(tr("Large    — 1.00m / 45.0°"),  3);
+    const auto addStep = [this](const QString& label, double transStep, double rotStep) {
+        const int row = m_stepCombo->count();
+        m_stepCombo->addItem(label, row);
+        m_stepCombo->setItemData(row, transStep, Qt::UserRole);
+        m_stepCombo->setItemData(row, rotStep, Qt::UserRole + 1);
+    };
+    addStep(tr("Fine     — 0.01m /  0.6°"),   0.01, 0.01);
+    addStep(tr("Medium   — 0.10m /  2.9°"),   0.10, 0.05);
+    addStep(tr("Coarse   — 0.50m / 11.5°"),   0.50, 0.20);
+    addStep(tr("Large    — 1.00m / 45.0°"),   1.00, 0.785);
+    // 新增两档大步长：合并图里两条轨迹的初始相对位姿可能差几十上百米（各自的世界系
+    // 原点独立），1m 一档根本够不着。用法是先用大档位把两片点云大致拉到一起，
+    // 再逐级换小档位精调；旋转步长同步放大（28.6° / 57.3°）以便一次性纠掉大角度。
+    addStep(tr("X-Large  — 10.0m / 28.6°"),  10.0, 0.50);
+    addStep(tr("XX-Large — 100.0m / 57.3°"), 100.0, 1.00);
     m_stepCombo->setCurrentIndex(1);  // 默认：Medium
     stepRow->addWidget(m_stepCombo);
     stepRow->addStretch();
@@ -424,18 +440,19 @@ void LoopClosureDialog::applySliderDelta(int axis, double delta, bool isRotation
  * @param direction  方向（-1=减, +1=加）
  */
 void LoopClosureDialog::onStepButton(int axis, bool isRotation, int direction) {
-    // 档位预设：{平移步长, 旋转步长}
-    static const double presets[][2] = {
-        {0.01, 0.01},   // Fine
-        {0.10, 0.05},   // Medium
-        {0.50, 0.20},   // Coarse
-        {1.00, 0.785},  // Large（45° ≈ 0.785 rad）
-    };
-    int idx = std::clamp(m_stepCombo->currentIndex(), 0, 3);
-    double step = presets[idx][isRotation ? 1 : 0];
-    double delta = direction * step;
+    // 步长从选项自带的 item data 读取（Qt::UserRole = 平移米，+1 = 旋转弧度），
+    // 因此档位的增删/重排都不会让"界面选了哪档"与"实际走多少"脱节。
+    // 数据缺失时退回 Medium 档并保证非零——绝不静默按 0 走（那样按钮会"点了没反应"）。
+    const int row = m_stepCombo->currentIndex();
+    bool okTrans = false, okRot = false;
+    double transStep = m_stepCombo->itemData(row, Qt::UserRole).toDouble(&okTrans);
+    double rotStep   = m_stepCombo->itemData(row, Qt::UserRole + 1).toDouble(&okRot);
+    if (!okTrans || !okRot || transStep <= 0.0 || rotStep <= 0.0) {
+        transStep = 0.10;  // Medium 档兜底
+        rotStep   = 0.05;
+    }
 
-    applySliderDelta(axis, delta, isRotation);
+    applySliderDelta(axis, direction * (isRotation ? rotStep : transStep), isRotation);
 }
 
 // ---------------------------------------------------------------------------
