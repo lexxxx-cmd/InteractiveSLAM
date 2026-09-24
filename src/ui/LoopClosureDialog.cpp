@@ -197,12 +197,24 @@ LoopClosureDialog::LoopClosureDialog(long beginVertexId, long endVertexId,
 /**
  * @brief 析构函数
  *
- * 等待后台配准线程完成（如果仍在运行）。
+ * 等待后台配准线程与后台分数计算完成（如果仍在运行）。
+ *
+ * 两个任务都只持有 shared_ptr（点云、KD-Tree）与按值拷贝的位姿，**不碰 this**，
+ * 因此"等一下"只是为了让销毁时序确定（避免任务在线程池里继续跑、而 GUI 侧
+ * 已在拆 watcher），不是为了防悬空指针——即便不等，任务也不会访问已销毁的
+ * 对话框。任务本身耗时上限就是一次全量最近邻搜索（19.5 万点实测 130–180 ms），
+ * 所以这里的等待是有限的、不会挂住关闭流程。
  */
 LoopClosureDialog::~LoopClosureDialog() {
     // 如果监听器正在运行，等待完成（它们持有 shared_ptr，安全）
     if (m_scanMatchWatcher && m_scanMatchWatcher->isRunning()) {
         m_scanMatchWatcher->waitForFinished();
+    }
+    // 分数任务同理：lambda 只捕获 m_beginTree / m_endCloud / relative 的拷贝，
+    // 没有任何一行读 this（见 updateFitnessScore()），所以析构期间它只是在
+    // 算自己的数、算完把结果丢进一个没人收的 QFuture 里
+    if (m_fitnessWatcher && m_fitnessWatcher->isRunning()) {
+        m_fitnessWatcher->waitForFinished();
     }
 }
 
@@ -460,16 +472,108 @@ void LoopClosureDialog::onStepButton(int axis, bool isRotation, int direction) {
 // ---------------------------------------------------------------------------
 
 /**
- * @brief 计算并更新适应度分数显示
+ * @brief 触发一次适应度分数计算（后台线程 + 结果合并）
  *
- * 使用 InformationMatrixCalculator 计算起点和终点点云在当前相对位姿下的
- * 配准适应度分数（值越小配准质量越好）。
+ * 语义：算出"当前 relative 下的适应度分数"并写进标签。分数算法与自动回环
+ * 判定共用同一套（逐点全量、不降采样），这里只改"在哪算"。
+ *
+ * 三段逻辑：
+ *   1. 已有任务在跑 → 只把 m_fitnessPending 立起来后直接返回，
+ *      **不排第二个任务**（否则连点 10 下排 10 个 130 ms 的任务，标签要 1.3 秒
+ *      才追上，且算的都是被淘汰的旧位姿）；
+ *   2. 空闲 → 用 QtConcurrent::run 起后台任务；
+ *   3. 任务结束 → onFitnessScoreReady() 里判断"期间是否又调过"，是则丢弃旧结果
+ *      并立刻用最新位姿再算一次（标签保持"…"），否则才更新标签。
+ *
+ * ⚠️ lambda 的捕获列表是这里最关键的一行：只捕获 m_beginTree / m_endCloud /
+ * relative 的**拷贝**（KD-Tree 与点云都是 shared_ptr，拷贝即延长生命周期），
+ * 绝不捕获 this。原因：对话框可能在计算中被销毁（用户直接关窗口），捕获 this
+ * 会让后台线程读到已析构的成员——这是"看起来能跑、偶发崩溃"的典型来源。只抓
+ * shared_ptr 后，任务的数据依赖与对话框的生死完全解耦，析构里那次
+ * waitForFinished() 就只是让时序确定，而不是安全性的必要条件。
  */
 void LoopClosureDialog::updateFitnessScore() {
-    Eigen::Isometry3d relative = m_beginPose.inverse() * m_endPose;
-    // 复用已建好的起点云 KD-Tree（见构造处的说明），不再每次重建
-    double score = hdl_graph_slam::InformationMatrixCalculator::calc_fitness_score_with_tree(
-        m_beginTree, m_endCloud, relative, 1.0);
+    // (1) 已有计算在跑：只记下"期间又调整过"这一事实，合并掉这次请求。
+    //     这里**不存**这次算出的 relative：重算时直接用那时的 m_endPose 现算，
+    //     而 m_endPose 只可能比此刻更新（任何改动都会再走一次本函数），
+    //     所以"现算"得到的一定不比"存下来"旧。
+    //
+    //     ⚠️ 用 m_fitnessWatcher 非空当"忙"标志，**不能**用 m_fitnessWatcher->
+    //     isRunning()：future 在 worker 线程结束时 isRunning() 立刻变 false，而
+    //     finished 回调要经 GUI 事件队列才送达。若某次调整/重置正好落在这条缝里，
+    //     就会误判为"空闲"→ 排第二个任务并覆盖 m_fitnessWatcher，于是：旧 watcher
+    //     的回调先去读**新** watcher 的 result()（在 GUI 线程阻塞），等新任务真正
+    //     结束时 m_fitnessWatcher 已被置空 → 空指针解引用崩溃。改用"只在完成回调
+    //     里才清空"的指针当标志，这条缝就不存在（与本文件 m_scanMatchRunning 同构）。
+    if (m_fitnessWatcher) {
+        m_fitnessPending = true;
+        return;   // 标签维持"…"，由完成回调负责重算/更新
+    }
+
+    // (2) 起后台任务。捕获只按值/shared_ptr，不含 this
+    // relative 语义与既有一致：终点在起点坐标系下的位姿
+    const Eigen::Isometry3d relative = m_beginPose.inverse() * m_endPose;
+    auto tree  = m_beginTree;
+    auto cloud = m_endCloud;
+    auto future = QtConcurrent::run([tree, cloud, relative]() -> double {
+        return hdl_graph_slam::InformationMatrixCalculator::
+            calc_fitness_score_with_tree(tree, cloud, relative, 1.0);
+    });
+
+    // watcher 以 this 为父：对话框销毁时它一起销毁。
+    // 连接的对象是 watcher、上下文是 this，因此 this 生命周期内槽一定有效；
+    // 而任务不在 GUI 线程、也不引用 this，两者不存在竞态。
+    m_fitnessWatcher = new QFutureWatcher<double>(this);
+    connect(m_fitnessWatcher, &QFutureWatcher<double>::finished,
+            this, &LoopClosureDialog::onFitnessScoreReady);
+
+    // 标签先置"…"（在 setFuture 之前！）：setFuture 对"已完成的 future"会
+    // 立刻同步发出 finished，若把置位放在后面会把刚算出的分数又盖回"…"
+    m_fitnessLabel->setText(tr("fitness_score: …"));
+    m_fitnessWatcher->setFuture(future);
+}
+
+/**
+ * @brief 适应度分数后台计算完成回调（GUI 线程）
+ *
+ * 合并策略的落点——保证"标签上的分数永远对应最后一次调整的位姿"：
+ *   - 计算期间又调整过（m_fitnessPending）→ 这次结果对应的是**旧位姿**，
+ *     直接丢弃，用当前位姿立刻再算一次，标签继续显示"…"；
+ *   - 没再调整 → 更新标签。
+ *
+ * 丢弃比"先显示旧值再刷新"更好：旧值会因为看着像最终结果而被用户采信，
+ * 而这个对话框的分数是给"要不要加这条边"做判断用的。
+ */
+void LoopClosureDialog::onFitnessScoreReady() {
+    // 本槽是 m_fitnessWatcher 那条 finished 信号的唯一接收者，因此这里
+    // m_fitnessWatcher 必然非空（它只在下面这两行被清空）
+    const double score = m_fitnessWatcher->result();
+
+    // 清空"忙"标志与 watcher（重排时 updateFitnessScore 会建新的）。
+    // 这一步必须在重排之前：它同时解开了 updateFitnessScore() 的忙判断
+    m_fitnessWatcher->deleteLater();
+    m_fitnessWatcher = nullptr;
+
+    if (m_fitnessPending) {
+        // 结果对应旧位姿 → 丢弃，用当前位姿立刻重算（标签保持"…"）。
+        // 重算走 updateFitnessScore() 现算 relative：pending 期间 m_endPose 若被
+        // 改过，必然又走过一次 updateFitnessScore（本函数），因此此刻的 m_endPose
+        // 就是最新位姿，不需要（也没有）额外存一份待算的相对位姿。
+        m_fitnessPending = false;
+        updateFitnessScore();
+        return;
+    }
+
+    applyFitnessScore(score);
+}
+
+/**
+ * @brief 把一次异步计算的结果写进分数标签
+ *
+ * clamp 到 1e6 与既有显示语义保持一致（无有效点对时算法返回 double 最大值，
+ * 直接显示会是一个 1.79e308 的怪物数字）。
+ */
+void LoopClosureDialog::applyFitnessScore(double score) {
     score = std::min(1000000.0, score);
     m_fitnessLabel->setText(tr("fitness_score: %1").arg(score, 0, 'f', 4));
 }
@@ -477,12 +581,13 @@ void LoopClosureDialog::updateFitnessScore() {
 /**
  * @brief 适应度分数的去抖触发（见头文件说明）
  *
- * 连续点击微调按钮时，每次都算分数会把 GUI 线程按"每次点击 0.2–0.3 秒"阻塞，
- * 表现为迷你视口极卡。这里改成：调整立即刷新预览（廉价），分数等 200 ms
- * 无新调整后再算一次。分数标签先置"…"提示正在重算，避免显示过期数值。
+ * 连续点击微调按钮时，每次都要算分数的话，即使计算已经异步化，也会往线程池
+ * 连排一串 130 ms 级的任务、标签长时间追不上位姿。这里改成：调整立即刷新预览
+ * （廉价），分数等 200 ms 无新调整后再**触发一次**（异步，见 updateFitnessScore）。
+ * 标签先置"…"提示正在重算，避免显示过期数值。
  */
 void LoopClosureDialog::scheduleFitnessScore() {
-    if (!m_fitnessTimer) {   // 兜底：计时器未创建时退回同步计算
+    if (!m_fitnessTimer) {   // 兜底：计时器未创建时也走异步路径（不再同步阻塞 GUI）
         updateFitnessScore();
         return;
     }
@@ -634,6 +739,9 @@ void LoopClosureDialog::onScanMatchFinished() {
     m_scanMatchRunning = false;
     m_statusLabel->setText(tr("Scan matching complete"));
 
+    // 配准结果把位姿整体换掉了：清掉"计算期间又调整过"的合并标记，
+    // 避免标签被一次与配准后位姿无关的 pending 重算顶成"…"
+    m_fitnessPending = false;
     updateFitnessScore();
     updatePreview();
 
@@ -650,6 +758,8 @@ void LoopClosureDialog::onScanMatchFinished() {
  */
 void LoopClosureDialog::onReset() {
     m_endPose = m_endPoseInit;
+    // 同 onScanMatchFinished：位姿被整体复位，丢弃上一轮的 pending 合并标记
+    m_fitnessPending = false;
     updateFitnessScore();
     updatePreview();
     m_miniViewport->resetCamera();

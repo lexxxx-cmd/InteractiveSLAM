@@ -14,6 +14,11 @@
  * 设计特点：
  * - OSG 几何体对象在构造函数中创建（不需要 GL 上下文）
  * - 摄像机设置（视口、场景数据）在 initOsg() 中等待 GL 上下文就绪
+ * - **顶点按帧局部坐标只建一次**，终点位姿变化只改一个 osg::MatrixTransform
+ *   的矩阵（updateEndPose 因此是 O(1)，与点数无关；旧实现每次调整都逐点
+ *   重算并把 19.5 万点的顶点/颜色数组整份重传）
+ * - 两张云各自单色：颜色数组只放 1 个元素并 BIND_OVERALL（与逐点 push 同一个
+ *   颜色等价，但省掉每点 16 字节）
  */
 
 #pragma once
@@ -23,7 +28,9 @@
 #include <osg/Group>
 #include <osg/Geode>
 #include <osg/Geometry>
+#include <osg/MatrixTransform>
 #include <osg/Uniform>
+#include <osg/Vec4>
 #include <Eigen/Geometry>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
@@ -61,7 +68,12 @@ public:
                    CloudPtr endCloud,   const Eigen::Isometry3d& endPose);
 
     /**
-     * @brief 在新的相对位姿下重建终点点云几何体
+     * @brief 设置终点位姿（O(1)，与点数无关）
+     *
+     * 只把相对位姿写进 m_endTransform 的矩阵，**不动任何顶点数组**：
+     * 终点云、终点球、坐标轴的顶点在 setClouds() 时已按"终点帧局部坐标"建好，
+     * 位姿变化由变换节点承担。
+     *
      * @param endPose   更新后的终点世界位姿
      * @param beginPose 起点世界位姿（用于计算相对变换）
      */
@@ -84,9 +96,20 @@ private slots:
 
 private:
     void setupGeometries();  ///< 在构造函数中创建几何体（不需要 GL 上下文）
-    void rebuildBeginCloud(const Eigen::Isometry3d& pose);  ///< 重建起点云几何体
-    void rebuildEndCloud(const Eigen::Isometry3d& relPose); ///< 重建终点云几何体
-    void rebuildOverlay(const Eigen::Isometry3d& relPose);  ///< 重建叠加几何体（球体+坐标轴）
+
+    /**
+     * @brief 在给定顶点数组上画一个单位球（球心在几何体局部原点，半径 0.3）
+     *
+     * 球体顶点只与"球心在原点"有关，因此可以只建一次、之后靠变换节点搬位置，
+     * 而不必每次调整位姿都重新三角化一遍（96×97 个顶点 + 11 万条索引）。
+     *
+     * @param geom   目标几何体（需要已设好着色器/状态集）
+     * @param color  球体颜色（起点用亮蓝、终点用亮绿，与原实现一致）
+     */
+    static void buildUnitSphereAtOrigin(osg::Geometry* geom, const osg::Vec4& color);
+
+    void rebuildBeginGeometry();  ///< 建起点云 + 原点的起点球（只做一次）
+    void rebuildEndGeometry();    ///< 建终点云/终点球/坐标轴（终点帧局部坐标，只做一次）
 
     osgQOpenGLWidget* m_osgWidget = nullptr;  ///< OSG 嵌入部件
 
@@ -94,13 +117,24 @@ private:
 
     osg::ref_ptr<osg::Geode>   m_beginGeode;   ///< 起点云几何节点
     osg::ref_ptr<osg::Geometry> m_beginGeom;    ///< 起点云几何体
+    osg::ref_ptr<osg::Geometry> m_beginSphereGeom;  ///< 原点的起点球（不随位姿变化）
 
     osg::ref_ptr<osg::Geode>   m_endGeode;     ///< 终点云几何节点
-    osg::ref_ptr<osg::Geometry> m_endGeom;      ///< 终点云几何体
+    osg::ref_ptr<osg::Geometry> m_endGeom;      ///< 终点云几何体（帧局部坐标，常驻）
 
-    osg::ref_ptr<osg::Geode>   m_overlayGeode;  ///< 叠加几何节点
-    osg::ref_ptr<osg::Geometry> m_sphereGeom;   ///< 球体几何体（起点/终点位置标记）
-    osg::ref_ptr<osg::Geometry> m_axesGeom;     ///< 坐标轴几何体（终点位置）
+    /**
+     * @brief 终点侧几何体的位姿变换节点
+     *
+     * 挂 m_endGeode（终点云）与 m_endOverlayGeode（终点球 + 坐标轴）。这些几何体
+     * 的顶点一律按**终点帧局部坐标**建好，位姿变化只改这个节点的矩阵——
+     * 于是 updateEndPose() 是 O(1)，不再逐点重算 19.5 万个顶点、也不再重传 VBO。
+     * OSG 会顺着这个节点算世界包围盒，resetCamera()/viewer->home() 取景因此仍正确。
+     */
+    osg::ref_ptr<osg::MatrixTransform> m_endTransform;
+
+    osg::ref_ptr<osg::Geode>   m_endOverlayGeode;  ///< 终点叠加几何节点（球 + 坐标轴）
+    osg::ref_ptr<osg::Geometry> m_endSphereGeom;   ///< 终点球几何体（局部原点，随变换平移）
+    osg::ref_ptr<osg::Geometry> m_axesGeom;        ///< 坐标轴几何体（终点帧局部坐标）
 
     CloudPtr m_beginCloud;  ///< 起点云数据
     CloudPtr m_endCloud;    ///< 终点云数据

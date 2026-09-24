@@ -143,7 +143,15 @@ void MiniViewportWidget::setUseOrthographic(bool enabled) {
 /**
  * @brief 创建场景几何体结构（不依赖 GL 上下文）
  *
- * 创建场景根节点、起点云/终点云/叠加层三个 Geode 及其 Geometry 对象。
+ * 场景图结构（顶点一律"只建一次"，位姿交给变换节点）：
+ *
+ *   m_root
+ *    ├─ m_beginGeode      起点云（蓝色，帧局部系 = 原点不动，无需变换）
+ *    ├─ 起点球几何体      （原点标记，静态）
+ *    └─ m_endTransform   ← updateEndPose() 只改这个矩阵
+ *         ├─ m_endGeode          终点云（绿色，顶点=终点帧局部坐标）
+ *         └─ m_endOverlayGeode   终点球 + 坐标轴（顶点已在终点帧里摆好）
+ *
  * 设置顶点数组对象和缓冲区对象的使能以获得更好性能。
  */
 void MiniViewportWidget::setupGeometries() {
@@ -160,44 +168,58 @@ void MiniViewportWidget::setupGeometries() {
     m_beginGeode->addDrawable(m_beginGeom);
     m_root->addChild(m_beginGeode);
 
-    // --- 终点云几何节点（绿色） ---
+    // --- 起点位置的球体标记（静态，挂在根下即可） ---
+    m_beginSphereGeom = new osg::Geometry;
+    m_beginSphereGeom->setUseDisplayList(false);
+    m_beginSphereGeom->setUseVertexBufferObjects(true);
+    m_beginSphereGeom->setUseVertexArrayObject(true);
+    m_beginSphereGeom->setDataVariance(osg::Object::STATIC);
+    applySimpleColorShader(m_beginSphereGeom->getOrCreateStateSet());
+    m_root->addChild(m_beginSphereGeom);
+
+    // --- 终点侧变换节点：终点云与终点叠加层都挂在它下面 ---
+    m_endTransform = new osg::MatrixTransform;
+    m_endTransform->setMatrix(osg::Matrixd::identity());
+
+    // 终点云几何节点（绿色）。顶点是**终点帧局部坐标**，位姿由父变换节点施加
     m_endGeode = new osg::Geode;
     m_endGeom = new osg::Geometry;
     m_endGeom->setUseDisplayList(false);
     m_endGeom->setUseVertexBufferObjects(true);
     m_endGeom->setUseVertexArrayObject(true);
-    m_endGeom->setDataVariance(osg::Object::DYNAMIC);    // 终点会随位姿变化
+    m_endGeom->setDataVariance(osg::Object::STATIC);   // 顶点不再随位姿重写
     applyPointCloudShader(m_endGeom->getOrCreateStateSet(), 2.0f);
     m_endGeode->addDrawable(m_endGeom);
-    m_root->addChild(m_endGeode);
+    m_endTransform->addChild(m_endGeode);
 
-    // --- 叠加几何节点（球体 + 坐标轴） ---
-    m_overlayGeode = new osg::Geode;
+    // --- 终点叠加几何节点（球体 + 坐标轴），同样在终点帧局部坐标下 ---
+    m_endOverlayGeode = new osg::Geode;
 
-    // 球体几何体（GL_TRIANGLES，环面+扇区细分）
-    m_sphereGeom = new osg::Geometry;
-    m_sphereGeom->setUseDisplayList(false);
-    m_sphereGeom->setUseVertexBufferObjects(true);
-    m_sphereGeom->setUseVertexArrayObject(true);
-    m_sphereGeom->setDataVariance(osg::Object::DYNAMIC);
-    applySimpleColorShader(m_sphereGeom->getOrCreateStateSet());
-    m_overlayGeode->addDrawable(m_sphereGeom);
+    // 终点球几何体（GL_TRIANGLES，球心在局部原点，靠变换节点搬到终点）
+    m_endSphereGeom = new osg::Geometry;
+    m_endSphereGeom->setUseDisplayList(false);
+    m_endSphereGeom->setUseVertexBufferObjects(true);
+    m_endSphereGeom->setUseVertexArrayObject(true);
+    m_endSphereGeom->setDataVariance(osg::Object::STATIC);
+    applySimpleColorShader(m_endSphereGeom->getOrCreateStateSet());
+    m_endOverlayGeode->addDrawable(m_endSphereGeom);
 
-    // 坐标轴几何体（GL_LINES）
+    // 坐标轴几何体（GL_LINES，顶点在终点帧里）
     m_axesGeom = new osg::Geometry;
     m_axesGeom->setUseDisplayList(false);
     m_axesGeom->setUseVertexBufferObjects(true);
     m_axesGeom->setUseVertexArrayObject(true);
-    m_axesGeom->setDataVariance(osg::Object::DYNAMIC);
+    m_axesGeom->setDataVariance(osg::Object::STATIC);
     {
         auto* ss = m_axesGeom->getOrCreateStateSet();
         applySimpleColorShader(ss);
         ss->setAttributeAndModes(new osg::LineWidth(2.0f),
                                  osg::StateAttribute::ON);
     }
-    m_overlayGeode->addDrawable(m_axesGeom);
+    m_endOverlayGeode->addDrawable(m_axesGeom);
 
-    m_root->addChild(m_overlayGeode);
+    m_endTransform->addChild(m_endOverlayGeode);
+    m_root->addChild(m_endTransform);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +265,10 @@ void MiniViewportWidget::initOsg() {
  * @brief 设置起点和终点的点云及位姿
  *
  * 计算相对位姿 rel = beginPose⁻¹ * endPose，
- * 在相对坐标系下重建两个点云和叠加层，然后使摄像机定格居中。
+ * **一次性**建好两片云的顶点（起点用原点、终点用帧局部坐标）并把 rel 写进
+ * 终点变换节点，然后使摄像机定格居中。
+ *
+ * 这里是唯一一次 O(N) 构建：之后每次微调只改 m_endTransform 的矩阵。
  */
 void MiniViewportWidget::setClouds(CloudPtr beginCloud,
                                     const Eigen::Isometry3d& beginPose,
@@ -255,10 +280,14 @@ void MiniViewportWidget::setClouds(CloudPtr beginCloud,
     // 计算相对位姿：终点在起点坐标系下的位姿
     Eigen::Isometry3d rel = beginPose.inverse() * endPose;
 
-    // 起点云在原点（没有相对变换），终点云在相对位姿处
-    rebuildBeginCloud(Eigen::Isometry3d::Identity());  // 起点在原点
-    rebuildEndCloud(rel);
-    rebuildOverlay(rel);
+    // 顶点只与"帧局部坐标"有关，与位姿无关：这里建一次，位姿写进变换节点。
+    rebuildBeginGeometry();  // 起点云 + 原点处的起点球
+    rebuildEndGeometry();    // 终点云 + 终点球 + 坐标轴（都在终点帧局部系里）
+    // 4x4 矩阵逐元素拷贝：Eigen 默认列主序、osg::Matrix 也是列主序，
+    // 因此 data() 的 16 个 double 可以直接喂给 osg::Matrixd（行主序的 Eigen
+    // 矩阵会在这里因 Eigen 自身的 static_assert 编译失败，不会静默转置错）
+    const Eigen::Matrix4d relMat = rel.matrix();
+    m_endTransform->setMatrix(osg::Matrixd(relMat.data()));
 
     // 更新视口
     osgViewer::Viewer* viewer = m_osgWidget->getOsgViewer();
@@ -272,15 +301,26 @@ void MiniViewportWidget::setClouds(CloudPtr beginCloud,
 /**
  * @brief 更新终点位姿
  *
- * 重新计算相对位姿，重建终点点云和叠加层。
+ * 只把相对位姿写进变换节点：O(1)，与点云规模无关（旧实现是逐点重建
+ * 终点云顶点数组 + 颜色数组，19.5 万点即每次 5.2 MB 分配与一次 VBO 重传）。
+ *
+ * 三个 dirtyBound() 的必要性：dirtyBound() 只在"本节点包围球已算过"时才向上
+ * 传播。刚 setClouds() 之后还没渲染过一帧就点击按钮的话，几何体的包围球尚未
+ * 计算，单靠它传播不到根节点，viewer->home()/Fit View 就会用旧包围盒取景。
+ * 因此这里逐层清缓存，保证下一次 getBound() 重新沿变换节点算世界包围球。
+ *
  * @param endPose   新的终点世界位姿
  * @param beginPose 起点世界位姿
  */
 void MiniViewportWidget::updateEndPose(const Eigen::Isometry3d& endPose,
                                         const Eigen::Isometry3d& beginPose) {
-    Eigen::Isometry3d rel = beginPose.inverse() * endPose;
-    rebuildEndCloud(rel);
-    rebuildOverlay(rel);
+    const Eigen::Isometry3d rel = beginPose.inverse() * endPose;
+    // 同 setClouds()：列主序逐元素拷贝，见那里的说明
+    const Eigen::Matrix4d relMat = rel.matrix();
+    m_endTransform->setMatrix(osg::Matrixd(relMat.data()));
+    m_endGeom->dirtyBound();
+    m_endTransform->dirtyBound();
+    m_root->dirtyBound();
     m_osgWidget->update();
 }
 
@@ -292,171 +332,97 @@ void MiniViewportWidget::resetCamera() {
 }
 
 // ---------------------------------------------------------------------------
-// 内部：重建几何体
+// 内部：构建几何体（每个只在 setClouds() 里做一次）
 // ---------------------------------------------------------------------------
 
 /**
- * @brief 重建起点云几何体
+ * @brief 构建起点侧的几何体：起点云（蓝色）+ 原点处的起点球
  *
- * 将起点点云中的所有点通过位姿变换后渲染为蓝色点集。
+ * 起点云在本控件的约定里就是"帧局部坐标 = 世界原点"，因此顶点原样写入，
+ * 不做任何位姿变换（与旧实现 pose=Identity 的行为逐位一致）。
+ *
+ * 颜色数组只放 1 个元素并 BIND_OVERALL：旧实现是给每个点 push 同一份颜色，
+ * 二者渲染结果相同（片元拿到的都是同一个颜色），但省掉每点 16 字节 ——
+ * 19.5 万点即省 3.1 MB。
  */
-void MiniViewportWidget::rebuildBeginCloud(const Eigen::Isometry3d& pose) {
+void MiniViewportWidget::rebuildBeginGeometry() {
     if (!m_beginCloud || m_beginCloud->empty() || !m_beginGeom) return;
 
     auto* verts = new osg::Vec3Array;
-    auto* colors = new osg::Vec4Array;
     verts->reserve(m_beginCloud->size());
-    colors->reserve(m_beginCloud->size());
-
-    osg::Vec4 blue(0.0f, 0.0f, 1.0f, 1.0f);
     for (const auto& pt : m_beginCloud->points) {
-        Eigen::Vector3d p = pose * Eigen::Vector3d(pt.x, pt.y, pt.z);
-        verts->push_back(osg::Vec3(p.x(), p.y(), p.z()));
-        colors->push_back(blue);
+        verts->push_back(osg::Vec3(pt.x, pt.y, pt.z));
     }
 
+    auto* colors = new osg::Vec4Array;
+    colors->push_back(osg::Vec4(0.0f, 0.0f, 1.0f, 1.0f));   // 起点云：纯蓝
+
     m_beginGeom->setVertexArray(verts);
-    m_beginGeom->setColorArray(colors, osg::Array::BIND_PER_VERTEX);
+    m_beginGeom->setColorArray(colors, osg::Array::BIND_OVERALL);
     m_beginGeom->removePrimitiveSet(0, m_beginGeom->getNumPrimitiveSets());
     m_beginGeom->addPrimitiveSet(
         new osg::DrawArrays(GL_POINTS, 0, verts->size()));
     m_beginGeom->dirtyBound();
+
+    // 起点位置的球体标记（球心在原点，颜色与旧叠加层一致）
+    buildUnitSphereAtOrigin(m_beginSphereGeom,
+                            osg::Vec4(0.2f, 0.2f, 1.0f, 1.0f));
 }
 
 /**
- * @brief 重建终点云几何体
+ * @brief 构建终点侧的几何体：终点云（绿色）+ 终点球 + 坐标轴
  *
- * 将终点点云中的所有点通过相对位姿变换后渲染为绿色点集。
+ * 全部按**终点帧局部坐标**构建——也就是旧实现里把 relPose 逐点乘进去之前
+ * 的那份坐标。位姿改由父节点 m_endTransform 施加，渲染结果与旧实现逐点等价
+ * （旧实现算的是 relPose * p，现在算的是 MVP · T_rel · p，T_rel 就是 relPose）。
  */
-void MiniViewportWidget::rebuildEndCloud(const Eigen::Isometry3d& relPose) {
-    if (!m_endCloud || m_endCloud->empty() || !m_endGeom) return;
-
-    auto* verts = new osg::Vec3Array;
-    auto* colors = new osg::Vec4Array;
-    verts->reserve(m_endCloud->size());
-    colors->reserve(m_endCloud->size());
-
-    osg::Vec4 green(0.0f, 1.0f, 0.0f, 1.0f);
-    for (const auto& pt : m_endCloud->points) {
-        Eigen::Vector3d p = relPose * Eigen::Vector3d(pt.x, pt.y, pt.z);
-        verts->push_back(osg::Vec3(p.x(), p.y(), p.z()));
-        colors->push_back(green);
-    }
-
-    m_endGeom->setVertexArray(verts);
-    m_endGeom->setColorArray(colors, osg::Array::BIND_PER_VERTEX);
-    m_endGeom->removePrimitiveSet(0, m_endGeom->getNumPrimitiveSets());
-    m_endGeom->addPrimitiveSet(
-        new osg::DrawArrays(GL_POINTS, 0, verts->size()));
-    m_endGeom->dirtyBound();
-}
-
-/**
- * @brief 重建叠加几何体（球体 + 坐标轴）
- *
- * 在起点和终点位置绘制球体标记（蓝色=起点，绿色=终点），
- * 并在终点位置绘制 XYZ 三色坐标轴（1.5倍缩放）。
- *
- * 球体通过环面（rings）× 扇区（sectors）网格细分实现。
- */
-void MiniViewportWidget::rebuildOverlay(const Eigen::Isometry3d& relPose) {
-    if (!m_sphereGeom || !m_axesGeom) return;
-
-    // --- 球体（实体，通过环面+扇区细分） ---
-    {
-        const float pi = 3.14159265f;
-        const float radius = 0.3f;
-        const int rings = 12;    // 环数
-        const int sectors = 12;  // 扇区数
-
+void MiniViewportWidget::rebuildEndGeometry() {
+    // --- 终点云（绿色） ---
+    if (m_endCloud && !m_endCloud->empty() && m_endGeom) {
         auto* verts = new osg::Vec3Array;
-        auto* colors = new osg::Vec4Array;
-        auto* indices = new osg::DrawElementsUInt(GL_TRIANGLES);
-
-        osg::Vec4 blue(0.2f, 0.2f, 1.0f, 1.0f);
-        osg::Vec4 green(0.2f, 1.0f, 0.2f, 1.0f);
-
-        // 起点在原点的球心，终点在相对位姿平移处的球心
-        osg::Vec3 centers[2] = {
-            osg::Vec3(0, 0, 0),
-            osg::Vec3(relPose.translation().x(),
-                      relPose.translation().y(),
-                      relPose.translation().z())
-        };
-        osg::Vec4 sphereColors[2] = { blue, green };
-
-        // 为两个球体生成顶点和索引
-        for (int si = 0; si < 2; ++si) {
-            unsigned int base = verts->size();
-            // 环方向循环（纬度）
-            for (int r = 0; r <= rings; ++r) {
-                float phi = float(r) * pi / float(rings);
-                float sinPhi = std::sin(phi);
-                float cosPhi = std::cos(phi);
-                // 扇区方向循环（经度）
-                for (int s = 0; s <= sectors; ++s) {
-                    float theta = float(s) * 2.0f * pi / float(sectors);
-                    float sinT = std::sin(theta);
-                    float cosT = std::cos(theta);
-                    verts->push_back(osg::Vec3(
-                        centers[si].x() + radius * sinPhi * cosT,
-                        centers[si].y() + radius * cosPhi,
-                        centers[si].z() + radius * sinPhi * sinT));
-                    colors->push_back(sphereColors[si]);
-                }
-            }
-            // 三角面片索引
-            for (int r = 0; r < rings; ++r) {
-                for (int s = 0; s < sectors; ++s) {
-                    unsigned int a = base + r * (sectors + 1) + s;
-                    unsigned int b = a + sectors + 1;
-                    indices->push_back(a);
-                    indices->push_back(b);
-                    indices->push_back(a + 1);
-                    indices->push_back(b);
-                    indices->push_back(b + 1);
-                    indices->push_back(a + 1);
-                }
-            }
+        verts->reserve(m_endCloud->size());
+        for (const auto& pt : m_endCloud->points) {
+            verts->push_back(osg::Vec3(pt.x, pt.y, pt.z));
         }
 
-        m_sphereGeom->setVertexArray(verts);
-        m_sphereGeom->setColorArray(colors, osg::Array::BIND_PER_VERTEX);
-        m_sphereGeom->removePrimitiveSet(0, m_sphereGeom->getNumPrimitiveSets());
-        m_sphereGeom->addPrimitiveSet(indices);
-        m_sphereGeom->dirtyBound();
+        auto* colors = new osg::Vec4Array;
+        colors->push_back(osg::Vec4(0.0f, 1.0f, 0.0f, 1.0f));  // 终点云：纯绿
+
+        m_endGeom->setVertexArray(verts);
+        m_endGeom->setColorArray(colors, osg::Array::BIND_OVERALL);
+        m_endGeom->removePrimitiveSet(0, m_endGeom->getNumPrimitiveSets());
+        m_endGeom->addPrimitiveSet(
+            new osg::DrawArrays(GL_POINTS, 0, verts->size()));
+        m_endGeom->dirtyBound();
     }
 
-    // --- 终点位置的坐标轴（1.5× 缩放） ---
-    {
-        Eigen::Vector3d t = relPose.translation();
-        Eigen::Matrix3d R = relPose.linear();
-        double s = 1.5;
+    // --- 终点球（球心在局部原点，随 m_endTransform 平移到终点） ---
+    buildUnitSphereAtOrigin(m_endSphereGeom,
+                            osg::Vec4(0.2f, 1.0f, 0.2f, 1.0f));
+
+    // --- 坐标轴（终点帧局部坐标：原点起、沿局部 XYZ 各 1.5 单位） ---
+    if (m_axesGeom) {
+        const double s = 1.5;
 
         auto* verts = new osg::Vec3Array;
         auto* colors = new osg::Vec4Array;
 
-        osg::Vec3 origin(t.x(), t.y(), t.z());
-        osg::Vec4 red(1, 0, 0, 1), grn(0, 1, 0, 1), blu(0, 0, 1, 1);
-
-        // 取旋转矩阵的各列作为局部坐标轴方向
-        Eigen::Vector3d axX = R.col(0) * s;
-        Eigen::Vector3d axY = R.col(1) * s;
-        Eigen::Vector3d axZ = R.col(2) * s;
+        const osg::Vec3 origin(0.0f, 0.0f, 0.0f);
+        const osg::Vec4 red(1, 0, 0, 1), grn(0, 1, 0, 1), blu(0, 0, 1, 1);
 
         // X 轴（红色）
         verts->push_back(origin);
-        verts->push_back(osg::Vec3(t.x() + axX.x(), t.y() + axX.y(), t.z() + axX.z()));
+        verts->push_back(osg::Vec3(s, 0.0f, 0.0f));
         colors->push_back(red); colors->push_back(red);
 
         // Y 轴（绿色）
         verts->push_back(origin);
-        verts->push_back(osg::Vec3(t.x() + axY.x(), t.y() + axY.y(), t.z() + axY.z()));
+        verts->push_back(osg::Vec3(0.0f, s, 0.0f));
         colors->push_back(grn); colors->push_back(grn);
 
         // Z 轴（蓝色）
         verts->push_back(origin);
-        verts->push_back(osg::Vec3(t.x() + axZ.x(), t.y() + axZ.y(), t.z() + axZ.z()));
+        verts->push_back(osg::Vec3(0.0f, 0.0f, s));
         colors->push_back(blu); colors->push_back(blu);
 
         m_axesGeom->setVertexArray(verts);
@@ -467,3 +433,64 @@ void MiniViewportWidget::rebuildOverlay(const Eigen::Isometry3d& relPose) {
         m_axesGeom->dirtyBound();
     }
 }
+
+/**
+ * @brief 在给定几何体上画一个"球心在局部原点"的球（半径 0.3，12×12 细分）
+ *
+ * 顶点只与球心在原点有关，所以把它抽出来：起点球直接挂根节点（原点不动），
+ * 终点球挂 m_endTransform（位姿变化只是换个矩阵，重新三角化 11 万条索引
+ * 完全没必要——那是旧实现每次点击都在做的事）。
+ *
+ * @param geom  目标几何体（着色器/状态集需已设置）
+ * @param color 球体颜色（旧实现里起点球 (0.2,0.2,1)、终点球 (0.2,1,0.2)）
+ */
+void MiniViewportWidget::buildUnitSphereAtOrigin(osg::Geometry* geom,
+                                                 const osg::Vec4& color) {
+    if (!geom) return;
+
+    const float pi = 3.14159265f;
+    const float radius = 0.3f;
+    const int rings = 12;    // 环数
+    const int sectors = 12;  // 扇区数
+
+    auto* verts = new osg::Vec3Array;
+    auto* colors = new osg::Vec4Array;
+    auto* indices = new osg::DrawElementsUInt(GL_TRIANGLES);
+
+    // 环方向循环（纬度）
+    for (int r = 0; r <= rings; ++r) {
+        float phi = float(r) * pi / float(rings);
+        float sinPhi = std::sin(phi);
+        float cosPhi = std::cos(phi);
+        // 扇区方向循环（经度）
+        for (int s = 0; s <= sectors; ++s) {
+            float theta = float(s) * 2.0f * pi / float(sectors);
+            float sinT = std::sin(theta);
+            float cosT = std::cos(theta);
+            verts->push_back(osg::Vec3(radius * sinPhi * cosT,
+                                       radius * cosPhi,
+                                       radius * sinPhi * sinT));
+            colors->push_back(color);
+        }
+    }
+    // 三角面片索引
+    for (int r = 0; r < rings; ++r) {
+        for (int s = 0; s < sectors; ++s) {
+            unsigned int a = r * (sectors + 1) + s;
+            unsigned int b = a + sectors + 1;
+            indices->push_back(a);
+            indices->push_back(b);
+            indices->push_back(a + 1);
+            indices->push_back(b);
+            indices->push_back(b + 1);
+            indices->push_back(a + 1);
+        }
+    }
+
+    geom->setVertexArray(verts);
+    geom->setColorArray(colors, osg::Array::BIND_PER_VERTEX);
+    geom->removePrimitiveSet(0, geom->getNumPrimitiveSets());
+    geom->addPrimitiveSet(indices);
+    geom->dirtyBound();
+}
+
