@@ -593,6 +593,16 @@
         <translation>大步   — 1.00 米 / 45.0°</translation>
     </message>
     <message>
+        <location filename="../src/ui/LoopClosureDialog.cpp" line="294"/>
+        <source>X-Large  — 10.0m / 28.6°</source>
+        <translation>超大步 — 10.0 米 / 28.6°</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/LoopClosureDialog.cpp" line="295"/>
+        <source>XX-Large — 100.0m / 57.3°</source>
+        <translation>极大步 — 100.0 米 / 57.3°</translation>
+    </message>
+    <message>
         <source>Auto Align</source>
         <translation type="vanished">自动对齐</translation>
     </message>
